@@ -2,7 +2,7 @@
 
 > Upload your course materials once; StudyLoop becomes a course-scoped tutor that answers **with page-level citations**, generates quizzes from *your* lectures, and schedules your revision — while showing the instructor exactly where the class is confused.
 
-Built for **Therap JavaFest 2026** · Java 21 · Spring Boot 4.1
+
 
 ---
 
@@ -57,6 +57,6 @@ Built for **Therap JavaFest 2026** · Java 21 · Spring Boot 4.1
 
 ## Project status
 
-Actively being built (July–September 2026). Current milestone: **Phase 0 — setup & skeleton** ✅ backend boots against Supabase Postgres with a green health check.
+In active development. Current milestone: **Phase 0 — setup & skeleton** ✅ backend boots against Supabase Postgres with a green health check.
 
 Roadmap: auth (JWT) → course spaces → document ingestion pipeline → RAG chat with citations → streaming + deploy (MVP) → quizzes & SM-2 → analytics & knowledge loop.
