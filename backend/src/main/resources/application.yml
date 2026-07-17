@@ -18,8 +18,8 @@ spring:
 
   jpa:
     hibernate:
-      # Never let Hibernate invent/alter the schema. Flyway migrations own it (Phase 1).
-      ddl-auto: none
+      # Flyway owns the schema; Hibernate only checks entities match it at startup.
+      ddl-auto: validate
     # Keeps DB connections out of the web layer; we load what we need inside services.
     open-in-view: false
 
