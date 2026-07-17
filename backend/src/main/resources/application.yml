@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: studyloop-backend
+
+  # Pull in local secrets from a git-ignored file (backend/.env.properties).
+  # "optional:" = don't crash if the file is missing — in the cloud (Phase 6)
+  # the same keys arrive as real environment variables instead.
+  config:
+    import: optional:file:.env.properties
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      # Supabase free tier allows few concurrent connections — keep our pool small.
+      maximum-pool-size: 5
+
+  jpa:
+    hibernate:
+      # Never let Hibernate invent/alter the schema. Flyway migrations own it (Phase 1).
+      ddl-auto: none
+    # Keeps DB connections out of the web layer; we load what we need inside services.
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      # Dev convenience: show the db component inside /actuator/health.
+      show-details: always
