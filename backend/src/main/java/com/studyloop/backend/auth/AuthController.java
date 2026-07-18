@@ -1,7 +1,9 @@
 package com.studyloop.backend.auth;
 
 import com.studyloop.backend.auth.dto.LoginRequest;
+import com.studyloop.backend.auth.dto.RefreshRequest;
 import com.studyloop.backend.auth.dto.RegisterRequest;
+import com.studyloop.backend.auth.dto.TokenResponse;
 import com.studyloop.backend.auth.dto.UserResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +28,12 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public UserResponse login(@Valid @RequestBody LoginRequest request) {
+    public TokenResponse login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request);
+    }
+
+    @PostMapping("/refresh")
+    public TokenResponse refresh(@Valid @RequestBody RefreshRequest request) {
+        return authService.refresh(request);
     }
 }

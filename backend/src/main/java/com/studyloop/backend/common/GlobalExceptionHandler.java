@@ -2,6 +2,7 @@ package com.studyloop.backend.common;
 
 import com.studyloop.backend.auth.EmailAlreadyRegisteredException;
 import com.studyloop.backend.auth.InvalidCredentialsException;
+import com.studyloop.backend.auth.InvalidTokenException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.validation.FieldError;
@@ -38,6 +39,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidCredentialsException.class)
     ProblemDetail handleInvalidCredentials(InvalidCredentialsException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNAUTHORIZED, ex.getMessage());
+        problem.setTitle("Authentication failed");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidTokenException.class)
+    ProblemDetail handleInvalidToken(InvalidTokenException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNAUTHORIZED, ex.getMessage());
         problem.setTitle("Authentication failed");

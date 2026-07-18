@@ -23,6 +23,14 @@ spring:
     # Keeps DB connections out of the web layer; we load what we need inside services.
     open-in-view: false
 
+# Our own settings — bound to JwtProperties records via @ConfigurationPropertiesScan.
+studyloop:
+  jwt:
+    # HMAC signing key, >= 32 bytes. Real value: .env.properties locally, secrets in CI/cloud.
+    secret: ${JWT_SECRET}
+    access-ttl: 15m
+    refresh-ttl: 7d
+
 management:
   endpoints:
     web:
