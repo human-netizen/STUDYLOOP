@@ -27,3 +27,37 @@ export interface LoginRequest {
   email: string
   password: string
 }
+
+// --- Courses (com.studyloop.backend.course.dto) ---
+
+export type MembershipRole = 'OWNER' | 'INSTRUCTOR' | 'MEMBER'
+
+export interface CourseResponse {
+  id: string
+  name: string
+  description: string | null
+  ownerId: string
+  myRole: MembershipRole
+  createdAt: string
+}
+
+export interface CreateCourseRequest {
+  name: string
+  description?: string
+}
+
+// The generic paging envelope the backend wraps list endpoints in (common/PageResponse).
+export interface PageResponse<T> {
+  content: T[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+}
+
+export interface InvitePreviewResponse {
+  courseId: string
+  courseName: string
+  role: MembershipRole
+  requiresMatchingEmail: boolean
+}

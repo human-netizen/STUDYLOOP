@@ -1,4 +1,13 @@
-import type { LoginRequest, RegisterRequest, TokenResponse, UserResponse } from './types'
+import type {
+  CourseResponse,
+  CreateCourseRequest,
+  InvitePreviewResponse,
+  LoginRequest,
+  PageResponse,
+  RegisterRequest,
+  TokenResponse,
+  UserResponse,
+} from './types'
 
 // The backend origin. Override with VITE_API_URL (e.g. in production); defaults to the
 // local Spring Boot server, whose CORS already allows the Vite dev origin.
@@ -103,4 +112,19 @@ export const authApi = {
   login: (body: LoginRequest) =>
     request<TokenResponse>('/auth/login', { method: 'POST', body }),
   me: () => request<UserResponse>('/users/me', { auth: true }),
+}
+
+export const coursesApi = {
+  list: (page = 0, size = 20) =>
+    request<PageResponse<CourseResponse>>(`/courses?page=${page}&size=${size}`, { auth: true }),
+  create: (body: CreateCourseRequest) =>
+    request<CourseResponse>('/courses', { method: 'POST', body, auth: true }),
+  get: (id: string) => request<CourseResponse>(`/courses/${id}`, { auth: true }),
+}
+
+export const invitesApi = {
+  preview: (token: string) =>
+    request<InvitePreviewResponse>(`/invites/${token}`, { auth: true }),
+  accept: (token: string) =>
+    request<CourseResponse>(`/invites/${token}/accept`, { method: 'POST', auth: true }),
 }
