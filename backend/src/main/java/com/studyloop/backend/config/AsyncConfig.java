@@ -24,4 +24,18 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    // Runs SSE chat streams off the request thread. Each stream holds a thread for the whole
+    // model response (seconds), so this pool is separate from ingestion and sized for a handful
+    // of concurrent chatters; excess requests wait briefly in the queue.
+    @Bean("chatStreamExecutor")
+    public ThreadPoolTaskExecutor chatStreamExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("chat-");
+        executor.initialize();
+        return executor;
+    }
 }

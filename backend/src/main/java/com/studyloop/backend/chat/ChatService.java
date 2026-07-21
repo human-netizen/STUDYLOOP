@@ -79,6 +79,47 @@ public class ChatService {
         return new ChatResponse(conversation.getId(), answer, toCitations(chunks));
     }
 
+    // Streaming counterpart split into two transactional halves so the model stream (which can
+    // run for seconds) never holds a DB transaction open. prepare() does the fast DB work —
+    // resolve the thread, retrieve, gate — and persists the user turn; persistAssistant() saves
+    // the finished answer. The token streaming itself happens between them, transaction-free,
+    // driven by ChatStreamService.
+    @Transactional
+    public PreparedTurn prepare(UUID actorId, UUID courseId, ChatRequest request) {
+        Membership member = courseAccess.requireMember(actorId, courseId);
+        if (!chatClient.isConfigured()) {
+            throw new ChatException("Chat provider is not configured.");
+        }
+
+        String question = request.question().trim();
+        ChatConversation conversation = resolveConversation(request.conversationId(), courseId, actorId, member, question);
+
+        RetrievalResult retrieval = retrievalService.search(actorId, courseId, question, RETRIEVAL_K);
+        List<RetrievedChunk> chunks = retrieval.chunks();
+
+        // Record the question now; the answer turn is saved once streaming completes.
+        saveMessage(conversation, ChatRole.USER, question);
+
+        if (shouldRefuse(retrieval)) {
+            saveMessage(conversation, ChatRole.ASSISTANT, NOT_IN_MATERIALS);
+            return PreparedTurn.refused(conversation.getId(), NOT_IN_MATERIALS);
+        }
+
+        // system prompt (numbered sources) → prior turns, which now end with the question we
+        // just saved, so there's no need to append it again.
+        List<LlmMessage> messages = new ArrayList<>();
+        messages.add(LlmMessage.system(buildSystemPrompt(chunks)));
+        messages.addAll(replayHistory(conversation.getId()));
+
+        return PreparedTurn.answerable(conversation.getId(), toCitations(chunks), messages);
+    }
+
+    @Transactional
+    public void persistAssistant(UUID conversationId, String answer) {
+        ChatConversation conversation = conversationRepository.getReferenceById(conversationId);
+        saveMessage(conversation, ChatRole.ASSISTANT, answer);
+    }
+
     // Refuse when there's simply nothing to answer from, or when the semantic match is too weak
     // AND no chunk matched the query's words either. Keeping the lexical escape hatch means an
     // exact-keyword question still answers even if its embedding sits below the threshold; only
