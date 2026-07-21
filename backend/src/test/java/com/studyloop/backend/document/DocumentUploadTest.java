@@ -16,8 +16,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,13 +34,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Transactional
 class DocumentUploadTest {
-
-    // Point the storage root at the OS temp dir so tests never write into the repo.
-    @DynamicPropertySource
-    static void storageProps(DynamicPropertyRegistry registry) {
-        registry.add("studyloop.storage.documents-dir",
-                () -> System.getProperty("java.io.tmpdir") + "/studyloop-test-docs");
-    }
 
     @Autowired
     private MockMvc mockMvc;

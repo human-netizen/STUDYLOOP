@@ -5,6 +5,7 @@ import com.studyloop.backend.course.CourseSpace;
 import com.studyloop.backend.course.Membership;
 import com.studyloop.backend.document.dto.DocumentResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -25,6 +26,7 @@ public class DocumentService {
     private final DocumentRepository documentRepository;
     private final DocumentStorageService storageService;
     private final CourseAccess courseAccess;
+    private final ApplicationEventPublisher eventPublisher;
 
     // Accepts a course material for ingestion. Manager-only (OWNER/INSTRUCTOR): a course's
     // corpus is curated, not crowd-sourced by every member. Re-uploading identical bytes is
@@ -62,6 +64,10 @@ public class DocumentService {
         document.setStatus(DocumentStatus.UPLOADED);
         // Flush so the @CreationTimestamp/@UpdateTimestamp are populated before we respond.
         documentRepository.saveAndFlush(document);
+
+        // Kick off ingestion only after this transaction commits (the listener is bound to
+        // AFTER_COMMIT), so the async worker always finds the row.
+        eventPublisher.publishEvent(new DocumentUploadedEvent(document.getId()));
 
         return new UploadOutcome(DocumentResponse.from(document, courseId), true);
     }

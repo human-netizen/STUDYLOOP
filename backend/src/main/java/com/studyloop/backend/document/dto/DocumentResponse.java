@@ -16,6 +16,8 @@ public record DocumentResponse(
         long sizeBytes,
         String sha256,
         DocumentStatus status,
+        // Non-null only when status is FAILED — the reason ingestion stopped.
+        String errorMessage,
         Integer pageCount,
         UUID uploadedById,
         Instant createdAt,
@@ -33,6 +35,7 @@ public record DocumentResponse(
                 document.getSizeBytes(),
                 document.getSha256(),
                 document.getStatus(),
+                document.getErrorMessage(),
                 document.getPageCount(),
                 document.getUploadedBy().getId(),
                 document.getCreatedAt(),

@@ -51,4 +51,14 @@ public class DocumentStorageService {
     public Path resolve(String relativePath) {
         return root.resolve(relativePath);
     }
+
+    // Reads previously-stored bytes back. A missing/unreadable file throws, which the
+    // ingestion pipeline turns into a FAILED document rather than a crash.
+    public byte[] read(String relativePath) {
+        try {
+            return Files.readAllBytes(root.resolve(relativePath));
+        } catch (IOException e) {
+            throw new DocumentStorageException("Could not read stored document bytes.", e);
+        }
+    }
 }
