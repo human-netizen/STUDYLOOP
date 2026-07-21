@@ -77,9 +77,11 @@ studyloop:
       model: ${COHERE_CHAT_MODEL:command-r-08-2024}
     # Confidence gate: the minimum cosine similarity (0..1) the best retrieved chunk must reach
     # for chat to answer. Below it — with no lexical match either — chat replies "not in your
-    # materials" instead of guessing. Tune per corpus; set to 0 to disable. Override with
-    # CHAT_MIN_SIMILARITY.
-    min-similarity: ${CHAT_MIN_SIMILARITY:0.30}
+    # materials" instead of guessing. Calibrated against the Phase 5.4 golden set, where genuine
+    # on-topic questions bottomed out near 0.30 (avg 0.46); 0.25 leaves a margin below that so a
+    # real question in novel wording isn't refused, while off-topic queries stay well under it.
+    # Tune per corpus; set to 0 to disable. Override with CHAT_MIN_SIMILARITY.
+    min-similarity: ${CHAT_MIN_SIMILARITY:0.25}
 
 management:
   endpoints:
