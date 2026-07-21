@@ -49,7 +49,7 @@ studyloop:
       # Google AI Studio key for embeddings. Blank when unset → ingestion stores chunks
       # without vectors (no crash). Set GOOGLE_API_KEY locally / as a cloud secret to enable.
       api-key: ${GOOGLE_API_KEY:}
-      model: text-embedding-004
+      model: gemini-embedding-001
 
 management:
   endpoints:

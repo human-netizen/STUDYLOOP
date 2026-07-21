@@ -10,14 +10,17 @@ import org.springframework.web.client.RestClientException;
 import java.util.ArrayList;
 import java.util.List;
 
-// Embeds text with Google's Generative Language API (text-embedding-004, 768-dim). Requests
-// go out in batches; a missing key leaves the client "unconfigured" so the pipeline skips
-// embedding rather than failing. Only exercised end to end in manual smoke tests (the key
-// isn't available in CI); the storage path is covered with a stub client.
+// Embeds text with Google's Generative Language API (gemini-embedding-001). That model's
+// native output is 3072-dim, so we request outputDimensionality=768 to match our vector(768)
+// column. Requests go out in batches; a missing key leaves the client "unconfigured" so the
+// pipeline skips embedding rather than failing. Only exercised end to end in manual smoke
+// tests (the key isn't available in CI); the storage path is covered with a stub client.
 @Component
 public class GoogleEmbeddingClient implements EmbeddingClient {
 
-    private static final String DEFAULT_MODEL = "text-embedding-004";
+    private static final String DEFAULT_MODEL = "gemini-embedding-001";
+    // Truncate the model's 3072-dim output to our pgvector column size (see V6 migration).
+    private static final int OUTPUT_DIMENSIONS = 768;
     // Google caps batchEmbedContents at 100 requests per call.
     private static final int MAX_BATCH = 100;
 
@@ -52,7 +55,7 @@ public class GoogleEmbeddingClient implements EmbeddingClient {
     private List<float[]> embedBatch(List<String> batch) {
         String qualifiedModel = "models/" + model;
         BatchRequest request = new BatchRequest(batch.stream()
-                .map(text -> new EmbedRequest(qualifiedModel, new Content(List.of(new Part(text)))))
+                .map(text -> new EmbedRequest(qualifiedModel, new Content(List.of(new Part(text))), OUTPUT_DIMENSIONS))
                 .toList());
 
         JsonNode response;
@@ -89,7 +92,7 @@ public class GoogleEmbeddingClient implements EmbeddingClient {
 
     // Request shapes for the Generative Language API (responses are read as JsonNode).
     private record BatchRequest(List<EmbedRequest> requests) { }
-    private record EmbedRequest(String model, Content content) { }
+    private record EmbedRequest(String model, Content content, int outputDimensionality) { }
     private record Content(List<Part> parts) { }
     private record Part(String text) { }
 }
