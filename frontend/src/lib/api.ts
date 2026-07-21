@@ -1,6 +1,7 @@
 import type {
   CourseResponse,
   CreateCourseRequest,
+  DocumentResponse,
   InvitePreviewResponse,
   LoginRequest,
   PageResponse,
@@ -106,6 +107,24 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return (await res.json()) as T
 }
 
+// Multipart upload helper. Kept separate from `send` because the browser must set the
+// multipart Content-Type (with its boundary) itself — we only attach auth. Mirrors the
+// single-retry-on-401 refresh behaviour of `request`.
+function sendUpload(path: string, form: FormData, token: string | null): Promise<Response> {
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return fetch(API_BASE + path, { method: 'POST', headers, body: form })
+}
+
+async function upload<T>(path: string, form: FormData): Promise<T> {
+  let res = await sendUpload(path, form, tokenStore.getAccess())
+  if (res.status === 401 && (await tryRefresh())) {
+    res = await sendUpload(path, form, tokenStore.getAccess())
+  }
+  if (!res.ok) throw await toError(res)
+  return (await res.json()) as T
+}
+
 export const authApi = {
   register: (body: RegisterRequest) =>
     request<UserResponse>('/auth/register', { method: 'POST', body }),
@@ -120,6 +139,18 @@ export const coursesApi = {
   create: (body: CreateCourseRequest) =>
     request<CourseResponse>('/courses', { method: 'POST', body, auth: true }),
   get: (id: string) => request<CourseResponse>(`/courses/${id}`, { auth: true }),
+}
+
+export const documentsApi = {
+  list: (courseId: string) =>
+    request<DocumentResponse[]>(`/courses/${courseId}/documents`, { auth: true }),
+  get: (courseId: string, documentId: string) =>
+    request<DocumentResponse>(`/courses/${courseId}/documents/${documentId}`, { auth: true }),
+  upload: (courseId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return upload<DocumentResponse>(`/courses/${courseId}/documents`, form)
+  },
 }
 
 export const invitesApi = {

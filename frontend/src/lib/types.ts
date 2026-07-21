@@ -61,3 +61,31 @@ export interface InvitePreviewResponse {
   role: MembershipRole
   requiresMatchingEmail: boolean
 }
+
+// --- Documents (com.studyloop.backend.document.dto) ---
+
+// Ingestion lifecycle. The terminal states are READY and FAILED; everything else is in
+// flight and worth polling.
+export type DocumentStatus =
+  | 'UPLOADED'
+  | 'EXTRACTING'
+  | 'CHUNKING'
+  | 'EMBEDDING'
+  | 'READY'
+  | 'FAILED'
+
+export interface DocumentResponse {
+  id: string
+  courseId: string
+  filename: string
+  contentType: string
+  sizeBytes: number
+  sha256: string
+  status: DocumentStatus
+  // Present only when status is FAILED.
+  errorMessage: string | null
+  pageCount: number | null
+  uploadedById: string
+  createdAt: string
+  updatedAt: string
+}

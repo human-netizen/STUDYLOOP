@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ApiError, coursesApi } from '../lib/api'
 import type { CourseResponse } from '../lib/types'
 import { AppHeader } from '../components/AppHeader'
@@ -45,17 +45,19 @@ export function CoursesPage() {
 
         <ul className="flex flex-col gap-3">
           {courses.map((course) => (
-            <li
-              key={course.id}
-              className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
-            >
-              <div>
-                <p className="font-medium text-slate-900 dark:text-slate-100">{course.name}</p>
-                {course.description && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{course.description}</p>
-                )}
-              </div>
-              <RoleBadge role={course.myRole} />
+            <li key={course.id}>
+              <Link
+                to={`/courses/${course.id}`}
+                className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 transition hover:border-indigo-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-indigo-500"
+              >
+                <div>
+                  <p className="font-medium text-slate-900 dark:text-slate-100">{course.name}</p>
+                  {course.description && (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{course.description}</p>
+                  )}
+                </div>
+                <RoleBadge role={course.myRole} />
+              </Link>
             </li>
           ))}
         </ul>
