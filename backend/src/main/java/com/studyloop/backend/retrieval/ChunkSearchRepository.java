@@ -17,20 +17,33 @@ class ChunkSearchRepository {
 
     private final JdbcTemplate jdbc;
 
-    private static final RowMapper<ChunkHit> ROW_MAPPER = (rs, row) -> new ChunkHit(
+    // Vector hits carry a cosine similarity; lexical hits don't have one, so it stays null.
+    private static final RowMapper<ChunkHit> VECTOR_MAPPER = (rs, row) -> new ChunkHit(
             UUID.fromString(rs.getString("id")),
             UUID.fromString(rs.getString("document_id")),
             rs.getString("filename"),
             (Integer) rs.getObject("page_number"),
             rs.getString("content"),
-            rs.getInt("token_count"));
+            rs.getInt("token_count"),
+            (Double) rs.getObject("cosine_similarity"));
+
+    private static final RowMapper<ChunkHit> TEXT_MAPPER = (rs, row) -> new ChunkHit(
+            UUID.fromString(rs.getString("id")),
+            UUID.fromString(rs.getString("document_id")),
+            rs.getString("filename"),
+            (Integer) rs.getObject("page_number"),
+            rs.getString("content"),
+            rs.getInt("token_count"),
+            null);
 
     // Approximate nearest neighbours by cosine distance (the HNSW index answers the <=> order).
     // queryVectorLiteral is a pgvector "[...]" text literal cast to vector; chunks without an
-    // embedding are skipped so an un-embedded corpus simply yields no vector hits.
+    // embedding are skipped so an un-embedded corpus simply yields no vector hits. We also select
+    // 1 - distance as the cosine similarity so the caller can gate on the top match's strength.
     List<ChunkHit> vectorSearch(UUID courseId, String queryVectorLiteral, int limit) {
         return jdbc.query("""
-                select c.id, c.document_id, d.filename, c.page_number, c.content, c.token_count
+                select c.id, c.document_id, d.filename, c.page_number, c.content, c.token_count,
+                       1 - (c.embedding <=> cast(? as vector)) as cosine_similarity
                 from document_chunks c
                 join documents d on d.id = c.document_id
                 where d.course_space_id = ?
@@ -38,7 +51,7 @@ class ChunkSearchRepository {
                   and c.embedding is not null
                 order by c.embedding <=> cast(? as vector)
                 limit ?
-                """, ROW_MAPPER, courseId, queryVectorLiteral, limit);
+                """, VECTOR_MAPPER, queryVectorLiteral, courseId, queryVectorLiteral, limit);
     }
 
     // Lexical matches ranked by ts_rank over the generated content_tsv column (GIN-indexed).
@@ -54,6 +67,6 @@ class ChunkSearchRepository {
                   and c.content_tsv @@ plainto_tsquery('english', ?)
                 order by ts_rank(c.content_tsv, plainto_tsquery('english', ?)) desc
                 limit ?
-                """, ROW_MAPPER, courseId, query, query, limit);
+                """, TEXT_MAPPER, courseId, query, query, limit);
     }
 }

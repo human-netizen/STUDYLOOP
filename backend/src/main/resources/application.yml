@@ -75,6 +75,11 @@ studyloop:
     cohere:
       api-key: ${COHERE_API_KEY:}
       model: ${COHERE_CHAT_MODEL:command-r-08-2024}
+    # Confidence gate: the minimum cosine similarity (0..1) the best retrieved chunk must reach
+    # for chat to answer. Below it — with no lexical match either — chat replies "not in your
+    # materials" instead of guessing. Tune per corpus; set to 0 to disable. Override with
+    # CHAT_MIN_SIMILARITY.
+    min-similarity: ${CHAT_MIN_SIMILARITY:0.30}
 
 management:
   endpoints:

@@ -4,7 +4,8 @@ import java.util.UUID;
 
 // A chunk that hybrid retrieval surfaced for a query, plus its fused RRF score (higher = more
 // relevant). Carries enough to cite the source (document + page) and to feed the chunk text
-// into a RAG prompt later (Phase 5.2), so callers never need a second fetch.
+// into a RAG prompt (Phase 5.2), so callers never need a second fetch. cosineSimilarity is the
+// raw semantic match strength from the vector search (null if the chunk only matched lexically).
 public record RetrievedChunk(
         UUID chunkId,
         UUID documentId,
@@ -13,12 +14,13 @@ public record RetrievedChunk(
         Integer pageNumber,
         String content,
         int tokenCount,
-        double score
+        double score,
+        Double cosineSimilarity
 ) {
 
     static RetrievedChunk of(ChunkHit hit, double score) {
         return new RetrievedChunk(
                 hit.id(), hit.documentId(), hit.filename(), hit.pageNumber(),
-                hit.content(), hit.tokenCount(), score);
+                hit.content(), hit.tokenCount(), score, hit.cosineSimilarity());
     }
 }

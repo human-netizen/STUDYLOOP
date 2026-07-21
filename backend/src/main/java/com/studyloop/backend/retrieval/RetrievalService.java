@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.UUID;
 
 // Hybrid retrieval: run a semantic (vector) search and a lexical (full-text) search over a
@@ -37,11 +38,19 @@ public class RetrievalService {
     // chunks, best-first; an empty/blank query or a course with no matching chunks yields [].
     @Transactional(readOnly = true)
     public List<RetrievedChunk> retrieve(UUID actorId, UUID courseId, String query, int limit) {
+        return search(actorId, courseId, query, limit).chunks();
+    }
+
+    // Like retrieve, but also reports the raw confidence signals (best cosine similarity and
+    // lexical hit count) the chat layer's gate needs. Both searches run once; the fused chunks
+    // and the signals come from the same candidate lists, so there's no extra query.
+    @Transactional(readOnly = true)
+    public RetrievalResult search(UUID actorId, UUID courseId, String query, int limit) {
         courseAccess.requireMember(actorId, courseId);
 
         String trimmed = query == null ? "" : query.trim();
         if (trimmed.isEmpty()) {
-            return List.of();
+            return new RetrievalResult(List.of(), OptionalDouble.empty(), 0);
         }
         int topN = clampLimit(limit);
 
@@ -56,7 +65,14 @@ public class RetrievalService {
         // Lexical half.
         List<ChunkHit> textHits = searchRepository.fullTextSearch(courseId, trimmed, CANDIDATES_PER_SOURCE);
 
-        return fuse(List.of(vectorHits, textHits), topN);
+        // Vector hits come back best-first, so the head is the strongest semantic match. Empty
+        // when no embedding provider ran, which the gate reads as "no semantic signal".
+        OptionalDouble topSimilarity = vectorHits.isEmpty()
+                ? OptionalDouble.empty()
+                : OptionalDouble.of(vectorHits.get(0).cosineSimilarity());
+
+        List<RetrievedChunk> fused = fuse(List.of(vectorHits, textHits), topN);
+        return new RetrievalResult(fused, topSimilarity, textHits.size());
     }
 
     // Reciprocal Rank Fusion: a chunk at 0-based rank r in a list contributes 1/(K + r + 1);

@@ -3,8 +3,10 @@ package com.studyloop.backend.chat;
 import com.studyloop.backend.chat.dto.ChatRequest;
 import com.studyloop.backend.chat.dto.ChatResponse;
 import com.studyloop.backend.chat.dto.Citation;
+import com.studyloop.backend.config.ChatProperties;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
+import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievalService;
 import com.studyloop.backend.retrieval.RetrievedChunk;
 import lombok.RequiredArgsConstructor;
@@ -27,12 +29,17 @@ public class ChatService {
     // Cap replayed history so a long thread can't blow the prompt budget (last N turns only).
     private static final int MAX_HISTORY_MESSAGES = 10;
     private static final int MAX_TITLE_LENGTH = 200;
+    // Shown verbatim when the confidence gate trips — a deterministic refusal, no model call.
+    private static final String NOT_IN_MATERIALS =
+            "I don't have that in this course's materials. Try rephrasing, or upload a document "
+            + "that covers it.";
 
     private final CourseAccess courseAccess;
     private final RetrievalService retrievalService;
     private final ChatClient chatClient;
     private final ChatConversationRepository conversationRepository;
     private final ChatMessageRepository messageRepository;
+    private final ChatProperties chatProperties;
 
     @Transactional
     public ChatResponse chat(UUID actorId, UUID courseId, ChatRequest request) {
@@ -45,7 +52,16 @@ public class ChatService {
         ChatConversation conversation = resolveConversation(request.conversationId(), courseId, actorId, member, question);
 
         // Ground on the course's materials (reuses the same hybrid retrieval as the API).
-        List<RetrievedChunk> chunks = retrievalService.retrieve(actorId, courseId, question, RETRIEVAL_K);
+        RetrievalResult retrieval = retrievalService.search(actorId, courseId, question, RETRIEVAL_K);
+        List<RetrievedChunk> chunks = retrieval.chunks();
+
+        // Confidence gate: if nothing relevant came back, refuse deterministically instead of
+        // letting the model answer from weak or absent context (and skip the provider call).
+        if (shouldRefuse(retrieval)) {
+            saveMessage(conversation, ChatRole.USER, question);
+            saveMessage(conversation, ChatRole.ASSISTANT, NOT_IN_MATERIALS);
+            return new ChatResponse(conversation.getId(), NOT_IN_MATERIALS, List.of());
+        }
 
         // system prompt (with numbered sources) → prior turns → the new question.
         List<LlmMessage> messages = new ArrayList<>();
@@ -61,6 +77,25 @@ public class ChatService {
         saveMessage(conversation, ChatRole.ASSISTANT, answer);
 
         return new ChatResponse(conversation.getId(), answer, toCitations(chunks));
+    }
+
+    // Refuse when there's simply nothing to answer from, or when the semantic match is too weak
+    // AND no chunk matched the query's words either. Keeping the lexical escape hatch means an
+    // exact-keyword question still answers even if its embedding sits below the threshold; only
+    // genuinely off-topic questions (weak on both signals) get the canned refusal. A threshold
+    // of 0 disables the semantic half of the gate, leaving only the empty-result case.
+    private boolean shouldRefuse(RetrievalResult retrieval) {
+        if (retrieval.chunks().isEmpty()) {
+            return true;
+        }
+        double threshold = chatProperties.minSimilarity();
+        if (threshold <= 0) {
+            return false;
+        }
+        boolean weakSemantic = retrieval.topVectorSimilarity().isPresent()
+                && retrieval.topVectorSimilarity().getAsDouble() < threshold;
+        boolean noLexical = retrieval.lexicalHitCount() == 0;
+        return weakSemantic && noLexical;
     }
 
     private ChatConversation resolveConversation(UUID conversationId, UUID courseId, UUID actorId,
