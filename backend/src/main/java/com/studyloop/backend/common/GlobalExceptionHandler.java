@@ -5,6 +5,10 @@ import com.studyloop.backend.auth.InvalidCredentialsException;
 import com.studyloop.backend.auth.InvalidTokenException;
 import com.studyloop.backend.auth.UserNotFoundException;
 import com.studyloop.backend.course.CourseNotFoundException;
+import com.studyloop.backend.course.InsufficientCourseRoleException;
+import com.studyloop.backend.course.InviteEmailMismatchException;
+import com.studyloop.backend.course.InviteExpiredException;
+import com.studyloop.backend.course.InviteNotFoundException;
 import com.studyloop.backend.course.NotACourseMemberException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -76,6 +80,39 @@ public class GlobalExceptionHandler {
     // Course exists but the caller isn't a member → 403, same shape as the method-security denial.
     @ExceptionHandler(NotACourseMemberException.class)
     ProblemDetail handleNotACourseMember(NotACourseMemberException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Access denied");
+        return problem;
+    }
+
+    @ExceptionHandler(InviteNotFoundException.class)
+    ProblemDetail handleInviteNotFound(InviteNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Invite not found");
+        return problem;
+    }
+
+    @ExceptionHandler(InviteExpiredException.class)
+    ProblemDetail handleInviteExpired(InviteExpiredException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.GONE, ex.getMessage());
+        problem.setTitle("Invite expired");
+        return problem;
+    }
+
+    @ExceptionHandler(InviteEmailMismatchException.class)
+    ProblemDetail handleInviteEmailMismatch(InviteEmailMismatchException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Access denied");
+        return problem;
+    }
+
+    // A member acting beyond their course role (e.g. a MEMBER issuing invites) → 403.
+    @ExceptionHandler(InsufficientCourseRoleException.class)
+    ProblemDetail handleInsufficientCourseRole(InsufficientCourseRoleException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.FORBIDDEN, ex.getMessage());
         problem.setTitle("Access denied");
