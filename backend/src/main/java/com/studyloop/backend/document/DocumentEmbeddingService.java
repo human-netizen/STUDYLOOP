@@ -46,20 +46,7 @@ public class DocumentEmbeddingService {
 
         for (int i = 0; i < chunks.size(); i++) {
             jdbcTemplate.update("update document_chunks set embedding = cast(? as vector) where id = ?",
-                    toVectorLiteral(vectors.get(i)), chunks.get(i).getId());
+                    VectorSupport.toLiteral(vectors.get(i)), chunks.get(i).getId());
         }
-    }
-
-    // pgvector accepts a "[f1,f2,...]" text literal; Float.toString keeps a locale-safe dot.
-    private static String toVectorLiteral(float[] vector) {
-        StringBuilder builder = new StringBuilder(vector.length * 8);
-        builder.append('[');
-        for (int i = 0; i < vector.length; i++) {
-            if (i > 0) {
-                builder.append(',');
-            }
-            builder.append(vector[i]);
-        }
-        return builder.append(']').toString();
     }
 }

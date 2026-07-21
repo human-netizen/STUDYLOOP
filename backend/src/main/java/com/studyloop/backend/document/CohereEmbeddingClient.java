@@ -63,15 +63,25 @@ public class CohereEmbeddingClient implements EmbeddingClient {
         }
         List<float[]> vectors = new ArrayList<>(texts.size());
         for (int start = 0; start < texts.size(); start += MAX_BATCH) {
-            vectors.addAll(embedBatch(texts.subList(start, Math.min(start + MAX_BATCH, texts.size()))));
+            // search_document: these are the documents we index.
+            vectors.addAll(embedBatch(
+                    texts.subList(start, Math.min(start + MAX_BATCH, texts.size())), "search_document"));
         }
         return vectors;
     }
 
-    private List<float[]> embedBatch(List<String> batch) {
-        // input_type=search_document: these are the documents we index (queries use search_query).
+    @Override
+    public float[] embedQuery(String text) {
+        if (!isConfigured()) {
+            throw new EmbeddingException("Cohere embedding API key is not configured.");
+        }
+        // search_query embeds a question into the same space as the search_document chunks.
+        return embedBatch(List.of(text), "search_query").get(0);
+    }
+
+    private List<float[]> embedBatch(List<String> batch, String inputType) {
         EmbedRequest request =
-                new EmbedRequest(model, "search_document", batch, List.of("float"), requestDimension);
+                new EmbedRequest(model, inputType, batch, List.of("float"), requestDimension);
 
         EmbedResponse response;
         try {

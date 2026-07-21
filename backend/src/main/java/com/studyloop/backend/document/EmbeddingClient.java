@@ -10,6 +10,16 @@ public interface EmbeddingClient {
     // Whether a provider is actually configured (e.g. an API key is present).
     boolean isConfigured();
 
-    // Returns one vector per input text, in the same order.
+    // Returns one vector per input text, in the same order. These are the documents we index.
     List<float[]> embed(List<String> texts);
+
+    // Embeds a search query. Some providers (e.g. Cohere) embed queries and documents with
+    // different "input types" for better retrieval; the default treats a query like any text.
+    default float[] embedQuery(String text) {
+        List<float[]> vectors = embed(List.of(text));
+        if (vectors.isEmpty()) {
+            throw new EmbeddingException("Query produced no embedding.");
+        }
+        return vectors.get(0);
+    }
 }
