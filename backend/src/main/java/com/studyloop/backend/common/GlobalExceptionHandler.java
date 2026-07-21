@@ -4,6 +4,8 @@ import com.studyloop.backend.auth.EmailAlreadyRegisteredException;
 import com.studyloop.backend.auth.InvalidCredentialsException;
 import com.studyloop.backend.auth.InvalidTokenException;
 import com.studyloop.backend.auth.UserNotFoundException;
+import com.studyloop.backend.course.CourseNotFoundException;
+import com.studyloop.backend.course.NotACourseMemberException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.authorization.AuthorizationDeniedException;
@@ -60,6 +62,23 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, ex.getMessage());
         problem.setTitle("User not found");
+        return problem;
+    }
+
+    @ExceptionHandler(CourseNotFoundException.class)
+    ProblemDetail handleCourseNotFound(CourseNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Course not found");
+        return problem;
+    }
+
+    // Course exists but the caller isn't a member → 403, same shape as the method-security denial.
+    @ExceptionHandler(NotACourseMemberException.class)
+    ProblemDetail handleNotACourseMember(NotACourseMemberException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Access denied");
         return problem;
     }
 
