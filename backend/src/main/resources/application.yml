@@ -23,13 +23,17 @@ spring:
     # Keeps DB connections out of the web layer; we load what we need inside services.
     open-in-view: false
 
-# Our own settings — bound to JwtProperties records via @ConfigurationPropertiesScan.
+# Our own settings — bound to JwtProperties/CorsProperties via @ConfigurationPropertiesScan.
 studyloop:
   jwt:
     # HMAC signing key, >= 32 bytes. Real value: .env.properties locally, secrets in CI/cloud.
     secret: ${JWT_SECRET}
     access-ttl: 15m
     refresh-ttl: 7d
+  cors:
+    # Browser origins allowed to call the API. The Phase 3 React app runs on Vite's
+    # dev server (5173). Override in the cloud via CORS_ALLOWED_ORIGINS (comma-separated).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
 
 management:
   endpoints:

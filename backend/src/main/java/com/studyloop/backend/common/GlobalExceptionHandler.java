@@ -3,8 +3,10 @@ package com.studyloop.backend.common;
 import com.studyloop.backend.auth.EmailAlreadyRegisteredException;
 import com.studyloop.backend.auth.InvalidCredentialsException;
 import com.studyloop.backend.auth.InvalidTokenException;
+import com.studyloop.backend.auth.UserNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -50,6 +52,23 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNAUTHORIZED, ex.getMessage());
         problem.setTitle("Authentication failed");
+        return problem;
+    }
+
+    @ExceptionHandler(UserNotFoundException.class)
+    ProblemDetail handleUserNotFound(UserNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("User not found");
+        return problem;
+    }
+
+    // A @PreAuthorize check failing (e.g. non-admin hitting /admin/**) throws this.
+    @ExceptionHandler(AuthorizationDeniedException.class)
+    ProblemDetail handleAccessDenied(AuthorizationDeniedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.FORBIDDEN, "You do not have permission to access this resource.");
+        problem.setTitle("Access denied");
         return problem;
     }
 }
