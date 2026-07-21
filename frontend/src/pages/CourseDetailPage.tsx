@@ -80,12 +80,22 @@ export function CourseDetailPage() {
 
         {course && (
           <>
-            <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-              {course.name}
-            </h1>
-            {course.description && (
-              <p className="mt-1 text-slate-500 dark:text-slate-400">{course.description}</p>
-            )}
+            <div className="mt-4 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+                  {course.name}
+                </h1>
+                {course.description && (
+                  <p className="mt-1 text-slate-500 dark:text-slate-400">{course.description}</p>
+                )}
+              </div>
+              <Link
+                to={`/courses/${id}/chat`}
+                className="shrink-0 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+              >
+                Ask this course
+              </Link>
+            </div>
 
             <div className="mt-8">
               <UploadDropzone courseId={id} onUploaded={mergeDocument} />

@@ -89,6 +89,17 @@ public class DocumentService {
         return DocumentResponse.from(document, courseId);
     }
 
+    // Loads the stored PDF bytes so a member can view the source behind a citation. Any course
+    // member may read the course's materials; the bytes come straight off disk by storage path.
+    @Transactional(readOnly = true)
+    public DocumentContent getContent(UUID actorId, UUID courseId, UUID documentId) {
+        courseAccess.requireMember(actorId, courseId);
+        Document document = documentRepository.findByIdAndCourseSpaceId(documentId, courseId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        byte[] bytes = storageService.read(document.getStoragePath());
+        return new DocumentContent(bytes, document.getFilename(), document.getContentType());
+    }
+
     private static byte[] readBytes(MultipartFile file) {
         try {
             return file.getBytes();
@@ -113,4 +124,7 @@ public class DocumentService {
     // Pairs the response with whether a new document was created (→ 202) or an existing one
     // was returned unchanged (→ 200), leaving the status choice to the controller.
     public record UploadOutcome(DocumentResponse document, boolean created) { }
+
+    // Raw stored bytes plus the metadata the controller needs to set download headers.
+    public record DocumentContent(byte[] bytes, String filename, String contentType) { }
 }

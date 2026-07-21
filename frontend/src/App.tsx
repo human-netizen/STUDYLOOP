@@ -3,6 +3,7 @@ import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { CoursesPage } from './pages/CoursesPage'
 import { CourseDetailPage } from './pages/CourseDetailPage'
+import { ChatPage } from './pages/ChatPage'
 import { JoinPage } from './pages/JoinPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
@@ -24,6 +25,14 @@ function App() {
         element={
           <ProtectedRoute>
             <CourseDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/courses/:id/chat"
+        element={
+          <ProtectedRoute>
+            <ChatPage />
           </ProtectedRoute>
         }
       />

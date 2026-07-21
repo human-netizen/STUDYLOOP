@@ -1,9 +1,13 @@
 package com.studyloop.backend.document;
 
+import com.studyloop.backend.document.DocumentService.DocumentContent;
 import com.studyloop.backend.document.DocumentService.UploadOutcome;
 import com.studyloop.backend.document.dto.DocumentResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,5 +52,21 @@ public class DocumentController {
                                    @PathVariable UUID courseId,
                                    @PathVariable UUID documentId) {
         return documentService.getOne(UUID.fromString(authentication.getName()), courseId, documentId);
+    }
+
+    // Streams the stored PDF bytes inline so the citation viewer can render the source. Served
+    // to any course member; the browser fetches it with the bearer token and renders it client-
+    // side (react-pdf), so it's returned inline rather than as an attachment.
+    @GetMapping("/{documentId}/file")
+    public ResponseEntity<byte[]> file(Authentication authentication,
+                                       @PathVariable UUID courseId,
+                                       @PathVariable UUID documentId) {
+        DocumentContent content = documentService.getContent(
+                UUID.fromString(authentication.getName()), courseId, documentId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.inline().filename(content.filename()).build().toString())
+                .body(content.bytes());
     }
 }

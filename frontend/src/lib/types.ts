@@ -89,3 +89,34 @@ export interface DocumentResponse {
   createdAt: string
   updatedAt: string
 }
+
+// --- Chat (com.studyloop.backend.chat.dto) ---
+
+// One numbered source an answer was grounded on. `index` is the [n] marker the model writes
+// inline; the viewer maps it to a document + page.
+export interface Citation {
+  index: number
+  chunkId: string
+  documentId: string
+  filename: string
+  pageNumber: number | null
+  snippet: string
+}
+
+// The non-streaming chat reply. The streaming endpoint delivers the same pieces as SSE events
+// (see ChatStreamEvents below) rather than one body.
+export interface ChatResponse {
+  conversationId: string
+  answer: string
+  citations: Citation[]
+}
+
+// Payloads of the SSE events the /chat/stream endpoint emits, keyed by event name.
+export interface ChatMetaEvent {
+  conversationId: string
+  citations: Citation[]
+}
+
+export interface ChatDoneEvent {
+  conversationId: string
+}

@@ -1,4 +1,6 @@
 import type {
+  ChatDoneEvent,
+  ChatMetaEvent,
   CourseResponse,
   CreateCourseRequest,
   DocumentResponse,
@@ -151,6 +153,19 @@ export const documentsApi = {
     form.append('file', file)
     return upload<DocumentResponse>(`/courses/${courseId}/documents`, form)
   },
+  // Fetches the raw PDF bytes (auth-guarded) as a Blob for client-side rendering. Same
+  // single-retry-on-401 refresh as the JSON calls; the caller turns it into an object URL.
+  async fileBlob(courseId: string, documentId: string): Promise<Blob> {
+    const path = `/courses/${courseId}/documents/${documentId}/file`
+    const get = (token: string | null) =>
+      fetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    let res = await get(tokenStore.getAccess())
+    if (res.status === 401 && (await tryRefresh())) {
+      res = await get(tokenStore.getAccess())
+    }
+    if (!res.ok) throw await toError(res)
+    return res.blob()
+  },
 }
 
 export const invitesApi = {
@@ -158,4 +173,81 @@ export const invitesApi = {
     request<InvitePreviewResponse>(`/invites/${token}`, { auth: true }),
   accept: (token: string) =>
     request<CourseResponse>(`/invites/${token}/accept`, { method: 'POST', auth: true }),
+}
+
+// --- Chat streaming -------------------------------------------------------------------------
+
+// Callbacks the caller supplies to receive the stream as it unfolds. onMeta fires once up front
+// (conversation id + citations), onDelta once per token, onDone at a clean finish, onError on
+// any failure (network, auth, or a server-side `error` event).
+export interface ChatStreamHandlers {
+  onMeta: (event: ChatMetaEvent) => void
+  onDelta: (text: string) => void
+  onDone: (event: ChatDoneEvent) => void
+  onError: (message: string) => void
+}
+
+// Parse a Server-Sent Events stream and dispatch each event to the handlers. Events are
+// separated by a blank line; within one, `event:` names it and `data:` carries the JSON.
+async function consumeSse(response: Response, handlers: ChatStreamHandlers): Promise<void> {
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const dispatch = (block: string) => {
+    let name = 'message'
+    const dataLines: string[] = []
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) name = line.slice(6).trim()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''))
+    }
+    if (dataLines.length === 0) return
+    const data = JSON.parse(dataLines.join('\n'))
+    if (name === 'meta') handlers.onMeta(data as ChatMetaEvent)
+    else if (name === 'delta') handlers.onDelta((data as { text: string }).text)
+    else if (name === 'done') handlers.onDone(data as ChatDoneEvent)
+    else if (name === 'error') handlers.onError((data as { message: string }).message)
+  }
+
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n')
+    let boundary
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      if (block.trim()) dispatch(block)
+    }
+  }
+}
+
+export const chatApi = {
+  // Opens the SSE chat stream. Mirrors `request`'s single-retry-on-401 refresh, then hands the
+  // live response to consumeSse. `signal` lets the caller abort an in-flight stream.
+  async stream(
+    courseId: string,
+    body: { question: string; conversationId: string | null },
+    handlers: ChatStreamHandlers,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const open = (token: string | null) =>
+      fetch(`${API_BASE}/courses/${courseId}/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+        signal,
+      })
+
+    let res = await open(tokenStore.getAccess())
+    if (res.status === 401 && (await tryRefresh())) {
+      res = await open(tokenStore.getAccess())
+    }
+    if (!res.ok || !res.body) throw await toError(res)
+    await consumeSse(res, handlers)
+  },
 }
