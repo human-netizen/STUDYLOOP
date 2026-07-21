@@ -3,7 +3,6 @@ package com.studyloop.backend.document;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.studyloop.backend.config.EmbeddingProperties;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -13,9 +12,8 @@ import java.util.List;
 // Embeds text with Google's Generative Language API (gemini-embedding-001). That model's
 // native output is 3072-dim, so we request outputDimensionality=768 to match our vector(768)
 // column. Requests go out in batches; a missing key leaves the client "unconfigured" so the
-// pipeline skips embedding rather than failing. Only exercised end to end in manual smoke
-// tests (the key isn't available in CI); the storage path is covered with a stub client.
-@Component
+// pipeline skips embedding rather than failing. Selected only when studyloop.embedding.provider
+// is "google" (see EmbeddingConfig); the default provider is the local Ollama client.
 public class GoogleEmbeddingClient implements EmbeddingClient {
 
     private static final String DEFAULT_MODEL = "gemini-embedding-001";

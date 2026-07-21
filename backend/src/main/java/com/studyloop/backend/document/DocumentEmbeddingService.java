@@ -27,8 +27,7 @@ public class DocumentEmbeddingService {
     @Transactional
     public void embedChunks(UUID documentId) {
         if (!embeddingClient.isConfigured()) {
-            log.warn("Embedding provider not configured (set GOOGLE_API_KEY); document {} stored without vectors",
-                    documentId);
+            log.warn("Embedding provider not configured; document {} stored without vectors", documentId);
             return;
         }
 

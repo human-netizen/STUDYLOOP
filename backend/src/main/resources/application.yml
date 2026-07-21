@@ -45,6 +45,16 @@ studyloop:
     # dev (→ backend/data/documents, git-ignored); a mounted volume via DOCUMENTS_DIR in the cloud.
     documents-dir: ${DOCUMENTS_DIR:./data/documents}
   embedding:
+    # Which backend embeds chunks: "ollama" (local, offline, no key/rate limits — the default)
+    # or "google" (hosted API). Override with EMBEDDING_PROVIDER (e.g. in the cloud).
+    provider: ${EMBEDDING_PROVIDER:ollama}
+    ollama:
+      # Local Ollama server. Pull the model first: `ollama pull qwen3-embedding:0.6b`.
+      # dimensions must match the vector(768) column (V6 migration); Qwen3-Embedding is MRL,
+      # so 768 is a valid truncation of its native 1024-dim output.
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_EMBED_MODEL:qwen3-embedding:0.6b}
+      dimensions: 768
     google:
       # Google AI Studio key for embeddings. Blank when unset → ingestion stores chunks
       # without vectors (no crash). Set GOOGLE_API_KEY locally / as a cloud secret to enable.
