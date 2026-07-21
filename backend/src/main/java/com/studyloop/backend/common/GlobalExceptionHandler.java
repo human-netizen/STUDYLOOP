@@ -10,6 +10,10 @@ import com.studyloop.backend.course.InviteEmailMismatchException;
 import com.studyloop.backend.course.InviteExpiredException;
 import com.studyloop.backend.course.InviteNotFoundException;
 import com.studyloop.backend.course.NotACourseMemberException;
+import com.studyloop.backend.document.DocumentNotFoundException;
+import com.studyloop.backend.document.DocumentStorageException;
+import com.studyloop.backend.document.EmptyDocumentException;
+import com.studyloop.backend.document.UnsupportedDocumentTypeException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.authorization.AuthorizationDeniedException;
@@ -17,6 +21,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -116,6 +121,49 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.FORBIDDEN, ex.getMessage());
         problem.setTitle("Access denied");
+        return problem;
+    }
+
+    @ExceptionHandler(DocumentNotFoundException.class)
+    ProblemDetail handleDocumentNotFound(DocumentNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Document not found");
+        return problem;
+    }
+
+    // Uploaded a non-PDF (only PDFs are ingestible today) → 415 Unsupported Media Type.
+    @ExceptionHandler(UnsupportedDocumentTypeException.class)
+    ProblemDetail handleUnsupportedDocumentType(UnsupportedDocumentTypeException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE, ex.getMessage());
+        problem.setTitle("Unsupported document type");
+        return problem;
+    }
+
+    @ExceptionHandler(EmptyDocumentException.class)
+    ProblemDetail handleEmptyDocument(EmptyDocumentException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("No file uploaded");
+        return problem;
+    }
+
+    // The upload exceeded the configured multipart size limit → 413 Payload Too Large.
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ProblemDetail handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONTENT_TOO_LARGE, "The uploaded file is too large.");
+        problem.setTitle("Upload too large");
+        return problem;
+    }
+
+    // A filesystem failure while storing/reading bytes — unexpected, so 500.
+    @ExceptionHandler(DocumentStorageException.class)
+    ProblemDetail handleDocumentStorage(DocumentStorageException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.INTERNAL_SERVER_ERROR, "The file could not be stored. Please try again.");
+        problem.setTitle("Storage error");
         return problem;
     }
 
