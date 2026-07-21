@@ -1,6 +1,6 @@
 package com.studyloop.backend.document;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.studyloop.backend.config.EmbeddingProperties;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
@@ -73,7 +73,7 @@ public class CohereEmbeddingClient implements EmbeddingClient {
         EmbedRequest request =
                 new EmbedRequest(model, "search_document", batch, List.of("float"), requestDimension);
 
-        JsonNode response;
+        EmbedResponse response;
         try {
             response = restClient.post()
                     .uri(EMBED_URL)
@@ -81,19 +81,19 @@ public class CohereEmbeddingClient implements EmbeddingClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .body(JsonNode.class);
+                    .body(EmbedResponse.class);
         } catch (RestClientException e) {
             throw new EmbeddingException("Cohere embedding request failed: " + e.getMessage(), e);
         }
 
-        JsonNode embeddings = response != null ? response.get("embeddings") : null;
-        JsonNode floats = embeddings != null ? embeddings.get("float") : null;
-        if (floats == null || !floats.isArray() || floats.size() != batch.size()) {
+        List<float[]> floats = response != null && response.embeddings() != null
+                ? response.embeddings().floats() : null;
+        if (floats == null || floats.size() != batch.size()) {
             throw new EmbeddingException("Unexpected embedding response from Cohere.");
         }
         List<float[]> vectors = new ArrayList<>(batch.size());
-        for (JsonNode values : floats) {
-            if (values == null || !values.isArray()) {
+        for (float[] values : floats) {
+            if (values == null) {
                 throw new EmbeddingException("Embedding response was missing vector values.");
             }
             vectors.add(fitToDimensions(values));
@@ -103,8 +103,8 @@ public class CohereEmbeddingClient implements EmbeddingClient {
 
     // Truncate the returned vector to our column size and renormalize. embed-v4.0 is Matryoshka,
     // so a leading slice of the vector is itself a valid (shorter) embedding.
-    private float[] fitToDimensions(JsonNode values) {
-        int returned = values.size();
+    private float[] fitToDimensions(float[] values) {
+        int returned = values.length;
         if (returned < dimensions) {
             throw new EmbeddingException(
                     "Embedding vector too short: expected " + dimensions + ", got " + returned);
@@ -112,7 +112,7 @@ public class CohereEmbeddingClient implements EmbeddingClient {
         float[] vector = new float[dimensions];
         double sumSquares = 0.0;
         for (int i = 0; i < dimensions; i++) {
-            float v = (float) values.get(i).asDouble();
+            float v = values[i];
             vector[i] = v;
             sumSquares += (double) v * v;
         }
@@ -128,4 +128,11 @@ public class CohereEmbeddingClient implements EmbeddingClient {
     // Cohere v2/embed request shape (field names match the wire format, so no annotations needed).
     private record EmbedRequest(String model, String input_type, List<String> texts,
                                 List<String> embedding_types, int output_dimension) { }
+
+    // Cohere v2/embed response shape. We only need embeddings.float — a list of vectors.
+    // Jackson deserializes each JSON number array straight into a float[]. "float" is a Java
+    // keyword, so the field is named `floats` and mapped to the wire name via @JsonProperty.
+    private record EmbedResponse(Embeddings embeddings) { }
+
+    private record Embeddings(@JsonProperty("float") List<float[]> floats) { }
 }
