@@ -44,6 +44,12 @@ studyloop:
     # Filesystem root for uploaded document bytes. Relative to the backend working dir in
     # dev (→ backend/data/documents, git-ignored); a mounted volume via DOCUMENTS_DIR in the cloud.
     documents-dir: ${DOCUMENTS_DIR:./data/documents}
+  embedding:
+    google:
+      # Google AI Studio key for embeddings. Blank when unset → ingestion stores chunks
+      # without vectors (no crash). Set GOOGLE_API_KEY locally / as a cloud secret to enable.
+      api-key: ${GOOGLE_API_KEY:}
+      model: text-embedding-004
 
 management:
   endpoints:

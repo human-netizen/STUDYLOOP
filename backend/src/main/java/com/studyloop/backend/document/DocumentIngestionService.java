@@ -20,6 +20,7 @@ public class DocumentIngestionService {
     private final PdfTextExtractor textExtractor;
     private final TextChunker textChunker;
     private final DocumentChunkService chunkService;
+    private final DocumentEmbeddingService embeddingService;
 
     public void ingest(UUID documentId) {
         String storagePath = documentRepository.findById(documentId)
@@ -40,7 +41,7 @@ public class DocumentIngestionService {
             chunkService.replaceChunks(documentId, chunks, pages.size());
 
             statusService.markStatus(documentId, DocumentStatus.EMBEDDING);
-            // 4.4: embed each chunk into a pgvector column.
+            embeddingService.embedChunks(documentId);
 
             statusService.markStatus(documentId, DocumentStatus.READY);
         } catch (Exception e) {
