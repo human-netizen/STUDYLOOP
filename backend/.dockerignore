@@ -1,0 +1,11 @@
+# Keep secrets, build output, and local document storage out of the image context.
+.env.properties
+*.env
+pass.txt
+target/
+data/
+.git/
+.idea/
+.vscode/
+HELP.md
+*.md

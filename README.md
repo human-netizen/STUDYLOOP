@@ -55,8 +55,46 @@
 
 3. Verify: `http://localhost:8080/actuator/health` → `"status": "UP"` with `db: UP`.
 
+   For grounded chat, also set `COHERE_API_KEY=<your-key>` in `backend/.env.properties` (a free
+   key from [Cohere](https://dashboard.cohere.com/api-keys) powers both embeddings and chat).
+
+4. Run the frontend against it:
+
+   ```bash
+   cd frontend
+   npm install
+   npm run dev            # http://localhost:5173
+   ```
+
+## Deployment
+
+Both apps ship as Docker images (`backend/Dockerfile`, `frontend/Dockerfile`); CI builds both on
+every push to verify they're deployable. A typical cloud setup (Railway/Render + Supabase):
+
+- **Database** — a Supabase Postgres project with the `vector` extension; Flyway applies the
+  schema automatically on first boot.
+- **Backend** — deploy `backend/` as a Docker service. Attach a **persistent disk mounted at
+  `/data`** so uploaded PDFs survive restarts, and set these environment variables:
+
+  | Variable | Purpose |
+  |---|---|
+  | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Supabase session-pooler credentials |
+  | `JWT_SECRET` | HMAC signing key, ≥ 32 bytes |
+  | `COHERE_API_KEY` | embeddings + chat |
+  | `CORS_ALLOWED_ORIGINS` | the deployed frontend origin (comma-separated) |
+  | `DOCUMENTS_DIR` | defaults to `/data/documents` in the image |
+
+- **Frontend** — build `frontend/` with `--build-arg VITE_API_URL=https://<your-backend-host>`
+  (Vite inlines it at build time), then serve the resulting nginx image. Point
+  `CORS_ALLOWED_ORIGINS` on the backend at this host.
+
+The backend exposes `/actuator/health` for the platform's health check.
+
 ## Project status
 
-In active development. Current milestone: **Phase 0 — setup & skeleton** ✅ backend boots against Supabase Postgres with a green health check.
+MVP complete through **Phase 6 — streaming answers + citation viewer + deploy**: JWT auth, course
+spaces with role-based access, an async PDF ingestion pipeline (extract → chunk → embed), hybrid
+(vector + full-text) retrieval with a confidence gate, and RAG chat that **streams** grounded
+answers whose `[n]` citations open the source PDF at the cited page. Containerized and CI-built.
 
-Roadmap: auth (JWT) → course spaces → document ingestion pipeline → RAG chat with citations → streaming + deploy (MVP) → quizzes & SM-2 → analytics & knowledge loop.
+Roadmap next: quizzes & SM-2 spaced repetition → confusion analytics & knowledge loop.
