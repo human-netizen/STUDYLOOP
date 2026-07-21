@@ -67,6 +67,14 @@ studyloop:
       # without vectors (no crash). Set GOOGLE_API_KEY locally / as a cloud secret to enable.
       api-key: ${GOOGLE_API_KEY:}
       model: gemini-embedding-001
+  chat:
+    # RAG answer generation. "cohere" is the only provider today; the key is shared with
+    # embeddings (COHERE_API_KEY). Blank key → the chat endpoint returns a clear 502 instead
+    # of crashing at startup.
+    provider: ${CHAT_PROVIDER:cohere}
+    cohere:
+      api-key: ${COHERE_API_KEY:}
+      model: ${COHERE_CHAT_MODEL:command-r-08-2024}
 
 management:
   endpoints:

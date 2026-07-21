@@ -10,6 +10,8 @@ import com.studyloop.backend.course.InviteEmailMismatchException;
 import com.studyloop.backend.course.InviteExpiredException;
 import com.studyloop.backend.course.InviteNotFoundException;
 import com.studyloop.backend.course.NotACourseMemberException;
+import com.studyloop.backend.chat.ChatConversationNotFoundException;
+import com.studyloop.backend.chat.ChatException;
 import com.studyloop.backend.document.DocumentNotFoundException;
 import com.studyloop.backend.document.DocumentStorageException;
 import com.studyloop.backend.document.EmptyDocumentException;
@@ -164,6 +166,24 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR, "The file could not be stored. Please try again.");
         problem.setTitle("Storage error");
+        return problem;
+    }
+
+    @ExceptionHandler(ChatConversationNotFoundException.class)
+    ProblemDetail handleChatConversationNotFound(ChatConversationNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Conversation not found");
+        return problem;
+    }
+
+    // The chat provider is unconfigured or errored — an upstream/server-side problem, and we
+    // don't leak the provider's raw message to the client.
+    @ExceptionHandler(ChatException.class)
+    ProblemDetail handleChat(ChatException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_GATEWAY, "The assistant is temporarily unavailable. Please try again.");
+        problem.setTitle("Chat unavailable");
         return problem;
     }
 
