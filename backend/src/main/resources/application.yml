@@ -45,9 +45,16 @@ studyloop:
     # dev (→ backend/data/documents, git-ignored); a mounted volume via DOCUMENTS_DIR in the cloud.
     documents-dir: ${DOCUMENTS_DIR:./data/documents}
   embedding:
-    # Which backend embeds chunks: "ollama" (local, offline, no key/rate limits — the default)
-    # or "google" (hosted API). Override with EMBEDDING_PROVIDER (e.g. in the cloud).
-    provider: ${EMBEDDING_PROVIDER:ollama}
+    # Which backend embeds chunks: "cohere" (hosted, the default) or "google" (hosted), or
+    # "ollama" (local, offline). Override with EMBEDDING_PROVIDER (e.g. in the cloud).
+    provider: ${EMBEDDING_PROVIDER:cohere}
+    cohere:
+      # Cohere embed-v4.0 key. Blank when unset → ingestion stores chunks without vectors (no
+      # crash). Get a free key at https://dashboard.cohere.com/api-keys. embed-v4.0 emits a
+      # 1024-dim Matryoshka vector that the client truncates to `dimensions` to fit vector(768).
+      api-key: ${COHERE_API_KEY:}
+      model: embed-v4.0
+      dimensions: 768
     ollama:
       # Local Ollama server. Pull the model first: `ollama pull qwen3-embedding:0.6b`.
       # dimensions must match the vector(768) column (V6 migration); Qwen3-Embedding is MRL,
