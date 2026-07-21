@@ -3,6 +3,7 @@ package com.studyloop.backend.document;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.UUID;
 
 // Orchestrates the ingestion pipeline for one document, driving its status forward and
@@ -16,6 +17,9 @@ public class DocumentIngestionService {
     private final DocumentRepository documentRepository;
     private final DocumentStorageService storageService;
     private final DocumentStatusService statusService;
+    private final PdfTextExtractor textExtractor;
+    private final TextChunker textChunker;
+    private final DocumentChunkService chunkService;
 
     public void ingest(UUID documentId) {
         String storagePath = documentRepository.findById(documentId)
@@ -28,11 +32,12 @@ public class DocumentIngestionService {
 
         try {
             statusService.markStatus(documentId, DocumentStatus.EXTRACTING);
-            // 4.2 confirms the stored bytes round-trip; 4.3 will parse them into page text.
-            storageService.read(storagePath);
+            byte[] bytes = storageService.read(storagePath);
+            List<PageText> pages = textExtractor.extract(bytes);
 
             statusService.markStatus(documentId, DocumentStatus.CHUNKING);
-            // 4.3: split the extracted text into overlapping chunks and persist them.
+            List<TextChunk> chunks = textChunker.chunk(pages);
+            chunkService.replaceChunks(documentId, chunks, pages.size());
 
             statusService.markStatus(documentId, DocumentStatus.EMBEDDING);
             // 4.4: embed each chunk into a pgvector column.
