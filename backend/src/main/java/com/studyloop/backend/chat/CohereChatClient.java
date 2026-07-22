@@ -1,5 +1,7 @@
 package com.studyloop.backend.chat;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.config.ChatProperties;
@@ -48,7 +50,22 @@ public class CohereChatClient implements ChatClient {
             throw new ChatException("Cohere chat API key is not configured.");
         }
 
-        ChatRequest request = new ChatRequest(model, messages, false);
+        return send(new ChatRequest(model, messages, false, null));
+    }
+
+    @Override
+    public String completeJson(List<LlmMessage> messages) {
+        if (!isConfigured()) {
+            throw new ChatException("Cohere chat API key is not configured.");
+        }
+
+        // response_format json_object makes Cohere return a bare JSON object (no prose, no code
+        // fences), so the caller can parse the reply directly.
+        return send(new ChatRequest(model, messages, false, ResponseFormat.jsonObject()));
+    }
+
+    // Shared non-streaming call: posts the request, reads the first text block of the reply.
+    private String send(ChatRequest request) {
         ChatCompletion response;
         try {
             response = restClient.post()
@@ -75,7 +92,7 @@ public class CohereChatClient implements ChatClient {
             throw new ChatException("Cohere chat API key is not configured.");
         }
 
-        ChatRequest request = new ChatRequest(model, messages, true);
+        ChatRequest request = new ChatRequest(model, messages, true, null);
         String answer;
         try {
             // exchange() gives us the live response stream (no buffering), so we can read
@@ -157,8 +174,18 @@ public class CohereChatClient implements ChatClient {
     }
 
     // Cohere v2/chat request shape — field names match the wire format. `stream` toggles the
-    // token-by-token SSE response used by streamComplete.
-    private record ChatRequest(String model, List<LlmMessage> messages, boolean stream) { }
+    // token-by-token SSE response used by streamComplete; `responseFormat` (omitted when null)
+    // switches the reply to a bare JSON object for completeJson.
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record ChatRequest(String model, List<LlmMessage> messages, boolean stream,
+                               @JsonProperty("response_format") ResponseFormat responseFormat) { }
+
+    // Cohere's structured-output selector; type "json_object" forces a single JSON object reply.
+    private record ResponseFormat(String type) {
+        static ResponseFormat jsonObject() {
+            return new ResponseFormat("json_object");
+        }
+    }
 
     // Cohere v2/chat response shape. We only read message.content[].text.
     private record ChatCompletion(Message message) { }

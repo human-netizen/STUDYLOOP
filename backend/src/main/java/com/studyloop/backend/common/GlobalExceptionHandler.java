@@ -16,6 +16,9 @@ import com.studyloop.backend.document.DocumentNotFoundException;
 import com.studyloop.backend.document.DocumentStorageException;
 import com.studyloop.backend.document.EmptyDocumentException;
 import com.studyloop.backend.document.UnsupportedDocumentTypeException;
+import com.studyloop.backend.quiz.NoQuizMaterialException;
+import com.studyloop.backend.quiz.QuizGenerationException;
+import com.studyloop.backend.quiz.QuizNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.authorization.AuthorizationDeniedException;
@@ -184,6 +187,33 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "The assistant is temporarily unavailable. Please try again.");
         problem.setTitle("Chat unavailable");
+        return problem;
+    }
+
+    @ExceptionHandler(QuizNotFoundException.class)
+    ProblemDetail handleQuizNotFound(QuizNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Quiz not found");
+        return problem;
+    }
+
+    // Asked to quiz on documents that have no ingested content yet → 400 (fix by choosing READY docs).
+    @ExceptionHandler(NoQuizMaterialException.class)
+    ProblemDetail handleNoQuizMaterial(NoQuizMaterialException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("No quiz material");
+        return problem;
+    }
+
+    // The model was unconfigured or produced unusable quiz output — an upstream/server-side
+    // problem, so 502 and no raw provider detail leaked to the client.
+    @ExceptionHandler(QuizGenerationException.class)
+    ProblemDetail handleQuizGeneration(QuizGenerationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_GATEWAY, "The quiz could not be generated. Please try again.");
+        problem.setTitle("Quiz generation failed");
         return problem;
     }
 
