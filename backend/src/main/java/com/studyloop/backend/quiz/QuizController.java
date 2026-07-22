@@ -1,8 +1,11 @@
 package com.studyloop.backend.quiz;
 
+import com.studyloop.backend.quiz.dto.AttemptResponse;
+import com.studyloop.backend.quiz.dto.AttemptSummaryResponse;
 import com.studyloop.backend.quiz.dto.GenerateQuizRequest;
 import com.studyloop.backend.quiz.dto.QuizResponse;
 import com.studyloop.backend.quiz.dto.QuizSummaryResponse;
+import com.studyloop.backend.quiz.dto.SubmitAttemptRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -27,6 +30,7 @@ import java.util.UUID;
 public class QuizController {
 
     private final QuizService quizService;
+    private final QuizGradingService gradingService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -46,5 +50,23 @@ public class QuizController {
                                @PathVariable UUID courseId,
                                @PathVariable UUID quizId) {
         return quizService.getForTaking(UUID.fromString(authentication.getName()), courseId, quizId);
+    }
+
+    // Submit answers → graded result (score + per-question verdict, answer key, explanations).
+    @PostMapping("/{quizId}/attempts")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AttemptResponse submit(Authentication authentication,
+                                  @PathVariable UUID courseId,
+                                  @PathVariable UUID quizId,
+                                  @Valid @RequestBody SubmitAttemptRequest request) {
+        return gradingService.submit(UUID.fromString(authentication.getName()), courseId, quizId, request);
+    }
+
+    // The caller's own past attempts on this quiz, most recent first.
+    @GetMapping("/{quizId}/attempts")
+    public List<AttemptSummaryResponse> attempts(Authentication authentication,
+                                                 @PathVariable UUID courseId,
+                                                 @PathVariable UUID quizId) {
+        return gradingService.listAttempts(UUID.fromString(authentication.getName()), courseId, quizId);
     }
 }
