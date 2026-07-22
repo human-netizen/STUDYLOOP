@@ -120,3 +120,102 @@ export interface ChatMetaEvent {
 export interface ChatDoneEvent {
   conversationId: string
 }
+
+// --- Quizzes (com.studyloop.backend.quiz.dto) ---
+
+export type QuestionType = 'MULTIPLE_CHOICE' | 'SHORT_ANSWER'
+
+export interface QuizSummary {
+  id: string
+  title: string
+  questionCount: number
+  createdAt: string
+}
+
+// One question in the take view — no answer key (options is empty for short-answer questions).
+export interface QuizQuestionView {
+  id: string
+  index: number
+  type: QuestionType
+  prompt: string
+  options: string[]
+}
+
+export interface Quiz {
+  id: string
+  title: string
+  createdAt: string
+  questions: QuizQuestionView[]
+}
+
+export interface GenerateQuizRequest {
+  documentIds?: string[] | null
+  multipleChoiceCount?: number
+  shortAnswerCount?: number
+  title?: string
+}
+
+// One submitted answer: set selectedOptionIndex for multiple-choice, answerText for short-answer.
+export interface AnswerInput {
+  questionId: string
+  selectedOptionIndex?: number | null
+  answerText?: string | null
+}
+
+export interface SubmitAttemptRequest {
+  answers: AnswerInput[]
+}
+
+// A graded question: what the user gave plus the revealed answer key and explanation.
+export interface GradedAnswer {
+  questionId: string
+  index: number
+  type: QuestionType
+  prompt: string
+  options: string[]
+  selectedOptionIndex: number | null
+  answerText: string | null
+  correct: boolean
+  correctOptionIndex: number | null
+  correctAnswer: string | null
+  explanation: string | null
+}
+
+export interface AttemptResponse {
+  attemptId: string
+  quizId: string
+  score: number
+  total: number
+  createdAt: string
+  answers: GradedAnswer[]
+}
+
+export interface AttemptSummary {
+  attemptId: string
+  score: number
+  total: number
+  createdAt: string
+}
+
+// --- Flashcards (com.studyloop.backend.flashcard.dto) ---
+
+export interface Flashcard {
+  id: string
+  front: string
+  back: string
+  sourceDocumentId: string | null
+  sourcePage: number | null
+  createdAt: string
+}
+
+export interface GenerateFlashcardsRequest {
+  documentId: string
+  count?: number
+}
+
+export interface CreateFlashcardRequest {
+  front: string
+  back: string
+  sourceDocumentId?: string | null
+  sourcePage?: number | null
+}

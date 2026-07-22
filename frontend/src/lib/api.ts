@@ -1,13 +1,22 @@
 import type {
+  AttemptResponse,
+  AttemptSummary,
   ChatDoneEvent,
   ChatMetaEvent,
   CourseResponse,
   CreateCourseRequest,
+  CreateFlashcardRequest,
   DocumentResponse,
+  Flashcard,
+  GenerateFlashcardsRequest,
+  GenerateQuizRequest,
   InvitePreviewResponse,
   LoginRequest,
   PageResponse,
+  Quiz,
+  QuizSummary,
   RegisterRequest,
+  SubmitAttemptRequest,
   TokenResponse,
   UserResponse,
 } from './types'
@@ -166,6 +175,38 @@ export const documentsApi = {
     if (!res.ok) throw await toError(res)
     return res.blob()
   },
+}
+
+export const quizzesApi = {
+  list: (courseId: string) =>
+    request<QuizSummary[]>(`/courses/${courseId}/quizzes`, { auth: true }),
+  get: (courseId: string, quizId: string) =>
+    request<Quiz>(`/courses/${courseId}/quizzes/${quizId}`, { auth: true }),
+  generate: (courseId: string, body: GenerateQuizRequest) =>
+    request<Quiz>(`/courses/${courseId}/quizzes`, { method: 'POST', body, auth: true }),
+  submit: (courseId: string, quizId: string, body: SubmitAttemptRequest) =>
+    request<AttemptResponse>(`/courses/${courseId}/quizzes/${quizId}/attempts`, {
+      method: 'POST',
+      body,
+      auth: true,
+    }),
+  attempts: (courseId: string, quizId: string) =>
+    request<AttemptSummary[]>(`/courses/${courseId}/quizzes/${quizId}/attempts`, { auth: true }),
+}
+
+export const flashcardsApi = {
+  list: (courseId: string) =>
+    request<Flashcard[]>(`/courses/${courseId}/flashcards`, { auth: true }),
+  generate: (courseId: string, body: GenerateFlashcardsRequest) =>
+    request<Flashcard[]>(`/courses/${courseId}/flashcards/generate`, {
+      method: 'POST',
+      body,
+      auth: true,
+    }),
+  create: (courseId: string, body: CreateFlashcardRequest) =>
+    request<Flashcard>(`/courses/${courseId}/flashcards`, { method: 'POST', body, auth: true }),
+  remove: (courseId: string, cardId: string) =>
+    request<void>(`/courses/${courseId}/flashcards/${cardId}`, { method: 'DELETE', auth: true }),
 }
 
 export const invitesApi = {

@@ -89,12 +89,26 @@ export function CourseDetailPage() {
                   <p className="mt-1 text-slate-500 dark:text-slate-400">{course.description}</p>
                 )}
               </div>
-              <Link
-                to={`/courses/${id}/chat`}
-                className="shrink-0 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
-              >
-                Ask this course
-              </Link>
+              <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                <Link
+                  to={`/courses/${id}/quizzes`}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Quizzes
+                </Link>
+                <Link
+                  to={`/courses/${id}/flashcards`}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Flashcards
+                </Link>
+                <Link
+                  to={`/courses/${id}/chat`}
+                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+                >
+                  Ask this course
+                </Link>
+              </div>
             </div>
 
             <div className="mt-8">

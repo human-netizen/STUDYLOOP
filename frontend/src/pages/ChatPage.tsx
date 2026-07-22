@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ApiError, chatApi, coursesApi } from '../lib/api'
+import { ApiError, chatApi, coursesApi, flashcardsApi } from '../lib/api'
 import type { Citation, CourseResponse } from '../lib/types'
 import { AppHeader } from '../components/AppHeader'
 import { PdfViewer } from '../components/PdfViewer'
@@ -116,7 +116,13 @@ export function ChatPage() {
             turn.role === 'user' ? (
               <UserBubble key={i} text={turn.text} />
             ) : (
-              <AssistantBubble key={i} turn={turn} onCite={setActiveCitation} />
+              <AssistantBubble
+                key={i}
+                turn={turn}
+                question={turns[i - 1]?.text ?? ''}
+                courseId={id}
+                onCite={setActiveCitation}
+              />
             ),
           )}
         </div>
@@ -175,7 +181,18 @@ function UserBubble({ text }: { text: string }) {
   )
 }
 
-function AssistantBubble({ turn, onCite }: { turn: Turn; onCite: (c: Citation) => void }) {
+function AssistantBubble({
+  turn,
+  question,
+  courseId,
+  onCite,
+}: {
+  turn: Turn
+  question: string
+  courseId: string
+  onCite: (c: Citation) => void
+}) {
+  const answered = !turn.streaming && turn.text.trim().length > 0
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
@@ -200,8 +217,51 @@ function AssistantBubble({ turn, onCite }: { turn: Turn; onCite: (c: Citation) =
             </ul>
           </div>
         )}
+        {answered && question && (
+          <SaveFlashcardButton courseId={courseId} front={question} back={turn.text} />
+        )}
       </div>
     </div>
+  )
+}
+
+// Turns a completed Q&A into a personal flashcard (question → front, answer → back).
+function SaveFlashcardButton({
+  courseId,
+  front,
+  back,
+}: {
+  courseId: string
+  front: string
+  back: string
+}) {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  async function save() {
+    setState('saving')
+    try {
+      await flashcardsApi.create(courseId, { front, back })
+      setState('saved')
+    } catch {
+      setState('error')
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void save()}
+      disabled={state === 'saving' || state === 'saved'}
+      className="mt-3 text-xs font-medium text-slate-400 transition hover:text-indigo-600 disabled:hover:text-slate-400 dark:hover:text-indigo-400"
+    >
+      {state === 'saved'
+        ? 'Saved to flashcards ✓'
+        : state === 'saving'
+          ? 'Saving…'
+          : state === 'error'
+            ? 'Could not save — retry'
+            : '+ Save as flashcard'}
+    </button>
   )
 }
 
