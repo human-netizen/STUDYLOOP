@@ -16,6 +16,9 @@ import com.studyloop.backend.document.DocumentNotFoundException;
 import com.studyloop.backend.document.DocumentStorageException;
 import com.studyloop.backend.document.EmptyDocumentException;
 import com.studyloop.backend.document.UnsupportedDocumentTypeException;
+import com.studyloop.backend.flashcard.FlashcardGenerationException;
+import com.studyloop.backend.flashcard.FlashcardNotFoundException;
+import com.studyloop.backend.flashcard.NoFlashcardMaterialException;
 import com.studyloop.backend.quiz.NoQuizMaterialException;
 import com.studyloop.backend.quiz.QuizGenerationException;
 import com.studyloop.backend.quiz.QuizNotFoundException;
@@ -214,6 +217,32 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "The quiz could not be generated. Please try again.");
         problem.setTitle("Quiz generation failed");
+        return problem;
+    }
+
+    @ExceptionHandler(FlashcardNotFoundException.class)
+    ProblemDetail handleFlashcardNotFound(FlashcardNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Flashcard not found");
+        return problem;
+    }
+
+    // Asked to build cards from a document with no ingested content → 400 (pick a READY document).
+    @ExceptionHandler(NoFlashcardMaterialException.class)
+    ProblemDetail handleNoFlashcardMaterial(NoFlashcardMaterialException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("No flashcard material");
+        return problem;
+    }
+
+    // The model was unconfigured or produced unusable flashcard output → 502, no raw detail leaked.
+    @ExceptionHandler(FlashcardGenerationException.class)
+    ProblemDetail handleFlashcardGeneration(FlashcardGenerationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_GATEWAY, "The flashcards could not be generated. Please try again.");
+        problem.setTitle("Flashcard generation failed");
         return problem;
     }
 
