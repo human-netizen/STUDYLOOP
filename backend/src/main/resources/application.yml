@@ -20,6 +20,12 @@ spring:
     hibernate:
       # Flyway owns the schema; Hibernate only checks entities match it at startup.
       ddl-auto: validate
+    # Echo generated SQL while debugging: SHOW_SQL=true. Off by default — on a chatty
+    # endpoint like ingestion it buries everything else in the log.
+    show-sql: ${SHOW_SQL:false}
+    properties:
+      hibernate:
+        format_sql: true
     # Keeps DB connections out of the web layer; we load what we need inside services.
     open-in-view: false
 
