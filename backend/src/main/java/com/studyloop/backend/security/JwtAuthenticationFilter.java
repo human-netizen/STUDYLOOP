@@ -24,6 +24,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
 
+    // A request that goes async (the SSE chat stream) comes back through the whole filter chain a
+    // second time as an ASYNC dispatch when the emitter completes, and a container-level error is
+    // dispatched to /error the same way. OncePerRequestFilter skips both by default, so without
+    // these overrides the second pass runs with an empty SecurityContext — this filter puts the
+    // Authentication straight on the holder rather than into a SecurityContextRepository, so
+    // nothing restores it — and AuthorizationFilter (which does filter every dispatch type) denies
+    // the request. By then the response is committed, so Tomcat can neither report the error nor
+    // finish the chunked body, and the client sees a truncated stream. The Bearer header is still
+    // on the request both times, so re-authenticating is just a second signature check.
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
+    @Override
+    protected boolean shouldNotFilterErrorDispatch() {
+        return false;
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
