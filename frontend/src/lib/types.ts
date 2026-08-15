@@ -240,6 +240,48 @@ export interface CreateFlashcardRequest {
   sourcePage?: number | null
 }
 
+// --- Cost dashboard (com.studyloop.backend.usage.dto) ---
+
+export interface CostTotals {
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  costUsd: number
+}
+
+// One feature's share of the bill. `operation` is the backend AiOperation enum name.
+export interface OperationCost {
+  operation: string
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  costUsd: number
+}
+
+export interface DailyCost {
+  day: string
+  calls: number
+  costUsd: number
+}
+
+// The semantic cache's scoreboard. Cumulative, unlike the spend figures — an entry knows how
+// often it has been reused but not when, so there is no window to apply.
+export interface CacheStats {
+  entries: number
+  hits: number
+  answersFromModel: number
+  hitRate: number
+  estimatedSavedUsd: number
+}
+
+export interface CostSummary {
+  windowDays: number
+  totals: CostTotals
+  byOperation: OperationCost[]
+  daily: DailyCost[]
+  cache: CacheStats
+}
+
 // --- Spaced repetition (com.studyloop.backend.review.dto) ---
 
 // A card that is due, with enough of its SM-2 state to show how well it's known.

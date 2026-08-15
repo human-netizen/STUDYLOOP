@@ -3,6 +3,7 @@ import type {
   AttemptSummary,
   ChatDoneEvent,
   ChatMetaEvent,
+  CostSummary,
   CourseResponse,
   CreateCourseRequest,
   CreateFlashcardRequest,
@@ -236,6 +237,13 @@ export const reviewApi = {
     }),
   grade: (cardId: string, grade: number) =>
     request<ReviewResult>(`/review/${cardId}`, { method: 'POST', body: { grade }, auth: true }),
+}
+
+// Admin-only. A non-admin token gets a 403 here, so callers should gate the UI on the user's
+// role rather than letting the page load and fail.
+export const adminApi = {
+  costs: (days?: number) =>
+    request<CostSummary>(`/admin/costs${days ? `?days=${days}` : ''}`, { auth: true }),
 }
 
 export const invitesApi = {

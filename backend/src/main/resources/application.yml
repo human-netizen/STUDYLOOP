@@ -93,6 +93,32 @@ studyloop:
     # them. Costs one chat call per document, never repeated. Set false (SUMMARY_AUTO_GENERATE)
     # to keep bulk imports off the provider — POST /documents/{id}/summary still works on demand.
     auto-generate: ${SUMMARY_AUTO_GENERATE:true}
+  semantic-cache:
+    # Phase 8.3: answers are cached against the *meaning* of the question, so a paraphrase of
+    # something already asked is served from the database instead of the model. Set false
+    # (SEMANTIC_CACHE_ENABLED) to send every question to the provider — the useful comparison
+    # when demonstrating what the cache is worth.
+    enabled: ${SEMANTIC_CACHE_ENABLED:true}
+    # Cosine similarity a previous question must reach before its answer is reused. High on
+    # purpose: 0.97 is "these are the same question worded differently", not "same topic". Serving
+    # a stale answer to a subtly different question is the failure mode worth paying to avoid, so
+    # this errs toward calling the model. Override with SEMANTIC_CACHE_MIN_SIMILARITY.
+    min-similarity: ${SEMANTIC_CACHE_MIN_SIMILARITY:0.97}
+    # Backstop only — uploading a document already clears that course's cache outright.
+    ttl: ${SEMANTIC_CACHE_TTL:30d}
+  pricing:
+    # USD per million tokens, used to price each recorded provider call for /admin/costs. These
+    # are Cohere's published list prices; a model with no entry here is still recorded, just
+    # costed at zero. Keys need [brackets] because Spring otherwise reads the dot in a model name
+    # as nesting.
+    models:
+      "[command-r-08-2024]":
+        input-per-million: 0.15
+        output-per-million: 0.60
+      # Embeddings bill on input only — nothing is generated.
+      "[embed-v4.0]":
+        input-per-million: 0.12
+        output-per-million: 0
 
 management:
   endpoints:

@@ -1,5 +1,8 @@
 package com.studyloop.backend.chat;
 
+import com.studyloop.backend.chat.PreparedTurn.CacheWrite;
+import com.studyloop.backend.chat.SemanticCacheService.CacheProbe;
+import com.studyloop.backend.chat.SemanticCacheService.CachedAnswer;
 import com.studyloop.backend.chat.dto.ChatRequest;
 import com.studyloop.backend.chat.dto.ChatResponse;
 import com.studyloop.backend.chat.dto.Citation;
@@ -20,6 +23,10 @@ import java.util.UUID;
 // The RAG orchestrator: retrieve the most relevant chunks for a question, ground the model on
 // them, and persist the turn so follow-ups have context. The model is told to answer only from
 // the numbered sources and to cite them inline as [n], which the response maps back to sources.
+//
+// A turn passes three gates before it reaches the model, cheapest first: the semantic cache
+// (have we answered this already?), then retrieval's confidence gate (is this even in the
+// materials?), and only then the provider.
 @Service
 @RequiredArgsConstructor
 public class ChatService {
@@ -40,50 +47,31 @@ public class ChatService {
     private final ChatConversationRepository conversationRepository;
     private final ChatMessageRepository messageRepository;
     private final ChatProperties chatProperties;
+    private final SemanticCacheService semanticCache;
 
+    // The non-streaming turn, kept as the simple fallback to /chat/stream. It shares prepare()
+    // and completeTurn() with the streaming path rather than restating them.
+    //
+    // @Transactional sits here as well as on those two methods on purpose: Spring applies it
+    // through a proxy, so the calls below — made on `this` — never reach it. Declaring it here
+    // means the whole turn runs in one transaction instead of none. The cost is that the model
+    // call happens inside it, which is exactly the thing the streaming path was split up to
+    // avoid; this endpoint answers in one shot and has no seam to split at.
     @Transactional
     public ChatResponse chat(UUID actorId, UUID courseId, ChatRequest request) {
-        Membership member = courseAccess.requireMember(actorId, courseId);
-        if (!chatClient.isConfigured()) {
-            throw new ChatException("Chat provider is not configured.");
+        PreparedTurn prepared = prepare(actorId, courseId, request);
+        if (prepared.isAnswered()) {
+            return new ChatResponse(prepared.conversationId(), prepared.finalAnswer(), prepared.citations());
         }
 
-        String question = request.question().trim();
-        ChatConversation conversation = resolveConversation(request.conversationId(), courseId, actorId, member, question);
-
-        // Ground on the course's materials (reuses the same hybrid retrieval as the API).
-        RetrievalResult retrieval = retrievalService.search(actorId, courseId, question, RETRIEVAL_K);
-        List<RetrievedChunk> chunks = retrieval.chunks();
-
-        // Confidence gate: if nothing relevant came back, refuse deterministically instead of
-        // letting the model answer from weak or absent context (and skip the provider call).
-        if (shouldRefuse(retrieval)) {
-            saveMessage(conversation, ChatRole.USER, question);
-            saveMessage(conversation, ChatRole.ASSISTANT, NOT_IN_MATERIALS);
-            return new ChatResponse(conversation.getId(), NOT_IN_MATERIALS, List.of());
-        }
-
-        // system prompt (with numbered sources) → prior turns → the new question.
-        List<LlmMessage> messages = new ArrayList<>();
-        messages.add(LlmMessage.system(buildSystemPrompt(chunks)));
-        messages.addAll(replayHistory(conversation.getId()));
-        messages.add(LlmMessage.user(question));
-
-        String answer = chatClient.complete(messages);
-
-        // Persist both turns only after a successful answer, so a provider failure leaves no
-        // half-written conversation.
-        saveMessage(conversation, ChatRole.USER, question);
-        saveMessage(conversation, ChatRole.ASSISTANT, answer);
-
-        return new ChatResponse(conversation.getId(), answer, toCitations(chunks));
+        String answer = chatClient.complete(prepared.messages());
+        completeTurn(prepared, answer);
+        return new ChatResponse(prepared.conversationId(), answer, prepared.citations());
     }
 
-    // Streaming counterpart split into two transactional halves so the model stream (which can
-    // run for seconds) never holds a DB transaction open. prepare() does the fast DB work —
-    // resolve the thread, retrieve, gate — and persists the user turn; persistAssistant() saves
-    // the finished answer. The token streaming itself happens between them, transaction-free,
-    // driven by ChatStreamService.
+    // The fast DB half of a streaming turn: resolve the thread, try the cache, retrieve, gate,
+    // and persist the user's question. Split from the model call so the stream — which can run
+    // for seconds — never holds a pooled Supabase connection open. completeTurn() closes it out.
     @Transactional
     public PreparedTurn prepare(UUID actorId, UUID courseId, ChatRequest request) {
         Membership member = courseAccess.requireMember(actorId, courseId);
@@ -92,17 +80,36 @@ public class ChatService {
         }
 
         String question = request.question().trim();
-        ChatConversation conversation = resolveConversation(request.conversationId(), courseId, actorId, member, question);
+        // Only an opening question is cacheable. A follow-up ("what about the second one?") is
+        // meaningless without the turns before it, so two threads whose latest questions look
+        // alike can still need completely different answers. No conversation id means no thread
+        // yet, which is the check — no extra query needed.
+        boolean opensThread = request.conversationId() == null;
+        ChatConversation conversation =
+                resolveConversation(request.conversationId(), courseId, actorId, member, question);
 
-        RetrievalResult retrieval = retrievalService.search(actorId, courseId, question, RETRIEVAL_K);
-        List<RetrievedChunk> chunks = retrieval.chunks();
-
-        // Record the question now; the answer turn is saved once streaming completes.
+        // Record the question now; the answer turn is saved once the answer exists.
         saveMessage(conversation, ChatRole.USER, question);
 
+        CacheProbe probe = opensThread ? semanticCache.probe(courseId, question) : CacheProbe.unavailable();
+        if (probe.isHit()) {
+            CachedAnswer cached = probe.hit();
+            saveMessage(conversation, ChatRole.ASSISTANT, cached.answer());
+            return PreparedTurn.answered(conversation.getId(), cached.citations(), cached.answer());
+        }
+
+        // Ground on the course's materials (the same hybrid retrieval the search API uses),
+        // reusing the embedding the probe just computed so a cache miss costs one embedding call
+        // rather than two.
+        RetrievalResult retrieval = retrievalService.search(
+                actorId, courseId, question, probe.questionVector(), RETRIEVAL_K);
+        List<RetrievedChunk> chunks = retrieval.chunks();
+
+        // Confidence gate: if nothing relevant came back, refuse deterministically instead of
+        // letting the model answer from weak or absent context (and skip the provider call).
         if (shouldRefuse(retrieval)) {
             saveMessage(conversation, ChatRole.ASSISTANT, NOT_IN_MATERIALS);
-            return PreparedTurn.refused(conversation.getId(), NOT_IN_MATERIALS);
+            return PreparedTurn.answered(conversation.getId(), List.of(), NOT_IN_MATERIALS);
         }
 
         // system prompt (numbered sources) → prior turns, which now end with the question we
@@ -111,13 +118,26 @@ public class ChatService {
         messages.add(LlmMessage.system(buildSystemPrompt(chunks)));
         messages.addAll(replayHistory(conversation.getId()));
 
-        return PreparedTurn.answerable(conversation.getId(), toCitations(chunks), messages);
+        // Cache only what the cache could ever serve: an opening question, answered from the
+        // materials, whose embedding we actually have. Refusals are excluded deliberately —
+        // "I don't have that" is the one answer most likely to be wrong tomorrow.
+        CacheWrite cacheWrite = opensThread && probe.questionVector() != null
+                ? new CacheWrite(courseId, question, probe.questionVector())
+                : null;
+        return PreparedTurn.answerable(conversation.getId(), toCitations(chunks), messages, cacheWrite);
     }
 
+    // Saves the finished answer and, when the turn was cacheable, remembers it for next time.
     @Transactional
-    public void persistAssistant(UUID conversationId, String answer) {
-        ChatConversation conversation = conversationRepository.getReferenceById(conversationId);
+    public void completeTurn(PreparedTurn prepared, String answer) {
+        ChatConversation conversation = conversationRepository.getReferenceById(prepared.conversationId());
         saveMessage(conversation, ChatRole.ASSISTANT, answer);
+
+        CacheWrite write = prepared.cacheWrite();
+        if (write != null) {
+            semanticCache.store(write.courseId(), write.question(), write.questionVector(),
+                    answer, prepared.citations());
+        }
     }
 
     // Refuse when there's simply nothing to answer from, or when the semantic match is too weak

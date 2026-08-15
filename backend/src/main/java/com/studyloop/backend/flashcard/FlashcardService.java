@@ -17,6 +17,8 @@ import com.studyloop.backend.flashcard.dto.CreateFlashcardRequest;
 import com.studyloop.backend.flashcard.dto.FlashcardResponse;
 import com.studyloop.backend.flashcard.dto.GenerateFlashcardsRequest;
 import com.studyloop.backend.review.ReviewService;
+import com.studyloop.backend.usage.AiOperation;
+import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -203,7 +205,12 @@ public class FlashcardService {
                 LlmMessage.system(buildSystemPrompt(count)),
                 LlmMessage.user("Document text:\n\n" + material));
 
-        String json = chatClient.completeJson(messages);
+        // Labels the call as flashcard generation for the cost dashboard; completeJson itself
+        // can't tell which of its four callers it is serving.
+        String json;
+        try (var ignored = AiUsageContext.of(AiOperation.FLASHCARD_GENERATION)) {
+            json = chatClient.completeJson(messages);
+        }
         try {
             GeneratedDeck deck = objectMapper.readValue(json, GeneratedDeck.class);
             return deck.cards() == null ? List.of() : deck.cards();

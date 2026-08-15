@@ -46,6 +46,14 @@ public class RetrievalService {
     // and the signals come from the same candidate lists, so there's no extra query.
     @Transactional(readOnly = true)
     public RetrievalResult search(UUID actorId, UUID courseId, String query, int limit) {
+        return search(actorId, courseId, query, null, limit);
+    }
+
+    // The same search, reusing a query embedding the caller already has. Chat embeds a question
+    // once — to probe the semantic cache — and hands the vector down here, so a cache miss costs
+    // one embedding call instead of embedding the identical string twice. Pass null to embed here.
+    @Transactional(readOnly = true)
+    public RetrievalResult search(UUID actorId, UUID courseId, String query, float[] queryVector, int limit) {
         courseAccess.requireMember(actorId, courseId);
 
         String trimmed = query == null ? "" : query.trim();
@@ -56,10 +64,11 @@ public class RetrievalService {
 
         // Semantic half — only when an embedding provider is configured. If not, retrieval
         // degrades gracefully to full-text alone rather than failing.
-        List<ChunkHit> vectorHits = embeddingClient.isConfigured()
+        float[] vector = queryVector != null ? queryVector
+                : embeddingClient.isConfigured() ? embeddingClient.embedQuery(trimmed) : null;
+        List<ChunkHit> vectorHits = vector != null
                 ? searchRepository.vectorSearch(
-                        courseId, VectorSupport.toLiteral(embeddingClient.embedQuery(trimmed)),
-                        CANDIDATES_PER_SOURCE)
+                        courseId, VectorSupport.toLiteral(vector), CANDIDATES_PER_SOURCE)
                 : List.of();
 
         // Lexical half.

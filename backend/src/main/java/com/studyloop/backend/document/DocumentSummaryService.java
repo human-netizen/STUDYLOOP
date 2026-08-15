@@ -9,6 +9,8 @@ import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.document.DocumentSummaryStore.SummaryInput;
 import com.studyloop.backend.document.DocumentSummaryStore.TermDraft;
 import com.studyloop.backend.document.dto.DocumentSummaryResponse;
+import com.studyloop.backend.usage.AiOperation;
+import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -94,7 +96,9 @@ public class DocumentSummaryService {
                 LlmMessage.user("Document text:\n\n" + material));
 
         String json;
-        try {
+        // The scope names this call for the cost dashboard; completeJson is shared with quizzes,
+        // grading and flashcards and can't tell them apart on its own.
+        try (var ignored = AiUsageContext.of(AiOperation.SUMMARY)) {
             json = chatClient.completeJson(messages);
         } catch (RuntimeException e) {
             // Whatever the provider threw (transport, rate limit, auth), the caller only needs

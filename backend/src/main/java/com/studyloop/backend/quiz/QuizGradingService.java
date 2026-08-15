@@ -13,6 +13,8 @@ import com.studyloop.backend.quiz.dto.AttemptResponse.GradedAnswer;
 import com.studyloop.backend.quiz.dto.AttemptSummaryResponse;
 import com.studyloop.backend.quiz.dto.SubmitAttemptRequest;
 import com.studyloop.backend.quiz.dto.SubmitAttemptRequest.AnswerInput;
+import com.studyloop.backend.usage.AiOperation;
+import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -179,8 +181,13 @@ public class QuizGradingService {
             return fallbackVerdicts(items);
         }
         try {
-            String json = chatClient.completeJson(List.of(
-                    LlmMessage.system(GRADER_SYSTEM), LlmMessage.user(buildGradingPrompt(items))));
+            String json;
+            // The scope is what separates this call from quiz *generation* in the cost dashboard —
+            // both reach the provider through the same completeJson method.
+            try (var ignored = AiUsageContext.of(AiOperation.QUIZ_GRADING)) {
+                json = chatClient.completeJson(List.of(
+                        LlmMessage.system(GRADER_SYSTEM), LlmMessage.user(buildGradingPrompt(items))));
+            }
             GradeResult result = objectMapper.readValue(json, GradeResult.class);
             Map<UUID, Boolean> verdicts = new HashMap<>();
             if (result.grades() != null) {

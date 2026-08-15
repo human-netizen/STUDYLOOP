@@ -1,5 +1,6 @@
 package com.studyloop.backend.document;
 
+import com.studyloop.backend.chat.SemanticCacheService;
 import com.studyloop.backend.config.SummaryProperties;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -28,6 +29,7 @@ public class DocumentIngestionService {
     private final DocumentEmbeddingService embeddingService;
     private final DocumentSummaryService summaryService;
     private final SummaryProperties summaryProperties;
+    private final SemanticCacheService semanticCache;
 
     public void ingest(UUID documentId) {
         Document document = documentRepository.findById(documentId).orElse(null);
@@ -56,6 +58,9 @@ public class DocumentIngestionService {
             return;
         }
 
+        // The course's corpus just grew, so every answer cached against the old one is suspect —
+        // most of all the refusals, which this document may well have just made answerable.
+        semanticCache.invalidate(courseId);
         summarizeQuietly(courseId, documentId);
     }
 

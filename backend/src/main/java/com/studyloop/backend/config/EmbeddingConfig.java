@@ -4,6 +4,7 @@ import com.studyloop.backend.document.CohereEmbeddingClient;
 import com.studyloop.backend.document.EmbeddingClient;
 import com.studyloop.backend.document.GoogleEmbeddingClient;
 import com.studyloop.backend.document.OllamaEmbeddingClient;
+import com.studyloop.backend.usage.AiUsageRecorder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -14,8 +15,11 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class EmbeddingConfig {
 
+    // Only the Cohere client is metered. Ollama runs on the user's own machine and bills nothing,
+    // and Google's embed response doesn't report token counts, so a row for either would be a
+    // call with a fabricated price — worse for the dashboard than an honest absence.
     @Bean
-    public EmbeddingClient embeddingClient(EmbeddingProperties properties) {
+    public EmbeddingClient embeddingClient(EmbeddingProperties properties, AiUsageRecorder usageRecorder) {
         String provider = properties.provider();
         if (provider != null && provider.equalsIgnoreCase("google")) {
             return new GoogleEmbeddingClient(properties);
@@ -23,6 +27,6 @@ public class EmbeddingConfig {
         if (provider != null && provider.equalsIgnoreCase("ollama")) {
             return new OllamaEmbeddingClient(properties);
         }
-        return new CohereEmbeddingClient(properties);
+        return new CohereEmbeddingClient(properties, usageRecorder);
     }
 }

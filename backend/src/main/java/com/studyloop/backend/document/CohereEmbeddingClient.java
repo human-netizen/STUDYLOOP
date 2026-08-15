@@ -2,6 +2,8 @@ package com.studyloop.backend.document;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.studyloop.backend.config.EmbeddingProperties;
+import com.studyloop.backend.usage.AiOperation;
+import com.studyloop.backend.usage.AiUsageRecorder;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -26,13 +28,17 @@ public class CohereEmbeddingClient implements EmbeddingClient {
     // The only output sizes embed-v4.0 supports; we pick the smallest that covers our target.
     private static final int[] SUPPORTED_DIMENSIONS = {256, 512, 1024, 1536};
 
+    private static final String PROVIDER = "cohere";
+
     private final RestClient restClient = RestClient.create();
+    private final AiUsageRecorder usageRecorder;
     private final String apiKey;
     private final String model;
     private final int dimensions;         // our target size (must match the vector column)
     private final int requestDimension;   // the output_dimension we actually ask Cohere for
 
-    public CohereEmbeddingClient(EmbeddingProperties properties) {
+    public CohereEmbeddingClient(EmbeddingProperties properties, AiUsageRecorder usageRecorder) {
+        this.usageRecorder = usageRecorder;
         EmbeddingProperties.Cohere cohere = properties.cohere();
         this.apiKey = cohere != null ? cohere.apiKey() : null;
         String configuredModel = cohere != null ? cohere.model() : null;
@@ -64,8 +70,8 @@ public class CohereEmbeddingClient implements EmbeddingClient {
         List<float[]> vectors = new ArrayList<>(texts.size());
         for (int start = 0; start < texts.size(); start += MAX_BATCH) {
             // search_document: these are the documents we index.
-            vectors.addAll(embedBatch(
-                    texts.subList(start, Math.min(start + MAX_BATCH, texts.size())), "search_document"));
+            vectors.addAll(embedBatch(texts.subList(start, Math.min(start + MAX_BATCH, texts.size())),
+                    "search_document", AiOperation.EMBED_DOCUMENTS));
         }
         return vectors;
     }
@@ -76,10 +82,10 @@ public class CohereEmbeddingClient implements EmbeddingClient {
             throw new EmbeddingException("Cohere embedding API key is not configured.");
         }
         // search_query embeds a question into the same space as the search_document chunks.
-        return embedBatch(List.of(text), "search_query").get(0);
+        return embedBatch(List.of(text), "search_query", AiOperation.EMBED_QUERY).get(0);
     }
 
-    private List<float[]> embedBatch(List<String> batch, String inputType) {
+    private List<float[]> embedBatch(List<String> batch, String inputType, AiOperation operation) {
         EmbedRequest request =
                 new EmbedRequest(model, inputType, batch, List.of("float"), requestDimension);
 
@@ -108,6 +114,10 @@ public class CohereEmbeddingClient implements EmbeddingClient {
             }
             vectors.add(fitToDimensions(values));
         }
+
+        // Embeddings bill on input only — there is no generated output to pay for. One record per
+        // batch, not per text, because a batch is one billable request.
+        usageRecorder.record(PROVIDER, model, operation, response.billedInputTokens(), 0);
         return vectors;
     }
 
@@ -139,10 +149,25 @@ public class CohereEmbeddingClient implements EmbeddingClient {
     private record EmbedRequest(String model, String input_type, List<String> texts,
                                 List<String> embedding_types, int output_dimension) { }
 
-    // Cohere v2/embed response shape. We only need embeddings.float — a list of vectors.
+    // Cohere v2/embed response shape. We need embeddings.float — a list of vectors — and the
+    // billed token count that meta carries, which is what the cost dashboard is built from.
     // Jackson deserializes each JSON number array straight into a float[]. "float" is a Java
     // keyword, so the field is named `floats` and mapped to the wire name via @JsonProperty.
-    private record EmbedResponse(Embeddings embeddings) { }
+    private record EmbedResponse(Embeddings embeddings, Meta meta) {
+
+        // Zero when the provider didn't report it: the call still gets a row, priced at nothing,
+        // which shows up as a visible gap rather than a silently missing call.
+        int billedInputTokens() {
+            if (meta == null || meta.billedUnits() == null || meta.billedUnits().inputTokens() == null) {
+                return 0;
+            }
+            return meta.billedUnits().inputTokens().intValue();
+        }
+    }
 
     private record Embeddings(@JsonProperty("float") List<float[]> floats) { }
+
+    private record Meta(@JsonProperty("billed_units") BilledUnits billedUnits) { }
+
+    private record BilledUnits(@JsonProperty("input_tokens") Double inputTokens) { }
 }

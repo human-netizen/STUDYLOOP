@@ -68,6 +68,9 @@ function Rail({ courseName }: { courseName?: string }) {
             <RailLink to={`/courses/${courseId}/review`} index="07" label="Review this course" end />
           </>
         )}
+        {/* Admins get one extra destination. Hidden rather than shown-and-refused: a link that
+            always 403s is noise for everyone who isn't an operator. */}
+        {user?.role === 'ADMIN' && <RailLink to="/admin/costs" index="··" label="Spend" end />}
       </nav>
 
       <div className="mt-auto hidden border-t border-line pt-4 lg:block">

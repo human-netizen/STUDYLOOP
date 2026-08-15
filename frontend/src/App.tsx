@@ -9,6 +9,7 @@ import { QuizPage } from './pages/QuizPage'
 import { FlashcardsPage } from './pages/FlashcardsPage'
 import { ReviewPage } from './pages/ReviewPage'
 import { JoinPage } from './pages/JoinPage'
+import { AdminCostsPage } from './pages/AdminCostsPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
 function App() {
@@ -78,6 +79,16 @@ function App() {
         element={
           <ProtectedRoute>
             <ReviewPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Spend is an operator's view, not a course's. The page checks the role itself; the
+          backend refuses a non-admin token regardless. */}
+      <Route
+        path="/admin/costs"
+        element={
+          <ProtectedRoute>
+            <AdminCostsPage />
           </ProtectedRoute>
         }
       />

@@ -17,6 +17,8 @@ import com.studyloop.backend.quiz.dto.GenerateQuizRequest;
 import com.studyloop.backend.quiz.dto.QuizResponse;
 import com.studyloop.backend.quiz.dto.QuizResponse.QuizQuestionView;
 import com.studyloop.backend.quiz.dto.QuizSummaryResponse;
+import com.studyloop.backend.usage.AiOperation;
+import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -167,7 +169,12 @@ public class QuizService {
                 LlmMessage.system(buildSystemPrompt(mcCount, saCount)),
                 LlmMessage.user("Course material:\n\n" + material));
 
-        String json = chatClient.completeJson(messages);
+        // completeJson serves four features; the scope is what tells the cost dashboard this
+        // particular call was quiz generation.
+        String json;
+        try (var ignored = AiUsageContext.of(AiOperation.QUIZ_GENERATION)) {
+            json = chatClient.completeJson(messages);
+        }
         try {
             GeneratedQuiz quiz = objectMapper.readValue(json, GeneratedQuiz.class);
             return quiz.questions() == null ? List.of() : quiz.questions();

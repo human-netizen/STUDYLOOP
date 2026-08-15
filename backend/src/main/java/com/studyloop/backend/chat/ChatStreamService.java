@@ -49,9 +49,11 @@ public class ChatStreamService {
             PreparedTurn prepared = chatService.prepare(actorId, courseId, request);
             send(emitter, "meta", new MetaEvent(prepared.conversationId(), prepared.citations()));
 
-            if (prepared.refused()) {
-                // Gate tripped: no model call — emit the canned refusal as a single delta.
-                send(emitter, "delta", new DeltaEvent(prepared.refusalText()));
+            if (prepared.isAnswered()) {
+                // The confidence gate refused, or the semantic cache already had this answer.
+                // Either way there is nothing to generate — emit the text as a single delta. The
+                // client sees the same event sequence as a generated answer, just faster.
+                send(emitter, "delta", new DeltaEvent(prepared.finalAnswer()));
                 send(emitter, "done", new DoneEvent(prepared.conversationId()));
                 emitter.complete();
                 return;
@@ -59,7 +61,7 @@ public class ChatStreamService {
 
             String answer = chatClient.streamComplete(prepared.messages(),
                     token -> send(emitter, "delta", new DeltaEvent(token)));
-            chatService.persistAssistant(prepared.conversationId(), answer);
+            chatService.completeTurn(prepared, answer);
 
             send(emitter, "done", new DoneEvent(prepared.conversationId()));
             emitter.complete();
