@@ -16,18 +16,24 @@ import com.studyloop.backend.document.DocumentStatus;
 import com.studyloop.backend.flashcard.dto.CreateFlashcardRequest;
 import com.studyloop.backend.flashcard.dto.FlashcardResponse;
 import com.studyloop.backend.flashcard.dto.GenerateFlashcardsRequest;
+import com.studyloop.backend.review.ReviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 // Builds and stores flashcards. Generation grounds the model on one document's text and asks for
 // front/back pairs as JSON (structured output). Cards can also be saved by hand (the "save this
-// Q&A as a card" flow). Cards are personal: each is owned by its creator and only they list or
-// delete them, which is what the Phase 8 SM-2 review queue will build on.
+// Q&A as a card" flow) or auto-created from a quiz question the owner got wrong. Cards are
+// personal: each is owned by its creator and only they list or delete them.
+//
+// Every card that is created here is also enrolled in the SM-2 review queue (Phase 8.1), so a
+// card is never stranded outside the schedule.
 @Service
 @RequiredArgsConstructor
 public class FlashcardService {
@@ -44,6 +50,7 @@ public class FlashcardService {
     private final DocumentChunkRepository chunkRepository;
     private final ChatClient chatClient;
     private final FlashcardRepository flashcardRepository;
+    private final ReviewService reviewService;
 
     // Generates a deck from one READY document and saves it to the caller's cards.
     @Transactional
@@ -80,7 +87,9 @@ public class FlashcardService {
             card.setFront(source.front().strip());
             card.setBack(source.back().strip());
             card.setSourceDocumentId(document.getId());
-            saved.add(flashcardRepository.save(card));
+            flashcardRepository.save(card);
+            reviewService.enroll(card);
+            saved.add(card);
         }
         flashcardRepository.flush();
         return saved.stream().map(FlashcardResponse::from).toList();
@@ -105,7 +114,55 @@ public class FlashcardService {
         card.setSourceDocumentId(request.sourceDocumentId());
         card.setSourcePage(request.sourcePage());
         flashcardRepository.saveAndFlush(card);
+        reviewService.enroll(card);
         return FlashcardResponse.from(card);
+    }
+
+    // Auto-enrols the questions a user just got wrong as flashcards (Phase 8.1) — the "your
+    // mistakes come back tomorrow" half of the loop. Called by quiz grading inside its own
+    // transaction. Idempotent: a question that already has a card for this user is skipped, so
+    // retaking a quiz and missing the same question again doesn't duplicate it. Returns the cards
+    // actually created.
+    @Transactional
+    public List<Flashcard> enrollMissedQuestions(Membership member, List<MissedQuestion> missed) {
+        if (missed.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> questionIds = missed.stream().map(MissedQuestion::questionId).toList();
+        Set<UUID> alreadyCarded = flashcardRepository
+                .findByCreatedByIdAndSourceQuizQuestionIdIn(member.getUser().getId(), questionIds)
+                .stream()
+                .map(Flashcard::getSourceQuizQuestionId)
+                .collect(Collectors.toSet());
+
+        List<Flashcard> created = new ArrayList<>();
+        for (MissedQuestion question : missed) {
+            if (alreadyCarded.contains(question.questionId()) || !question.isUsable()) {
+                continue;
+            }
+            Flashcard card = new Flashcard();
+            card.setCourseSpace(member.getCourseSpace());
+            card.setCreatedBy(member.getUser());
+            card.setFront(question.front().strip());
+            card.setBack(question.back().strip());
+            card.setSourceQuizQuestionId(question.questionId());
+            flashcardRepository.save(card);
+            reviewService.enroll(card);
+            created.add(card);
+        }
+        flashcardRepository.flush();
+        return created;
+    }
+
+    // A question the caller answered incorrectly, reduced to card shape. Lives here rather than in
+    // the quiz package so the dependency only points one way: quiz → flashcard.
+    public record MissedQuestion(UUID questionId, String front, String back) {
+
+        boolean isUsable() {
+            return questionId != null
+                    && front != null && !front.isBlank()
+                    && back != null && !back.isBlank();
+        }
     }
 
     @Transactional(readOnly = true)

@@ -9,13 +9,17 @@ import java.util.UUID;
 // The graded result of a submission. `score` of `total` is how many questions were correct; each
 // entry in `answers` pairs what the user gave with the correct answer and the explanation, so the
 // UI can render a full review. This is where the answer key is revealed (the take view hides it).
+//
+// `cardsEnrolled` is how many of the missed questions became new review cards (Phase 8.1) — zero
+// on a perfect score, and also zero on a retake where the same questions already have cards.
 public record AttemptResponse(
         UUID attemptId,
         UUID quizId,
         int score,
         int total,
         Instant createdAt,
-        List<GradedAnswer> answers
+        List<GradedAnswer> answers,
+        int cardsEnrolled
 ) {
 
     public record GradedAnswer(

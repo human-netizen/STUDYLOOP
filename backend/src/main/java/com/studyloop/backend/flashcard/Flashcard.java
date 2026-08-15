@@ -55,6 +55,12 @@ public class Flashcard {
     @Column(name = "source_page")
     private Integer sourcePage;
 
+    // Set when the card was auto-created from a quiz question the owner got wrong (Phase 8.1).
+    // A partial unique index on (created_by, source_quiz_question_id) makes that enrolment
+    // idempotent: missing the same question on a retake reuses the existing card.
+    @Column(name = "source_quiz_question_id")
+    private UUID sourceQuizQuestionId;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

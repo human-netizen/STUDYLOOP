@@ -20,6 +20,7 @@ import com.studyloop.backend.flashcard.FlashcardGenerationException;
 import com.studyloop.backend.flashcard.FlashcardNotFoundException;
 import com.studyloop.backend.flashcard.NoFlashcardMaterialException;
 import com.studyloop.backend.quiz.NoQuizMaterialException;
+import com.studyloop.backend.review.ReviewCardNotFoundException;
 import com.studyloop.backend.quiz.QuizGenerationException;
 import com.studyloop.backend.quiz.QuizNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -243,6 +244,16 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "The flashcards could not be generated. Please try again.");
         problem.setTitle("Flashcard generation failed");
+        return problem;
+    }
+
+    // Grading a card that isn't yours, or doesn't exist. Same 404 either way, so the queue
+    // can't be used to probe whether a card id belongs to someone else.
+    @ExceptionHandler(ReviewCardNotFoundException.class)
+    ProblemDetail handleReviewCardNotFound(ReviewCardNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Review card not found");
         return problem;
     }
 

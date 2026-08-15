@@ -6,6 +6,8 @@ import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
+import com.studyloop.backend.flashcard.FlashcardService;
+import com.studyloop.backend.flashcard.FlashcardService.MissedQuestion;
 import com.studyloop.backend.quiz.dto.AttemptResponse;
 import com.studyloop.backend.quiz.dto.AttemptResponse.GradedAnswer;
 import com.studyloop.backend.quiz.dto.AttemptSummaryResponse;
@@ -50,6 +52,7 @@ public class QuizGradingService {
     private final QuizAttemptRepository attemptRepository;
     private final QuizAttemptAnswerRepository answerRepository;
     private final ChatClient chatClient;
+    private final FlashcardService flashcardService;
 
     @Transactional
     public AttemptResponse submit(UUID actorId, UUID courseId, UUID quizId, SubmitAttemptRequest request) {
@@ -89,8 +92,43 @@ public class QuizGradingService {
         }
         answerRepository.flush();
 
+        // Close the loop: what you got wrong becomes a flashcard due today (Phase 8.1).
+        int enrolled = flashcardService
+                .enrollMissedQuestions(member, missedQuestions(verdicts, optionsByQuestion))
+                .size();
+
         return new AttemptResponse(attempt.getId(), quiz.getId(), score, questions.size(),
-                attempt.getCreatedAt(), graded);
+                attempt.getCreatedAt(), graded, enrolled);
+    }
+
+    // Turns each wrong verdict into card shape: the question on the front, the right answer (plus
+    // the explanation, when the generator gave one) on the back.
+    private List<MissedQuestion> missedQuestions(List<Verdict> verdicts,
+                                                 Map<UUID, List<String>> optionsByQuestion) {
+        List<MissedQuestion> missed = new ArrayList<>();
+        for (Verdict verdict : verdicts) {
+            if (verdict.correct()) {
+                continue;
+            }
+            QuizQuestion question = verdict.question();
+            String answer = question.getType() == QuestionType.MULTIPLE_CHOICE
+                    ? correctOptionText(question, optionsByQuestion)
+                    : question.getExpectedAnswer();
+            if (answer == null || answer.isBlank()) {
+                continue;
+            }
+            String back = question.getExplanation() == null || question.getExplanation().isBlank()
+                    ? answer
+                    : answer + "\n\n" + question.getExplanation();
+            missed.add(new MissedQuestion(question.getId(), question.getPrompt(), back));
+        }
+        return missed;
+    }
+
+    private static String correctOptionText(QuizQuestion question, Map<UUID, List<String>> optionsByQuestion) {
+        List<String> options = optionsByQuestion.getOrDefault(question.getId(), List.of());
+        Integer index = question.getCorrectOptionIndex();
+        return index != null && index >= 0 && index < options.size() ? options.get(index) : null;
     }
 
     @Transactional(readOnly = true)
