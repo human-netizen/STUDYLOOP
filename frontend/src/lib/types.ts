@@ -90,6 +90,23 @@ export interface DocumentResponse {
   updatedAt: string
 }
 
+// One entry in a document's auto-generated glossary.
+export interface GlossaryTerm {
+  term: string
+  definition: string
+}
+
+// A document's cached AI summary. `summary` is null and `terms` empty when it hasn't been
+// generated yet — an ordinary state, not an error.
+export interface DocumentSummary {
+  documentId: string
+  filename: string
+  status: DocumentStatus
+  summary: string | null
+  terms: GlossaryTerm[]
+  generatedAt: string | null
+}
+
 // --- Chat (com.studyloop.backend.chat.dto) ---
 
 // One numbered source an answer was grounded on. `index` is the [n] marker the model writes

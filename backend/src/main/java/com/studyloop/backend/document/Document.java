@@ -73,6 +73,15 @@ public class Document {
     @Column(name = "error_message", length = 500)
     private String errorMessage;
 
+    // Cached AI summary (Phase 8.2), generated once after the document reaches READY. Null
+    // until then — and it stays null if generation fails, which is not an ingestion failure.
+    @Column(columnDefinition = "text")
+    private String summary;
+
+    // When the cached summary + glossary were produced; null while `summary` is null.
+    @Column(name = "summary_generated_at")
+    private Instant summaryGeneratedAt;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "uploaded_by", nullable = false)
     private User uploadedBy;

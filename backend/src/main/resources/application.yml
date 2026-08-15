@@ -88,6 +88,11 @@ studyloop:
     # real question in novel wording isn't refused, while off-topic queries stay well under it.
     # Tune per corpus; set to 0 to disable. Override with CHAT_MIN_SIMILARITY.
     min-similarity: ${CHAT_MIN_SIMILARITY:0.25}
+  summary:
+    # Phase 8.2: after a document reaches READY, generate its summary + glossary once and cache
+    # them. Costs one chat call per document, never repeated. Set false (SUMMARY_AUTO_GENERATE)
+    # to keep bulk imports off the provider — POST /documents/{id}/summary still works on demand.
+    auto-generate: ${SUMMARY_AUTO_GENERATE:true}
 
 management:
   endpoints:

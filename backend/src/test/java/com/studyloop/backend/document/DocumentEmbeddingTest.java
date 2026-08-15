@@ -14,11 +14,8 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
@@ -27,7 +24,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,16 +34,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Verifies the embedding step writes a vector into the pgvector column for every chunk, using
-// a stub EmbeddingClient (no real API key needed, so this runs in CI). The @Import gives this
-// class its own context; that's a deliberate second context, kept within the pooler budget.
+// Verifies the embedding step writes a vector into the pgvector column for every chunk, using a
+// stub EmbeddingClient (no real API key needed, so this runs in CI). StubAiConfig is shared with
+// the other document tests so all three run in one cached context — see the note there about the
+// pooler's client budget.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
-@Import(DocumentEmbeddingTest.StubEmbeddingConfig.class)
+@Import(StubAiConfig.class)
 class DocumentEmbeddingTest {
-
-    private static final int DIMENSIONS = 768;
 
     @Autowired
     private MockMvc mockMvc;
@@ -144,33 +139,6 @@ class DocumentEmbeddingTest {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             document.save(out);
             return out.toByteArray();
-        }
-    }
-
-    // Deterministic, non-zero 768-dim vectors — enough to exercise storage without a real API.
-    @TestConfiguration
-    static class StubEmbeddingConfig {
-
-        @Bean
-        @Primary
-        EmbeddingClient stubEmbeddingClient() {
-            return new EmbeddingClient() {
-                @Override
-                public boolean isConfigured() {
-                    return true;
-                }
-
-                @Override
-                public List<float[]> embed(List<String> texts) {
-                    return texts.stream().map(text -> {
-                        float[] vector = new float[DIMENSIONS];
-                        for (int i = 0; i < DIMENSIONS; i++) {
-                            vector[i] = 0.001f * (((text.length() + i) % 7) + 1);
-                        }
-                        return vector;
-                    }).toList();
-                }
-            };
         }
     }
 }

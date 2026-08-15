@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, coursesApi, documentsApi } from '../lib/api'
-import type { CourseResponse, DocumentResponse, DocumentStatus } from '../lib/types'
+import type {
+  CourseResponse,
+  DocumentResponse,
+  DocumentStatus,
+  DocumentSummary,
+} from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import {
+  Button,
   Empty,
   ErrorText,
+  Eyebrow,
   Loading,
   Meta,
   PageTitle,
@@ -120,7 +127,7 @@ export function CourseDetailPage() {
             ) : (
               <Rows>
                 {documents.map((doc) => (
-                  <DocumentRow key={doc.id} document={doc} />
+                  <DocumentRow key={doc.id} courseId={id} document={doc} />
                 ))}
               </Rows>
             )}
@@ -214,22 +221,171 @@ function UploadDropzone({
   )
 }
 
-function DocumentRow({ document }: { document: DocumentResponse }) {
-  return (
-    <Row className="flex items-center justify-between gap-4 px-5 py-4">
-      <div className="min-w-0">
-        <p className="m-0 truncate font-mono text-[13px] text-ink">{document.filename}</p>
-        <Meta>
-          {formatBytes(document.sizeBytes)}
-          {document.pageCount != null && ` · ${document.pageCount} pages`}
-        </Meta>
-        {document.status === 'FAILED' && document.errorMessage && (
-          <p className="m-0 mt-1 text-[12px] text-bad">{document.errorMessage}</p>
+// A document row that opens to reveal what the document is about. Once ingested, the backend
+// has already written a summary and glossary, so this is a read of cached text rather than a
+// generation — but it's fetched lazily on first open, so a course with thirty documents doesn't
+// fire thirty requests just to render the list.
+function DocumentRow({ courseId, document }: { courseId: string; document: DocumentResponse }) {
+  const [open, setOpen] = useState(false)
+  const [summary, setSummary] = useState<DocumentSummary | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const fetched = useRef(false)
+
+  const expandable = document.status === 'READY'
+
+  useEffect(() => {
+    if (!open || fetched.current) return
+    fetched.current = true
+    let active = true
+    setLoading(true)
+    documentsApi
+      .summary(courseId, document.id)
+      .then((data) => {
+        if (active) setSummary(data)
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof ApiError ? err.message : 'Could not load the summary.')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [open, courseId, document.id])
+
+  async function generate(refresh: boolean) {
+    setError(null)
+    setGenerating(true)
+    try {
+      setSummary(await documentsApi.generateSummary(courseId, document.id, refresh))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not generate a summary.')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const header = (
+    <div className="flex items-center justify-between gap-4 px-5 py-4">
+      <div className="flex min-w-0 items-center gap-3">
+        {expandable && (
+          <span
+            aria-hidden
+            className={cx(
+              'font-mono text-[10px] text-ink-muted transition-transform duration-150',
+              open && 'rotate-90',
+            )}
+          >
+            ▶
+          </span>
         )}
+        <div className="min-w-0">
+          <p className="m-0 truncate font-mono text-[13px] text-ink">{document.filename}</p>
+          <Meta>
+            {formatBytes(document.sizeBytes)}
+            {document.pageCount != null && ` · ${document.pageCount} pages`}
+          </Meta>
+          {document.status === 'FAILED' && document.errorMessage && (
+            <p className="m-0 mt-1 text-[12px] text-bad">{document.errorMessage}</p>
+          )}
+        </div>
       </div>
       <StatusBadge status={document.status} />
+    </div>
+  )
+
+  return (
+    <Row interactive={expandable}>
+      {expandable ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="block w-full cursor-pointer border-0 bg-transparent p-0 text-left"
+        >
+          {header}
+        </button>
+      ) : (
+        header
+      )}
+
+      {open && (
+        <div className="border-t border-line-soft bg-ground-2 px-5 py-5">
+          {loading && <Loading>Reading the summary</Loading>}
+          {error && <ErrorText className="mb-3">{error}</ErrorText>}
+
+          {summary && !loading && (
+            <>
+              {summary.summary ? (
+                <>
+                  <Eyebrow className="mb-1.5">Summary</Eyebrow>
+                  <p className="m-0 max-w-[70ch] text-sm leading-relaxed text-ink-2">
+                    {summary.summary}
+                  </p>
+
+                  {summary.terms.length > 0 && (
+                    <>
+                      <Eyebrow className="mt-6 mb-2">Key terms</Eyebrow>
+                      <dl className="m-0 grid gap-x-6 gap-y-2.5 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+                        {summary.terms.map((entry) => (
+                          <div key={entry.term} className="contents">
+                            <dt className="m-0 font-mono text-[12px] text-ink">{entry.term}</dt>
+                            <dd className="m-0 mb-2 text-[13px] text-ink-2 sm:mb-0">
+                              {entry.definition}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </>
+                  )}
+
+                  <div className="mt-5 flex items-center gap-4 border-t border-line-soft pt-3">
+                    <Meta>generated {formatWhen(summary.generatedAt)}</Meta>
+                    <Button
+                      variant="quiet"
+                      onClick={() => void generate(true)}
+                      disabled={generating}
+                      className="ml-auto"
+                    >
+                      {generating ? 'Regenerating…' : 'Regenerate'}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                // Ordinary for anything ingested before this feature existed, or whose
+                // generation failed while the provider was down.
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="m-0 text-sm text-ink-muted">
+                    No summary for this document yet.
+                  </p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => void generate(false)}
+                    disabled={generating}
+                  >
+                    {generating ? 'Summarizing…' : 'Summarize it'}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </Row>
   )
+}
+
+function formatWhen(iso: string | null): string {
+  if (!iso) return 'just now'
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 function StatusBadge({ status }: { status: DocumentStatus }) {

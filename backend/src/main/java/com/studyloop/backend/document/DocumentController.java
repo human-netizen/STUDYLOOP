@@ -3,6 +3,7 @@ package com.studyloop.backend.document;
 import com.studyloop.backend.document.DocumentService.DocumentContent;
 import com.studyloop.backend.document.DocumentService.UploadOutcome;
 import com.studyloop.backend.document.dto.DocumentResponse;
+import com.studyloop.backend.document.dto.DocumentSummaryResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -27,6 +28,7 @@ import java.util.UUID;
 public class DocumentController {
 
     private final DocumentService documentService;
+    private final DocumentSummaryService summaryService;
 
     // Upload a course document for ingestion. A new file → 202 Accepted (the pipeline runs
     // asynchronously); an already-ingested identical file → 200 OK with the existing record.
@@ -52,6 +54,28 @@ public class DocumentController {
                                    @PathVariable UUID courseId,
                                    @PathVariable UUID documentId) {
         return documentService.getOne(UUID.fromString(authentication.getName()), courseId, documentId);
+    }
+
+    // The cached AI summary + glossary (Phase 8.2). Cheap: it reads what ingestion already
+    // generated and never calls the model, so `summary` is null for a document that hasn't been
+    // summarized yet — the client offers generation rather than treating that as an error.
+    @GetMapping("/{documentId}/summary")
+    public DocumentSummaryResponse summary(Authentication authentication,
+                                           @PathVariable UUID courseId,
+                                           @PathVariable UUID documentId) {
+        return summaryService.get(UUID.fromString(authentication.getName()), courseId, documentId);
+    }
+
+    // Generates the summary on demand — for documents ingested before the feature existed, or
+    // whose generation failed. Idempotent: returns the cached summary untouched unless
+    // ?refresh=true, so a double-click costs one model call, not two.
+    @PostMapping("/{documentId}/summary")
+    public DocumentSummaryResponse generateSummary(Authentication authentication,
+                                                   @PathVariable UUID courseId,
+                                                   @PathVariable UUID documentId,
+                                                   @RequestParam(defaultValue = "false") boolean refresh) {
+        return summaryService.generateFor(
+                UUID.fromString(authentication.getName()), courseId, documentId, refresh);
     }
 
     // Streams the stored PDF bytes inline so the citation viewer can render the source. Served

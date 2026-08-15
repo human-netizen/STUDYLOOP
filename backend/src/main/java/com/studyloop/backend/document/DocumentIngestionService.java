@@ -1,6 +1,9 @@
 package com.studyloop.backend.document;
 
+import com.studyloop.backend.config.SummaryProperties;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -14,6 +17,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DocumentIngestionService {
 
+    private static final Logger log = LoggerFactory.getLogger(DocumentIngestionService.class);
+
     private final DocumentRepository documentRepository;
     private final DocumentStorageService storageService;
     private final DocumentStatusService statusService;
@@ -21,15 +26,17 @@ public class DocumentIngestionService {
     private final TextChunker textChunker;
     private final DocumentChunkService chunkService;
     private final DocumentEmbeddingService embeddingService;
+    private final DocumentSummaryService summaryService;
+    private final SummaryProperties summaryProperties;
 
     public void ingest(UUID documentId) {
-        String storagePath = documentRepository.findById(documentId)
-                .map(Document::getStoragePath)
-                .orElse(null);
-        if (storagePath == null) {
+        Document document = documentRepository.findById(documentId).orElse(null);
+        if (document == null) {
             // The document was removed (e.g. its course was deleted) before ingestion ran.
             return;
         }
+        String storagePath = document.getStoragePath();
+        UUID courseId = document.getCourseSpace().getId();
 
         try {
             statusService.markStatus(documentId, DocumentStatus.EXTRACTING);
@@ -46,6 +53,26 @@ public class DocumentIngestionService {
             statusService.markStatus(documentId, DocumentStatus.READY);
         } catch (Exception e) {
             statusService.markFailed(documentId, e.getMessage());
+            return;
+        }
+
+        summarizeQuietly(courseId, documentId);
+    }
+
+    // Phase 8.2, deliberately after READY and deliberately swallowing its failure: the summary is
+    // a convenience built on top of a document that is already fully usable for chat, quizzes and
+    // flashcards. A provider outage must not retroactively mark that document FAILED. The summary
+    // stays null and any member can trigger generation later from the document view.
+    private void summarizeQuietly(UUID courseId, UUID documentId) {
+        if (!summaryProperties.autoGenerate()) {
+            return;
+        }
+        try {
+            if (summaryService.generate(courseId, documentId, false)) {
+                log.info("Summarized document {}", documentId);
+            }
+        } catch (Exception e) {
+            log.warn("Could not summarize document {}: {}", documentId, e.getMessage());
         }
     }
 }

@@ -15,6 +15,8 @@ import com.studyloop.backend.chat.ChatException;
 import com.studyloop.backend.document.DocumentNotFoundException;
 import com.studyloop.backend.document.DocumentStorageException;
 import com.studyloop.backend.document.EmptyDocumentException;
+import com.studyloop.backend.document.NoSummaryMaterialException;
+import com.studyloop.backend.document.SummaryGenerationException;
 import com.studyloop.backend.document.UnsupportedDocumentTypeException;
 import com.studyloop.backend.flashcard.FlashcardGenerationException;
 import com.studyloop.backend.flashcard.FlashcardNotFoundException;
@@ -164,6 +166,24 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.CONTENT_TOO_LARGE, "The uploaded file is too large.");
         problem.setTitle("Upload too large");
+        return problem;
+    }
+
+    // Asked for a summary of a document with no ingested text yet → 400. Wait for READY.
+    @ExceptionHandler(NoSummaryMaterialException.class)
+    ProblemDetail handleNoSummaryMaterial(NoSummaryMaterialException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Nothing to summarize");
+        return problem;
+    }
+
+    // The model was unreachable or returned something unusable → 502, as with chat and quizzes.
+    @ExceptionHandler(SummaryGenerationException.class)
+    ProblemDetail handleSummaryGeneration(SummaryGenerationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_GATEWAY, "The summary could not be generated. Please try again.");
+        problem.setTitle("Summary unavailable");
         return problem;
     }
 

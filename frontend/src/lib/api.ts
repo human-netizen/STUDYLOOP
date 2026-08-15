@@ -7,6 +7,7 @@ import type {
   CreateCourseRequest,
   CreateFlashcardRequest,
   DocumentResponse,
+  DocumentSummary,
   Flashcard,
   GenerateFlashcardsRequest,
   GenerateQuizRequest,
@@ -164,6 +165,19 @@ export const documentsApi = {
     form.append('file', file)
     return upload<DocumentResponse>(`/courses/${courseId}/documents`, form)
   },
+  // The cached summary + glossary. Cheap — it never triggers generation, so `summary` comes
+  // back null for a document that hasn't been summarized yet.
+  summary: (courseId: string, documentId: string) =>
+    request<DocumentSummary>(`/courses/${courseId}/documents/${documentId}/summary`, {
+      auth: true,
+    }),
+  // Generates it on demand. Idempotent unless `refresh` is set, so this is safe to call for a
+  // document whose summary may already exist.
+  generateSummary: (courseId: string, documentId: string, refresh = false) =>
+    request<DocumentSummary>(
+      `/courses/${courseId}/documents/${documentId}/summary${refresh ? '?refresh=true' : ''}`,
+      { method: 'POST', auth: true },
+    ),
   // Fetches the raw PDF bytes (auth-guarded) as a Blob for client-side rendering. Same
   // single-retry-on-401 refresh as the JSON calls; the caller turns it into an object URL.
   async fileBlob(courseId: string, documentId: string): Promise<Blob> {
