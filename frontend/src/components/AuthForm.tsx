@@ -1,22 +1,57 @@
 import type { ReactNode } from 'react'
+import { Eyebrow, Field, Input } from './ui'
+import { cx } from '../lib/style'
 
-// Shared chrome for the login and register pages: a centered card, labelled inputs, and a
-// primary submit button — so both pages stay small and look identical.
+// Sign-in and sign-up share this frame: a raised slab on the left carrying the wordmark, the
+// form on the page ground to its right. Below 1024px the slab collapses into a header strip
+// so the form still opens at the top of a phone screen.
+//
+// The slab is the one place the ambient warm key light appears — a low-alpha radial behind
+// the wordmark (.warm-key), which is why the type reads as lit rather than as flat fill.
 
-export function AuthShell({ title, children }: { title: string; children: ReactNode }) {
+export function AuthShell({
+  title,
+  intro,
+  children,
+  footer,
+}: {
+  title: string
+  intro: string
+  children: ReactNode
+  footer: ReactNode
+}) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h1 className="mb-6 text-center text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          {title}
-        </h1>
-        {children}
-      </div>
+    <div className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      <aside className="warm-key flex flex-col justify-between gap-8 border-b border-line bg-surface px-6 py-10 sm:px-10 lg:border-r lg:border-b-0 lg:px-14 lg:py-14">
+        <div>
+          <Eyebrow>StudyLoop</Eyebrow>
+          <p className="mt-6 mb-0 font-display text-[clamp(40px,6vw,72px)] leading-[0.92] font-bold tracking-[-0.04em] text-ink">
+            Your
+            <br />
+            materials,
+            <br />
+            <span className="text-accent">answering back.</span>
+          </p>
+        </div>
+        <p className="m-0 max-w-[34ch] text-sm text-ink-2">
+          Upload a course's PDFs, then ask them questions, generate quizzes from them, and
+          drill the answers as flashcards — every answer cites the page it came from.
+        </p>
+      </aside>
+
+      <main className="flex items-center px-6 py-12 sm:px-10 lg:px-14">
+        <div className="w-full max-w-[27rem]">
+          <h1 className="m-0 text-[32px] leading-[1.05] tracking-[-0.03em]">{title}</h1>
+          <p className="mt-2 mb-8 text-sm text-ink-muted">{intro}</p>
+          {children}
+          <div className="mt-8 border-t border-line pt-5 text-sm text-ink-muted">{footer}</div>
+        </div>
+      </main>
     </div>
   )
 }
 
-export function Field({
+export function AuthField({
   label,
   type,
   value,
@@ -30,26 +65,37 @@ export function Field({
   autoComplete?: string
 }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium text-slate-700 dark:text-slate-300">{label}</span>
-      <input
+    <Field label={label}>
+      <Input
         type={type}
         value={value}
         autoComplete={autoComplete}
-        onChange={(event) => onChange(event.target.value)}
         required
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:ring-indigo-900"
+        onChange={(event) => onChange(event.target.value)}
       />
-    </label>
+    </Field>
   )
 }
 
-export function SubmitButton({ submitting, children }: { submitting: boolean; children: ReactNode }) {
+// Full-width accent submit — the one saturated element on the page.
+export function SubmitButton({
+  submitting,
+  children,
+  className,
+}: {
+  submitting: boolean
+  children: ReactNode
+  className?: string
+}) {
   return (
     <button
       type="submit"
       disabled={submitting}
-      className="mt-2 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+      className={cx(
+        'mt-2 w-full rounded-ctl border border-accent-deep bg-accent px-4 py-2.5 text-sm font-medium text-on-accent',
+        'transition duration-150 hover:brightness-105 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45',
+        className,
+      )}
     >
       {submitting ? 'Please wait…' : children}
     </button>

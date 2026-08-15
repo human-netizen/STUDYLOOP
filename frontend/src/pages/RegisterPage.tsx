@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { ApiError } from '../lib/api'
-import { AuthShell, Field, SubmitButton } from '../components/AuthForm'
+import { AuthField, AuthShell, SubmitButton } from '../components/AuthForm'
+import { ErrorText } from '../components/ui'
 
 export function RegisterPage() {
   const { register } = useAuth()
@@ -34,26 +35,31 @@ export function RegisterPage() {
   }
 
   return (
-    <AuthShell title="Create your account">
+    <AuthShell
+      title="Create your account"
+      intro="Takes a minute. No card, no email confirmation."
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link to="/login" className="font-medium text-ink underline decoration-accent underline-offset-4">
+            Sign in
+          </Link>
+        </>
+      }
+    >
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <Field label="Name" type="text" value={displayName} onChange={setDisplayName} autoComplete="name" />
-        <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
-        <Field
+        <AuthField label="Name" type="text" value={displayName} onChange={setDisplayName} autoComplete="name" />
+        <AuthField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
+        <AuthField
           label="Password"
           type="password"
           value={password}
           onChange={setPassword}
           autoComplete="new-password"
         />
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <ErrorText>{error}</ErrorText>}
         <SubmitButton submitting={submitting}>Create account</SubmitButton>
       </form>
-      <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-        Already have an account?{' '}
-        <Link to="/login" className="font-medium text-indigo-600 hover:underline dark:text-indigo-400">
-          Sign in
-        </Link>
-      </p>
     </AuthShell>
   )
 }

@@ -1,8 +1,24 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { ApiError, coursesApi, documentsApi, flashcardsApi } from '../lib/api'
 import type { CourseResponse, DocumentResponse, Flashcard } from '../lib/types'
-import { AppHeader } from '../components/AppHeader'
+import { AppShell } from '../components/AppShell'
+import {
+  Button,
+  Empty,
+  ErrorText,
+  Eyebrow,
+  Field,
+  Input,
+  Loading,
+  Meta,
+  NumberField,
+  PageTitle,
+  Panel,
+  SectionHead,
+  Select,
+} from '../components/ui'
+import { cx } from '../lib/style'
 
 // A member's personal flashcards for a course: generate a deck from one ready document, add a
 // card by hand, flip cards to study, and delete. Cards are private to the signed-in user.
@@ -51,45 +67,45 @@ export function FlashcardsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <AppHeader />
-      <main className="mx-auto max-w-4xl px-6 py-10">
-        <Link to={`/courses/${id}`} className="text-sm text-slate-500 hover:underline dark:text-slate-400">
-          ← {course ? course.name : 'Course'}
-        </Link>
+    <AppShell courseName={course?.name}>
+      <PageTitle
+        eyebrow={course?.name ?? 'Course'}
+        title="Flashcards"
+        sub="Private to you. Click a card to flip it."
+      />
 
-        <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          Flashcards
-        </h1>
+      {loading && <Loading />}
+      {error && <ErrorText>{error}</ErrorText>}
 
-        {loading && <p className="mt-6 text-slate-500 dark:text-slate-400">Loading…</p>}
-        {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
-
-        {!loading && (
-          <>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
+      {!loading && (
+        <>
+          <section className="mb-14">
+            <SectionHead index="01 · New" title="Build your deck" />
+            <div className="grid gap-4 lg:grid-cols-2">
               <GenerateDeck courseId={id} documents={documents} onGenerated={prepend} />
               <AddCard courseId={id} onAdded={(card) => prepend([card])} />
             </div>
+          </section>
 
-            <h2 className="mt-10 mb-4 text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-              Your cards ({cards.length})
-            </h2>
+          <section>
+            <SectionHead
+              index="02 · Deck"
+              title="Your cards"
+              description={cards.length > 0 ? `${cards.length} saved` : undefined}
+            />
             {cards.length === 0 ? (
-              <p className="text-slate-500 dark:text-slate-400">
-                No cards yet — generate a deck or add one above. Click a card to flip it.
-              </p>
+              <Empty>No cards yet — generate a deck, add one by hand, or save an answer from chat.</Empty>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 {cards.map((card) => (
-                  <FlashcardCard key={card.id} card={card} onDelete={() => void remove(card.id)} />
+                  <FlashcardTile key={card.id} card={card} onDelete={() => void remove(card.id)} />
                 ))}
               </div>
             )}
-          </>
-        )}
-      </main>
-    </div>
+          </section>
+        </>
+      )}
+    </AppShell>
   )
 }
 
@@ -127,57 +143,47 @@ function GenerateDeck({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-      <p className="font-medium text-slate-800 dark:text-slate-100">Generate from a document</p>
+    <Panel className="flex flex-col gap-4">
+      <div>
+        <Eyebrow>From a document</Eyebrow>
+        <h3 className="mt-1 mb-0 text-[17px] tracking-[-0.015em]">Generate a deck</h3>
+      </div>
+
       {documents.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-400">
-          No ready documents yet — upload and ingest a PDF first.
-        </p>
+        <Meta>No ready documents yet — upload and ingest a PDF first.</Meta>
       ) : (
         <>
-          <div className="mt-4 flex flex-col gap-3">
-            <select
+          <Field label="Document">
+            <Select
               value={documentId}
               disabled={generating}
+              className="font-mono text-[12.5px]"
               onChange={(event) => setDocumentId(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             >
               {documents.map((doc) => (
                 <option key={doc.id} value={doc.id}>
                   {doc.filename}
                 </option>
               ))}
-            </select>
-            <div className="flex items-end gap-3">
-              <label className="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                Cards
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={count}
-                  disabled={generating}
-                  onChange={(event) => {
-                    const next = Number(event.target.value)
-                    setCount(Number.isFinite(next) ? Math.min(30, Math.max(1, next)) : 1)
-                  }}
-                  className="w-24 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => void generate()}
-                disabled={generating}
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
-              >
-                {generating ? 'Generating…' : 'Generate'}
-              </button>
-            </div>
+            </Select>
+          </Field>
+          <div className="flex items-end gap-3">
+            <NumberField
+              label="Cards"
+              value={count}
+              min={1}
+              max={30}
+              disabled={generating}
+              onChange={setCount}
+            />
+            <Button variant="primary" onClick={() => void generate()} disabled={generating}>
+              {generating ? 'Generating…' : 'Generate'}
+            </Button>
           </div>
-          {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+          {error && <ErrorText>{error}</ErrorText>}
         </>
       )}
-    </div>
+    </Panel>
   )
 }
 
@@ -204,58 +210,70 @@ function AddCard({ courseId, onAdded }: { courseId: string; onAdded: (card: Flas
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-      <p className="font-medium text-slate-800 dark:text-slate-100">Add a card</p>
-      <div className="mt-4 flex flex-col gap-3">
-        <input
+    <Panel className="flex flex-col gap-4">
+      <div>
+        <Eyebrow>By hand</Eyebrow>
+        <h3 className="mt-1 mb-0 text-[17px] tracking-[-0.015em]">Add a card</h3>
+      </div>
+      <Field label="Front">
+        <Input
           value={front}
           disabled={saving}
           onChange={(event) => setFront(event.target.value)}
-          placeholder="Front (question or term)"
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          placeholder="Question or term"
         />
-        <input
+      </Field>
+      <Field label="Back">
+        <Input
           value={back}
           disabled={saving}
           onChange={(event) => setBack(event.target.value)}
-          placeholder="Back (answer or definition)"
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          placeholder="Answer or definition"
         />
-        <button
-          type="button"
-          onClick={() => void add()}
-          disabled={saving || !front.trim() || !back.trim()}
-          className="self-start rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
-        >
-          {saving ? 'Saving…' : 'Add card'}
-        </button>
-      </div>
-      {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
-    </div>
+      </Field>
+      <Button
+        variant="primary"
+        onClick={() => void add()}
+        disabled={saving || !front.trim() || !back.trim()}
+        className="self-start"
+      >
+        {saving ? 'Saving…' : 'Add card'}
+      </Button>
+      {error && <ErrorText>{error}</ErrorText>}
+    </Panel>
   )
 }
 
-function FlashcardCard({ card, onDelete }: { card: Flashcard; onDelete: () => void }) {
+// A real 3D flip. The delete control sits outside the rotating element — otherwise it would
+// turn with the card and end up mirrored on the back.
+function FlashcardTile({ card, onDelete }: { card: Flashcard; onDelete: () => void }) {
   const [flipped, setFlipped] = useState(false)
+
+  const face =
+    'flip-face absolute inset-0 flex flex-col gap-2 rounded-card border border-line p-5 text-left'
+
   return (
-    <div className="group relative rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+    <div className="flip-scene group relative h-44">
       <button
         type="button"
+        aria-label={flipped ? 'Show front' : 'Show back'}
         onClick={() => setFlipped((value) => !value)}
-        className="flex min-h-28 w-full flex-col justify-center gap-1 px-5 py-6 text-left"
+        className={cx('flip-card h-full w-full cursor-pointer border-0 bg-transparent p-0', flipped && 'is-flipped')}
       >
-        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-          {flipped ? 'Back' : 'Front'}
+        <span className={cx(face, 'bg-surface shadow-card')}>
+          <Eyebrow>Front</Eyebrow>
+          <span className="overflow-y-auto text-sm text-ink">{card.front}</span>
         </span>
-        <span className="text-sm text-slate-800 dark:text-slate-100">
-          {flipped ? card.back : card.front}
+        <span className={cx(face, 'flip-face-back bg-surface-2 shadow-card')}>
+          <Eyebrow>Back</Eyebrow>
+          <span className="overflow-y-auto text-sm text-ink">{card.back}</span>
         </span>
       </button>
       <button
         type="button"
         onClick={onDelete}
         aria-label="Delete card"
-        className="absolute right-2 top-2 rounded-md px-2 py-1 text-xs text-slate-400 opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+        className="absolute top-2 right-2 z-10 cursor-pointer rounded-ctl border-0 bg-transparent px-2 py-1 font-mono text-[10.5px] tracking-[0.06em] text-ink-muted uppercase opacity-0 transition duration-150 group-focus-within:opacity-100 group-hover:opacity-100 hover:text-bad"
       >
         Delete
       </button>

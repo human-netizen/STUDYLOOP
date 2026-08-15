@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { ApiError } from '../lib/api'
-import { AuthShell, Field, SubmitButton } from '../components/AuthForm'
+import { AuthField, AuthShell, SubmitButton } from '../components/AuthForm'
+import { ErrorText } from '../components/ui'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -28,25 +29,30 @@ export function LoginPage() {
   }
 
   return (
-    <AuthShell title="Sign in to StudyLoop">
+    <AuthShell
+      title="Sign in"
+      intro="Pick up where you left off."
+      footer={
+        <>
+          No account?{' '}
+          <Link to="/register" className="font-medium text-ink underline decoration-accent underline-offset-4">
+            Create one
+          </Link>
+        </>
+      }
+    >
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
-        <Field
+        <AuthField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
+        <AuthField
           label="Password"
           type="password"
           value={password}
           onChange={setPassword}
           autoComplete="current-password"
         />
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <ErrorText>{error}</ErrorText>}
         <SubmitButton submitting={submitting}>Sign in</SubmitButton>
       </form>
-      <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-        No account?{' '}
-        <Link to="/register" className="font-medium text-indigo-600 hover:underline dark:text-indigo-400">
-          Create one
-        </Link>
-      </p>
     </AuthShell>
   )
 }

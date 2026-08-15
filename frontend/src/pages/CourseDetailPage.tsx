@@ -2,7 +2,19 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, coursesApi, documentsApi } from '../lib/api'
 import type { CourseResponse, DocumentResponse, DocumentStatus } from '../lib/types'
-import { AppHeader } from '../components/AppHeader'
+import { AppShell } from '../components/AppShell'
+import {
+  Empty,
+  ErrorText,
+  Loading,
+  Meta,
+  PageTitle,
+  Pill,
+  Row,
+  Rows,
+  SectionHead,
+} from '../components/ui'
+import { cx, linkButton } from '../lib/style'
 
 // Statuses that are still moving through the pipeline — while any document sits in one of
 // these, we re-poll the list so the UI tracks it to READY/FAILED.
@@ -64,75 +76,58 @@ export function CourseDetailPage() {
     })
   }, [])
 
+  const readyCount = documents.filter((doc) => doc.status === 'READY').length
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <AppHeader />
-      <main className="mx-auto max-w-3xl px-6 py-10">
-        <Link
-          to="/"
-          className="text-sm text-slate-500 hover:underline dark:text-slate-400"
-        >
-          ← Your courses
-        </Link>
+    <AppShell courseName={course?.name}>
+      {loading && <Loading />}
+      {error && <ErrorText>{error}</ErrorText>}
 
-        {loading && <p className="mt-6 text-slate-500 dark:text-slate-400">Loading…</p>}
-        {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
+      {course && (
+        <>
+          <PageTitle
+            eyebrow={course.myRole}
+            title={course.name}
+            sub={course.description}
+            action={
+              <Link to={`/courses/${id}/chat`} className={cx(linkButton('primary'), 'no-underline')}>
+                Ask this course
+              </Link>
+            }
+          />
 
-        {course && (
-          <>
-            <div className="mt-4 flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-                  {course.name}
-                </h1>
-                {course.description && (
-                  <p className="mt-1 text-slate-500 dark:text-slate-400">{course.description}</p>
-                )}
-              </div>
-              <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                <Link
-                  to={`/courses/${id}/quizzes`}
-                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Quizzes
-                </Link>
-                <Link
-                  to={`/courses/${id}/flashcards`}
-                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Flashcards
-                </Link>
-                <Link
-                  to={`/courses/${id}/chat`}
-                  className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
-                >
-                  Ask this course
-                </Link>
-              </div>
-            </div>
+          <section className="mb-14">
+            <SectionHead
+              index="01 · Materials"
+              title="Add a PDF"
+              description="Uploads are extracted, chunked and embedded before they can be asked about."
+            />
+            <UploadDropzone courseId={id} onUploaded={mergeDocument} />
+          </section>
 
-            <div className="mt-8">
-              <UploadDropzone courseId={id} onUploaded={mergeDocument} />
-            </div>
-
-            <h2 className="mt-10 mb-4 text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-              Documents
-            </h2>
+          <section>
+            <SectionHead
+              index="02 · Library"
+              title="Documents"
+              description={
+                documents.length > 0
+                  ? `${readyCount} of ${documents.length} ready to answer questions`
+                  : undefined
+              }
+            />
             {documents.length === 0 ? (
-              <p className="text-slate-500 dark:text-slate-400">
-                No documents yet — upload a PDF above to get started.
-              </p>
+              <Empty>Nothing here yet — drop a PDF above to get started.</Empty>
             ) : (
-              <ul className="flex flex-col gap-3">
+              <Rows>
                 {documents.map((doc) => (
                   <DocumentRow key={doc.id} document={doc} />
                 ))}
-              </ul>
+              </Rows>
             )}
-          </>
-        )}
-      </main>
-    </div>
+          </section>
+        </>
+      )}
+    </AppShell>
   )
 }
 
@@ -190,18 +185,18 @@ function UploadDropzone({
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={[
-          'flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition',
+        className={cx(
+          'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-card border border-dashed px-6 py-12 text-center transition duration-150',
           dragging
-            ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30'
-            : 'border-slate-300 bg-white hover:border-indigo-400 dark:border-slate-700 dark:bg-slate-900',
-          uploading ? 'pointer-events-none opacity-60' : '',
-        ].join(' ')}
+            ? 'border-accent bg-surface-2'
+            : 'border-line bg-surface hover:border-line-strong',
+          uploading && 'pointer-events-none opacity-60',
+        )}
       >
-        <p className="font-medium text-slate-700 dark:text-slate-200">
-          {uploading ? 'Uploading…' : 'Drop a PDF here, or click to browse'}
+        <p className="m-0 font-display text-[17px] font-bold tracking-[-0.015em] text-ink">
+          {uploading ? 'Uploading…' : 'Drop a PDF here'}
         </p>
-        <p className="mt-1 text-xs text-slate-400">PDF up to 25 MB</p>
+        <Meta>or click to browse · PDF up to 25 MB</Meta>
       </div>
       <input
         ref={inputRef}
@@ -214,50 +209,38 @@ function UploadDropzone({
           event.target.value = ''
         }}
       />
-      {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+      {error && <ErrorText className="mt-3">{error}</ErrorText>}
     </div>
   )
 }
 
 function DocumentRow({ document }: { document: DocumentResponse }) {
   return (
-    <li className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+    <Row className="flex items-center justify-between gap-4 px-5 py-4">
       <div className="min-w-0">
-        <p className="truncate font-medium text-slate-900 dark:text-slate-100">
-          {document.filename}
-        </p>
-        <p className="text-xs text-slate-400">
+        <p className="m-0 truncate font-mono text-[13px] text-ink">{document.filename}</p>
+        <Meta>
           {formatBytes(document.sizeBytes)}
           {document.pageCount != null && ` · ${document.pageCount} pages`}
-        </p>
+        </Meta>
         {document.status === 'FAILED' && document.errorMessage && (
-          <p className="mt-1 text-xs text-red-500">{document.errorMessage}</p>
+          <p className="m-0 mt-1 text-[12px] text-bad">{document.errorMessage}</p>
         )}
       </div>
       <StatusBadge status={document.status} />
-    </li>
+    </Row>
   )
 }
 
 function StatusBadge({ status }: { status: DocumentStatus }) {
-  const styles: Record<DocumentStatus, string> = {
-    UPLOADED: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
-    EXTRACTING: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
-    CHUNKING: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
-    EMBEDDING: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
-    READY: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
-    FAILED: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
-  }
+  const tone =
+    status === 'READY' ? 'ok' : status === 'FAILED' ? 'bad' : IN_FLIGHT.includes(status) && status !== 'UPLOADED' ? 'warn' : 'neutral'
   const inFlight = IN_FLIGHT.includes(status)
   return (
-    <span
-      className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[status]}`}
-    >
-      {inFlight && (
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />
-      )}
+    <Pill tone={tone}>
+      {inFlight && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" aria-hidden />}
       {status}
-    </span>
+    </Pill>
   )
 }
 

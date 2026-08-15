@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { ApiError, chatApi, coursesApi, flashcardsApi } from '../lib/api'
 import type { Citation, CourseResponse } from '../lib/types'
-import { AppHeader } from '../components/AppHeader'
+import { AppShell } from '../components/AppShell'
 import { PdfViewer } from '../components/PdfViewer'
+import { Button, ErrorText, Eyebrow } from '../components/ui'
+import { cx } from '../lib/style'
 
 // One rendered turn in the thread. Assistant turns grow token-by-token while `streaming`, and
 // carry the citations the answer's [n] markers refer to.
@@ -95,69 +97,70 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50 dark:bg-slate-950">
-      <AppHeader />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-hidden px-6 py-6">
-        <Link to={`/courses/${id}`} className="text-sm text-slate-500 hover:underline dark:text-slate-400">
-          ← {course?.name ?? 'Course'}
-        </Link>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+    <AppShell courseName={course?.name} fill>
+      <div className="mb-5 shrink-0">
+        <Eyebrow>{course?.name ?? 'Course'}</Eyebrow>
+        <h1 className="mt-1.5 mb-0 text-[clamp(28px,3.4vw,40px)] leading-[1] tracking-[-0.03em]">
           Ask this course
         </h1>
+      </div>
 
-        <div ref={threadRef} className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
-          {turns.length === 0 && (
-            <p className="mt-10 text-center text-sm text-slate-400">
-              Ask a question about this course's materials. Answers cite the sources they came from —
-              click a citation to open the exact page.
+      {/* The thread sits in a recessed well so the composer below it reads as a separate
+          surface rather than as part of the same scrolling page. */}
+      <div
+        ref={threadRef}
+        className="flex-1 space-y-4 overflow-y-auto rounded-card border border-line bg-ground-2 p-4 sm:p-5"
+      >
+        {turns.length === 0 && (
+          <div className="flex h-full min-h-40 items-center justify-center">
+            <p className="m-0 max-w-[46ch] text-center text-sm text-ink-muted">
+              Ask about this course's materials. Every answer cites the pages it came from —
+              click a citation to open that exact page.
             </p>
-          )}
-          {turns.map((turn, i) =>
-            turn.role === 'user' ? (
-              <UserBubble key={i} text={turn.text} />
-            ) : (
-              <AssistantBubble
-                key={i}
-                turn={turn}
-                question={turns[i - 1]?.text ?? ''}
-                courseId={id}
-                onCite={setActiveCitation}
-              />
-            ),
-          )}
-        </div>
+          </div>
+        )}
+        {turns.map((turn, i) =>
+          turn.role === 'user' ? (
+            <UserBubble key={i} text={turn.text} />
+          ) : (
+            <AssistantBubble
+              key={i}
+              turn={turn}
+              question={turns[i - 1]?.text ?? ''}
+              courseId={id}
+              onCite={setActiveCitation}
+            />
+          ),
+        )}
+      </div>
 
-        {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+      {error && <ErrorText className="mt-2 shrink-0">{error}</ErrorText>}
 
-        <form
-          className="mt-3 flex items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void submit()
+      {/* One bordered bar, send button inset — not a textarea with a button floating beside it. */}
+      <form
+        className="mt-3 flex shrink-0 items-end gap-2 rounded-card border border-line bg-surface p-2 transition duration-150 focus-within:border-accent"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              void submit()
+            }
           }}
-        >
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                void submit()
-              }
-            }}
-            rows={1}
-            placeholder="Ask a question…"
-            className="max-h-40 flex-1 resize-none rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          />
-          <button
-            type="submit"
-            disabled={sending || !input.trim()}
-            className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {sending ? 'Sending…' : 'Send'}
-          </button>
-        </form>
-      </main>
+          rows={1}
+          placeholder="Ask a question…"
+          className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-ink outline-none"
+        />
+        <Button type="submit" variant="primary" size="sm" disabled={sending || !input.trim()}>
+          {sending ? 'Sending…' : 'Send'}
+        </Button>
+      </form>
 
       {activeCitation && (
         <PdfViewer
@@ -167,14 +170,16 @@ export function ChatPage() {
           onClose={() => setActiveCitation(null)}
         />
       )}
-    </div>
+    </AppShell>
   )
 }
 
+// Your own turns carry expert blue — the one place accent-2 is spent. A tint rather than a
+// fill, so it separates the two speakers without competing with the cyan on this screen.
 function UserBubble({ text }: { text: string }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-indigo-600 px-4 py-2.5 text-sm text-white">
+      <div className="max-w-[80%] rounded-card rounded-br-[2px] border border-accent-2/35 bg-accent-2/12 px-4 py-2.5 text-sm whitespace-pre-wrap text-ink">
         {text}
       </div>
     </div>
@@ -195,19 +200,19 @@ function AssistantBubble({
   const answered = !turn.streaming && turn.text.trim().length > 0
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+      <div className="max-w-[85%] rounded-card rounded-bl-[2px] border border-line bg-surface px-4 py-3 text-sm text-ink-2">
         <AnswerText text={turn.text} citations={turn.citations} onCite={onCite} />
-        {turn.streaming && <span className="ml-0.5 inline-block animate-pulse">▋</span>}
+        {turn.streaming && <span className="ml-0.5 inline-block animate-pulse text-accent">▋</span>}
         {!turn.streaming && turn.citations.length > 0 && (
-          <div className="mt-3 border-t border-slate-100 pt-2 dark:border-slate-800">
-            <p className="mb-1 text-xs font-medium text-slate-400">Sources</p>
-            <ul className="flex flex-col gap-1">
+          <div className="mt-3 border-t border-line-soft pt-2">
+            <Eyebrow className="mb-1.5">Sources</Eyebrow>
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {turn.citations.map((c) => (
                 <li key={c.index}>
                   <button
                     type="button"
                     onClick={() => onCite(c)}
-                    className="text-left text-xs text-slate-500 hover:text-indigo-600 hover:underline dark:text-slate-400 dark:hover:text-indigo-400"
+                    className="tnum cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-[11.5px] text-ink-muted underline decoration-transparent underline-offset-2 transition duration-150 hover:text-ink hover:decoration-accent"
                   >
                     [{c.index}] {c.filename}
                     {c.pageNumber != null && ` · p.${c.pageNumber}`}
@@ -248,20 +253,21 @@ function SaveFlashcardButton({
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => void save()}
-      disabled={state === 'saving' || state === 'saved'}
-      className="mt-3 text-xs font-medium text-slate-400 transition hover:text-indigo-600 disabled:hover:text-slate-400 dark:hover:text-indigo-400"
-    >
-      {state === 'saved'
-        ? 'Saved to flashcards ✓'
-        : state === 'saving'
-          ? 'Saving…'
-          : state === 'error'
-            ? 'Could not save — retry'
-            : '+ Save as flashcard'}
-    </button>
+    <div className="mt-3">
+      <Button
+        variant="quiet"
+        onClick={() => void save()}
+        disabled={state === 'saving' || state === 'saved'}
+      >
+        {state === 'saved'
+          ? 'Saved to flashcards ✓'
+          : state === 'saving'
+            ? 'Saving…'
+            : state === 'error'
+              ? 'Could not save — retry'
+              : '+ Save as flashcard'}
+      </Button>
+    </div>
   )
 }
 
@@ -290,7 +296,10 @@ function AnswerText({
                 key={i}
                 type="button"
                 onClick={() => onCite(citation)}
-                className="mx-0.5 rounded bg-indigo-100 px-1 align-baseline text-xs font-medium text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300"
+                className={cx(
+                  'tnum mx-0.5 cursor-pointer rounded-[3px] border border-accent-deep bg-surface-2 px-1 align-baseline',
+                  'font-mono text-[10.5px] text-ink transition duration-150 hover:bg-accent hover:text-on-accent',
+                )}
               >
                 {part}
               </button>

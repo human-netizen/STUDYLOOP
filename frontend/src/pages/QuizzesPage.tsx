@@ -2,7 +2,20 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, coursesApi, quizzesApi } from '../lib/api'
 import type { CourseResponse, QuizSummary } from '../lib/types'
-import { AppHeader } from '../components/AppHeader'
+import { AppShell } from '../components/AppShell'
+import {
+  Button,
+  Empty,
+  ErrorText,
+  Loading,
+  Meta,
+  NumberField,
+  PageTitle,
+  Panel,
+  Row,
+  Rows,
+  SectionHead,
+} from '../components/ui'
 
 // A course's quizzes: generate a new one from the course's ready materials, or open an existing
 // one to take. Quizzes are shared across the course.
@@ -35,65 +48,63 @@ export function QuizzesPage() {
   }, [id])
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <AppHeader />
-      <main className="mx-auto max-w-3xl px-6 py-10">
-        <Link to={`/courses/${id}`} className="text-sm text-slate-500 hover:underline dark:text-slate-400">
-          ← {course ? course.name : 'Course'}
-        </Link>
+    <AppShell courseName={course?.name}>
+      <PageTitle
+        eyebrow={course?.name ?? 'Course'}
+        title="Quizzes"
+        sub="Generated from this course's ready documents, then graded for you."
+      />
 
-        <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          Quizzes
-        </h1>
+      {loading && <Loading />}
+      {error && <ErrorText>{error}</ErrorText>}
 
-        {loading && <p className="mt-6 text-slate-500 dark:text-slate-400">Loading…</p>}
-        {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
+      {!loading && (
+        <>
+          <section className="mb-14">
+            <SectionHead index="01 · New" title="Generate a quiz" />
+            <GenerateQuiz
+              courseId={id}
+              onGenerated={(quizId) => navigate(`/courses/${id}/quizzes/${quizId}`)}
+            />
+          </section>
 
-        {!loading && (
-          <>
-            <div className="mt-8">
-              <GenerateQuiz
-                courseId={id}
-                onGenerated={(quizId) => navigate(`/courses/${id}/quizzes/${quizId}`)}
-              />
-            </div>
-
-            <h2 className="mt-10 mb-4 text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-              Your course's quizzes
-            </h2>
+          <section>
+            <SectionHead
+              index="02 · Saved"
+              title="This course's quizzes"
+              description={quizzes.length > 0 ? `${quizzes.length} available` : undefined}
+            />
             {quizzes.length === 0 ? (
-              <p className="text-slate-500 dark:text-slate-400">
-                No quizzes yet — generate one from your materials above.
-              </p>
+              <Empty>No quizzes yet — generate one from your materials above.</Empty>
             ) : (
-              <ul className="flex flex-col gap-3">
+              <Rows>
                 {quizzes.map((quiz) => (
-                  <li key={quiz.id}>
+                  <Row key={quiz.id} interactive>
                     <Link
                       to={`/courses/${id}/quizzes/${quiz.id}`}
-                      className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-indigo-400 dark:border-slate-800 dark:bg-slate-900"
+                      className="group flex items-center justify-between gap-4 px-5 py-4 no-underline"
                     >
                       <div className="min-w-0">
-                        <p className="truncate font-medium text-slate-900 dark:text-slate-100">
+                        <p className="m-0 truncate font-display text-[17px] font-bold tracking-[-0.015em] text-ink">
                           {quiz.title}
                         </p>
-                        <p className="text-xs text-slate-400">
+                        <Meta>
                           {quiz.questionCount} question{quiz.questionCount === 1 ? '' : 's'} ·{' '}
                           {new Date(quiz.createdAt).toLocaleDateString()}
-                        </p>
+                        </Meta>
                       </div>
-                      <span className="shrink-0 text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                      <span className="shrink-0 font-mono text-[11px] tracking-[0.08em] text-ink-muted uppercase transition duration-150 group-hover:text-ink">
                         Take →
                       </span>
                     </Link>
-                  </li>
+                  </Row>
                 ))}
-              </ul>
+              </Rows>
             )}
-          </>
-        )}
-      </main>
-    </div>
+          </section>
+        </>
+      )}
+    </AppShell>
   )
 }
 
@@ -125,64 +136,30 @@ function GenerateQuiz({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-      <p className="font-medium text-slate-800 dark:text-slate-100">Generate a quiz</p>
-      <p className="mt-1 text-xs text-slate-400">
-        Built from all ready documents in this course.
-      </p>
-      <div className="mt-4 flex flex-wrap items-end gap-4">
+    <Panel>
+      <div className="flex flex-wrap items-end gap-4">
         <NumberField
           label="Multiple choice"
           value={mcCount}
-          onChange={setMcCount}
+          min={0}
+          max={20}
           disabled={generating}
+          onChange={setMcCount}
         />
         <NumberField
           label="Short answer"
           value={saCount}
+          min={0}
+          max={20}
+          disabled={generating}
           onChange={setSaCount}
-          disabled={generating}
         />
-        <button
-          type="button"
-          onClick={() => void generate()}
-          disabled={generating}
-          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
-        >
+        <Button variant="primary" onClick={() => void generate()} disabled={generating}>
           {generating ? 'Generating…' : 'Generate'}
-        </button>
+        </Button>
       </div>
-      {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
-    </div>
-  )
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-  disabled,
-}: {
-  label: string
-  value: number
-  onChange: (value: number) => void
-  disabled: boolean
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-      {label}
-      <input
-        type="number"
-        min={0}
-        max={20}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => {
-          const next = Number(event.target.value)
-          onChange(Number.isFinite(next) ? Math.min(20, Math.max(0, next)) : 0)
-        }}
-        className="w-24 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-      />
-    </label>
+      <Meta className="mt-4 block">Built from every READY document in this course.</Meta>
+      {error && <ErrorText className="mt-3">{error}</ErrorText>}
+    </Panel>
   )
 }

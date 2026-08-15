@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, invitesApi } from '../lib/api'
 import type { InvitePreviewResponse } from '../lib/types'
-import { AppHeader } from '../components/AppHeader'
+import { AppShell } from '../components/AppShell'
+import { Button, ErrorText, Eyebrow, Loading, Meta, Panel, Pill } from '../components/ui'
 
 export function JoinPage() {
   const { token = '' } = useParams()
@@ -35,57 +36,50 @@ export function JoinPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <AppHeader />
-      <main className="mx-auto flex max-w-md flex-col items-center px-6 py-16 text-center">
-        {loading && <p className="text-slate-500 dark:text-slate-400">Loading invite…</p>}
+    <AppShell>
+      <div className="max-w-lg">
+        {loading && <Loading>Loading invite</Loading>}
 
         {!loading && error && !preview && (
           <>
-            <p className="text-red-500">{error}</p>
-            <BackLink navigate={navigate} />
+            <ErrorText>{error}</ErrorText>
+            <Button variant="quiet" onClick={() => navigate('/')} className="mt-4">
+              Back to your courses
+            </Button>
           </>
         )}
 
         {preview && (
-          <div className="w-full rounded-2xl border border-slate-200 bg-white p-8 dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-sm text-slate-500 dark:text-slate-400">You've been invited to join</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-              {preview.courseName}
-            </h1>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              as <span className="font-medium">{preview.role}</span>
-            </p>
-            {preview.requiresMatchingEmail && (
-              <p className="mt-3 text-xs text-slate-400">
-                This invite is tied to a specific email address.
-              </p>
-            )}
-            {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
-            <button
-              type="button"
-              onClick={accept}
-              disabled={joining}
-              className="mt-6 w-full rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
-            >
-              {joining ? 'Joining…' : 'Join course'}
-            </button>
-            <BackLink navigate={navigate} />
-          </div>
-        )}
-      </main>
-    </div>
-  )
-}
+          <Panel className="flex flex-col gap-5">
+            <div>
+              <Eyebrow>You've been invited to join</Eyebrow>
+              <h1 className="mt-2 mb-0 text-[clamp(28px,3.6vw,42px)] leading-[1] tracking-[-0.035em]">
+                {preview.courseName}
+              </h1>
+            </div>
 
-function BackLink({ navigate }: { navigate: (to: string) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => navigate('/')}
-      className="mt-4 text-sm text-slate-500 hover:underline dark:text-slate-400"
-    >
-      Back to your courses
-    </button>
+            <div className="flex items-center gap-3">
+              <Meta>as</Meta>
+              <Pill>{preview.role}</Pill>
+            </div>
+
+            {preview.requiresMatchingEmail && (
+              <Meta>This invite is tied to a specific email address.</Meta>
+            )}
+
+            {error && <ErrorText>{error}</ErrorText>}
+
+            <div className="flex items-center gap-3 border-t border-line pt-5">
+              <Button variant="primary" onClick={accept} disabled={joining}>
+                {joining ? 'Joining…' : 'Join course'}
+              </Button>
+              <Button variant="quiet" onClick={() => navigate('/')}>
+                Not now
+              </Button>
+            </div>
+          </Panel>
+        )}
+      </div>
+    </AppShell>
   )
 }

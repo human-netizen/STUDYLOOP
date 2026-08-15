@@ -4,6 +4,7 @@ import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import { ApiError, documentsApi } from '../lib/api'
 import type { Citation } from '../lib/types'
+import { Button, ErrorText, Eyebrow, Loading, Meta } from './ui'
 
 // pdf.js runs its parser in a Web Worker. Vite bundles the worker file and hands us a URL for
 // it; pointing pdf.js at that URL keeps everything self-hosted (no CDN fetch).
@@ -74,69 +75,59 @@ export function PdfViewer({
         type="button"
         aria-label="Close viewer"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-900/40"
+        className="absolute inset-0 cursor-default border-0 bg-scrim"
       />
-      <aside className="relative z-10 flex h-full w-full max-w-2xl flex-col bg-white shadow-xl dark:bg-slate-900">
-        <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+      <aside className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-line bg-surface">
+        <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
-              {citation.filename}
-            </p>
-            <p className="text-xs text-slate-400">
-              Source [{citation.index}]
-              {citation.pageNumber != null && ` · cited page ${citation.pageNumber}`}
-            </p>
+            <Eyebrow>Source [{citation.index}]</Eyebrow>
+            <p className="m-0 truncate font-mono text-[13px] text-ink">{citation.filename}</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-300 px-2.5 py-1 text-sm text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
+          <Button size="sm" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </header>
 
         {numPages != null && (
-          <div className="flex items-center justify-center gap-4 border-b border-slate-200 px-4 py-2 text-sm dark:border-slate-800">
-            <button
-              type="button"
+          <div className="flex items-center justify-center gap-5 border-b border-line px-5 py-2">
+            <Button
+              variant="quiet"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={clampedPage <= 1}
-              className="rounded px-2 py-1 text-slate-600 disabled:opacity-40 enabled:hover:bg-slate-100 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
             >
               ← Prev
-            </button>
-            <span className="text-slate-500 dark:text-slate-400">
-              Page {clampedPage} of {numPages}
-            </span>
-            <button
-              type="button"
+            </Button>
+            <Meta>
+              Page {clampedPage} / {numPages}
+              {citation.pageNumber != null && ` · cited ${citation.pageNumber}`}
+            </Meta>
+            <Button
+              variant="quiet"
               onClick={() => setPage((p) => Math.min(numPages, p + 1))}
               disabled={clampedPage >= numPages}
-              className="rounded px-2 py-1 text-slate-600 disabled:opacity-40 enabled:hover:bg-slate-100 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
             >
               Next →
-            </button>
+            </Button>
           </div>
         )}
 
-        <div className="flex-1 overflow-auto bg-slate-100 p-4 dark:bg-slate-950">
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          {!error && !fileUrl && <p className="text-sm text-slate-500 dark:text-slate-400">Loading document…</p>}
+        <div className="flex-1 overflow-auto bg-ground-2 p-4">
+          {error && <ErrorText>{error}</ErrorText>}
+          {!error && !fileUrl && <Loading>Loading document</Loading>}
           {fileUrl && (
             <Document
               file={fileUrl}
               onLoadSuccess={({ numPages: n }) => setNumPages(n)}
               onLoadError={(e) => setError(e.message)}
-              loading={<p className="text-sm text-slate-500 dark:text-slate-400">Loading document…</p>}
-              error={<p className="text-sm text-red-500">Failed to render this PDF.</p>}
+              loading={<Loading>Loading document</Loading>}
+              error={<ErrorText>Failed to render this PDF.</ErrorText>}
               className="flex justify-center"
             >
               <Page
                 pageNumber={clampedPage}
                 width={560}
                 renderAnnotationLayer={false}
-                className="shadow"
+                className="shadow-card"
               />
             </Document>
           )}

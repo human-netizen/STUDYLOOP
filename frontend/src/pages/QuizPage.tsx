@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { ApiError, quizzesApi } from '../lib/api'
 import type { AnswerInput, AttemptResponse, GradedAnswer, Quiz, QuizQuestionView } from '../lib/types'
-import { AppHeader } from '../components/AppHeader'
+import { AppShell, BackLink } from '../components/AppShell'
+import { Button, ErrorText, Eyebrow, Loading, Pill, TextArea } from '../components/ui'
+import { cx } from '../lib/style'
 
 // Take one quiz and see it graded. While taking, answers are held locally; on submit the server
 // grades them (revealing the answer key + explanations), and the page switches to a review of the
@@ -66,83 +68,82 @@ export function QuizPage() {
     setSubmitError(null)
   }
 
+  const answered = quiz ? quiz.questions.filter((q) => answers[q.id] !== undefined).length : 0
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <AppHeader />
-      <main className="mx-auto max-w-3xl px-6 py-10">
-        <Link
-          to={`/courses/${id}/quizzes`}
-          className="text-sm text-slate-500 hover:underline dark:text-slate-400"
-        >
-          ← Quizzes
-        </Link>
+    <AppShell>
+      <BackLink to={`/courses/${id}/quizzes`}>Quizzes</BackLink>
 
-        {loading && <p className="mt-6 text-slate-500 dark:text-slate-400">Loading…</p>}
-        {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
+      {loading && <Loading />}
+      {error && <ErrorText>{error}</ErrorText>}
 
-        {quiz && (
-          <>
-            <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+      {quiz && (
+        <>
+          <div className="mb-8">
+            <Eyebrow className="mb-2">
+              {quiz.questions.length} question{quiz.questions.length === 1 ? '' : 's'}
+              {!result && ` · ${answered} answered`}
+            </Eyebrow>
+            <h1 className="m-0 text-[clamp(30px,3.8vw,46px)] leading-[1] tracking-[-0.035em]">
               {quiz.title}
             </h1>
+          </div>
 
-            {result && <ScoreBanner score={result.score} total={result.total} onRetake={retake} />}
+          {result && <ScoreBanner score={result.score} total={result.total} onRetake={retake} />}
 
-            <ol className="mt-8 flex flex-col gap-6">
-              {quiz.questions.map((question) => {
-                const graded = result?.answers.find((a) => a.questionId === question.id)
-                return graded ? (
-                  <ReviewQuestion key={question.id} graded={graded} />
-                ) : (
-                  <TakeQuestion
-                    key={question.id}
-                    question={question}
-                    answer={answers[question.id]}
-                    onOption={setOption}
-                    onText={setText}
-                    disabled={submitting}
-                  />
-                )
-              })}
-            </ol>
-
-            {!result && (
-              <div className="mt-8">
-                <button
-                  type="button"
-                  onClick={() => void submit()}
+          <ol className="m-0 flex list-none flex-col gap-4 p-0">
+            {quiz.questions.map((question) => {
+              const graded = result?.answers.find((a) => a.questionId === question.id)
+              return graded ? (
+                <ReviewQuestion key={question.id} graded={graded} />
+              ) : (
+                <TakeQuestion
+                  key={question.id}
+                  question={question}
+                  answer={answers[question.id]}
+                  onOption={setOption}
+                  onText={setText}
                   disabled={submitting}
-                  className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
-                >
-                  {submitting ? 'Grading…' : 'Submit answers'}
-                </button>
-                {submitError && <p className="mt-3 text-sm text-red-500">{submitError}</p>}
-              </div>
-            )}
-          </>
-        )}
-      </main>
-    </div>
+                />
+              )
+            })}
+          </ol>
+
+          {!result && (
+            <div className="mt-8 border-t border-line pt-6">
+              <Button variant="primary" onClick={() => void submit()} disabled={submitting}>
+                {submitting ? 'Grading…' : 'Submit answers'}
+              </Button>
+              {submitError && <ErrorText className="mt-3">{submitError}</ErrorText>}
+            </div>
+          )}
+        </>
+      )}
+    </AppShell>
   )
 }
 
 function ScoreBanner({ score, total, onRetake }: { score: number; total: number; onRetake: () => void }) {
   const pct = total === 0 ? 0 : Math.round((score / total) * 100)
   return (
-    <div className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50 p-5 dark:border-indigo-900 dark:bg-indigo-950/40">
-      <div>
-        <p className="text-sm text-indigo-600 dark:text-indigo-300">Your score</p>
-        <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          {score} / {total} <span className="text-base font-normal text-slate-500">({pct}%)</span>
-        </p>
+    <div className="mb-10 rounded-card border border-line bg-surface p-6 shadow-card">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Eyebrow className="mb-1">Your score</Eyebrow>
+          <p className="tnum m-0 font-display text-[clamp(40px,6vw,54px)] leading-[0.95] font-bold tracking-[-0.04em] text-ink">
+            {score}
+            <span className="text-ink-muted">/{total}</span>
+          </p>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="tnum font-mono text-[13px] text-ink-2">{pct}%</span>
+          <Button onClick={onRetake}>Retake</Button>
+        </div>
       </div>
-      <button
-        type="button"
-        onClick={onRetake}
-        className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-      >
-        Retake
-      </button>
+      {/* One thin accent bar — the only place a percentage gets drawn. */}
+      <div className="mt-5 h-[6px] overflow-hidden rounded-full bg-ground-2">
+        <div className="h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${pct}%` }} />
+      </div>
     </div>
   )
 }
@@ -161,25 +162,27 @@ function TakeQuestion({
   disabled: boolean
 }) {
   return (
-    <li className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-      <p className="font-medium text-slate-900 dark:text-slate-100">
-        <span className="mr-2 text-slate-400">{question.index + 1}.</span>
-        {question.prompt}
-      </p>
+    <li className="rounded-card border border-line bg-surface p-5 shadow-card">
+      <div className="flex gap-3">
+        <span className="tnum shrink-0 font-mono text-[11px] leading-6 text-ink-muted">
+          {String(question.index + 1).padStart(2, '0')}
+        </span>
+        <p className="m-0 font-medium text-ink">{question.prompt}</p>
+      </div>
 
       {question.type === 'MULTIPLE_CHOICE' ? (
-        <div className="mt-4 flex flex-col gap-2">
+        <div className="mt-4 flex flex-col gap-1.5 pl-8">
           {question.options.map((option, optionIndex) => {
             const selected = answer?.selectedOptionIndex === optionIndex
             return (
               <label
                 key={optionIndex}
-                className={[
-                  'flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm transition',
+                className={cx(
+                  'flex cursor-pointer items-center gap-3 rounded-ctl border border-l-2 px-3 py-2 text-sm transition duration-150',
                   selected
-                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30'
-                    : 'border-slate-200 hover:border-indigo-300 dark:border-slate-700',
-                ].join(' ')}
+                    ? 'border-line border-l-accent bg-surface-2 text-ink'
+                    : 'border-line-soft border-l-transparent text-ink-2 hover:bg-surface-2',
+                )}
               >
                 <input
                   type="radio"
@@ -187,21 +190,20 @@ function TakeQuestion({
                   checked={selected}
                   disabled={disabled}
                   onChange={() => onOption(question.id, optionIndex)}
-                  className="accent-indigo-600"
                 />
-                <span className="text-slate-700 dark:text-slate-200">{option}</span>
+                <span>{option}</span>
               </label>
             )
           })}
         </div>
       ) : (
-        <textarea
+        <TextArea
           value={answer?.answerText ?? ''}
           disabled={disabled}
           onChange={(event) => onText(question.id, event.target.value)}
           rows={3}
           placeholder="Your answer…"
-          className="mt-4 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          className="mt-4 ml-8 w-[calc(100%-2rem)]"
         />
       )}
     </li>
@@ -211,74 +213,72 @@ function TakeQuestion({
 function ReviewQuestion({ graded }: { graded: GradedAnswer }) {
   return (
     <li
-      className={[
-        'rounded-xl border p-5',
-        graded.correct
-          ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30'
-          : 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30',
-      ].join(' ')}
+      className={cx(
+        'rounded-card border p-5',
+        graded.correct ? 'border-ok/40 bg-ok-bg' : 'border-bad/40 bg-bad-bg',
+      )}
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="font-medium text-slate-900 dark:text-slate-100">
-          <span className="mr-2 text-slate-400">{graded.index + 1}.</span>
-          {graded.prompt}
-        </p>
-        <span
-          className={[
-            'shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium',
-            graded.correct
-              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300'
-              : 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300',
-          ].join(' ')}
-        >
-          {graded.correct ? 'Correct' : 'Incorrect'}
-        </span>
+        <div className="flex gap-3">
+          <span className="tnum shrink-0 font-mono text-[11px] leading-6 text-ink-muted">
+            {String(graded.index + 1).padStart(2, '0')}
+          </span>
+          <p className="m-0 font-medium text-ink">{graded.prompt}</p>
+        </div>
+        <Pill tone={graded.correct ? 'ok' : 'bad'}>{graded.correct ? 'Correct' : 'Wrong'}</Pill>
       </div>
 
       {graded.type === 'MULTIPLE_CHOICE' ? (
-        <div className="mt-4 flex flex-col gap-2">
+        <div className="mt-4 flex flex-col gap-1.5 pl-8">
           {graded.options.map((option, optionIndex) => {
             const isCorrect = graded.correctOptionIndex === optionIndex
             const isPicked = graded.selectedOptionIndex === optionIndex
             return (
               <div
                 key={optionIndex}
-                className={[
-                  'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm',
+                className={cx(
+                  'flex items-center gap-2 rounded-ctl border border-l-2 px-3 py-2 text-sm',
                   isCorrect
-                    ? 'border-emerald-400 bg-emerald-100/60 dark:border-emerald-700 dark:bg-emerald-900/30'
+                    ? 'border-ok/40 border-l-ok text-ink'
                     : isPicked
-                      ? 'border-red-400 bg-red-100/60 dark:border-red-700 dark:bg-red-900/30'
-                      : 'border-slate-200 dark:border-slate-700',
-                ].join(' ')}
+                      ? 'border-bad/40 border-l-bad text-ink'
+                      : 'border-line-soft border-l-transparent text-ink-2',
+                )}
               >
-                <span className="text-slate-700 dark:text-slate-200">{option}</span>
-                {isCorrect && <span className="ml-auto text-xs font-medium text-emerald-600">✓ correct</span>}
+                <span>{option}</span>
+                {isCorrect && (
+                  <span className="ml-auto font-mono text-[10.5px] tracking-[0.06em] text-ok uppercase">
+                    ✓ answer
+                  </span>
+                )}
                 {isPicked && !isCorrect && (
-                  <span className="ml-auto text-xs font-medium text-red-600">your pick</span>
+                  <span className="ml-auto font-mono text-[10.5px] tracking-[0.06em] text-bad uppercase">
+                    your pick
+                  </span>
                 )}
               </div>
             )
           })}
         </div>
       ) : (
-        <div className="mt-4 space-y-2 text-sm">
-          <p className="text-slate-500 dark:text-slate-400">
-            Your answer:{' '}
-            <span className="text-slate-800 dark:text-slate-200">
+        <div className="mt-4 flex flex-col gap-2 pl-8 text-sm">
+          <div>
+            <Eyebrow>Your answer</Eyebrow>
+            <p className="m-0 text-ink">
               {graded.answerText?.trim() ? graded.answerText : '— (blank)'}
-            </span>
-          </p>
-          {graded.correctAnswer && (
-            <p className="text-slate-500 dark:text-slate-400">
-              Expected: <span className="text-slate-800 dark:text-slate-200">{graded.correctAnswer}</span>
             </p>
+          </div>
+          {graded.correctAnswer && (
+            <div>
+              <Eyebrow>Expected</Eyebrow>
+              <p className="m-0 text-ink">{graded.correctAnswer}</p>
+            </div>
           )}
         </div>
       )}
 
       {graded.explanation && (
-        <p className="mt-4 border-t border-slate-200/70 pt-3 text-sm text-slate-600 dark:border-slate-700/70 dark:text-slate-300">
+        <p className="mt-4 ml-8 border-t border-line-soft pt-3 text-sm text-ink-2">
           {graded.explanation}
         </p>
       )}

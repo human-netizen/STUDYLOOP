@@ -2,7 +2,24 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError, coursesApi } from '../lib/api'
 import type { CourseResponse } from '../lib/types'
-import { AppHeader } from '../components/AppHeader'
+import { AppShell } from '../components/AppShell'
+import {
+  Button,
+  Empty,
+  ErrorText,
+  Eyebrow,
+  Field,
+  Input,
+  Loading,
+  Meta,
+  PageTitle,
+  Panel,
+  Pill,
+  Row,
+  Rows,
+  SectionHead,
+} from '../components/ui'
+import { PANEL, cx } from '../lib/style'
 
 export function CoursesPage() {
   const [courses, setCourses] = useState<CourseResponse[]>([])
@@ -23,54 +40,67 @@ export function CoursesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <AppHeader />
-      <main className="mx-auto max-w-3xl px-6 py-10">
-        <div className="grid gap-4 sm:grid-cols-2">
+    <AppShell>
+      <PageTitle
+        eyebrow="Workspace"
+        title="Your courses"
+        sub="Each course holds its own materials, quizzes and cards."
+      />
+
+      <section className="mb-14">
+        <SectionHead index="01 · Start" title="Add a course" description="Create one, or join with an invite." />
+        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
           <CreateCourseCard onCreated={addCourse} />
           <JoinCourseCard />
         </div>
+      </section>
 
-        <h1 className="mt-10 mb-4 text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-          Your courses
-        </h1>
+      <section>
+        <SectionHead
+          index="02 · Library"
+          title="Courses"
+          description={courses.length > 0 ? `${courses.length} in your library` : undefined}
+        />
 
-        {loading && <p className="text-slate-500 dark:text-slate-400">Loading…</p>}
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {loading && <Loading />}
+        {error && <ErrorText>{error}</ErrorText>}
+
         {!loading && !error && courses.length === 0 && (
-          <p className="text-slate-500 dark:text-slate-400">
-            No courses yet — create one above or join with a link.
-          </p>
+          <Empty>No courses yet — create one above, or paste an invite link.</Empty>
         )}
 
-        <ul className="flex flex-col gap-3">
-          {courses.map((course) => (
-            <li key={course.id}>
-              <Link
-                to={`/courses/${course.id}`}
-                className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 transition hover:border-indigo-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-indigo-500"
-              >
-                <div>
-                  <p className="font-medium text-slate-900 dark:text-slate-100">{course.name}</p>
-                  {course.description && (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">{course.description}</p>
-                  )}
-                </div>
-                <RoleBadge role={course.myRole} />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </main>
-    </div>
-  )
-}
-
-function RoleBadge({ role }: { role: CourseResponse['myRole'] }) {
-  return (
-    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-      {role}
-    </span>
+        {courses.length > 0 && (
+          <Rows>
+            {courses.map((course) => (
+              <Row key={course.id} interactive>
+                <Link
+                  to={`/courses/${course.id}`}
+                  className="group flex items-center justify-between gap-4 px-5 py-4 no-underline"
+                >
+                  <div className="min-w-0">
+                    <p className="m-0 truncate font-display text-[17px] font-bold tracking-[-0.015em] text-ink">
+                      {course.name}
+                    </p>
+                    {course.description && (
+                      <p className="m-0 truncate text-sm text-ink-muted">{course.description}</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <Pill>{course.myRole}</Pill>
+                    <span
+                      aria-hidden
+                      className="text-ink-muted transition duration-150 group-hover:translate-x-0.5 group-hover:text-ink"
+                    >
+                      →
+                    </span>
+                  </div>
+                </Link>
+              </Row>
+            ))}
+          </Rows>
+        )}
+      </section>
+    </AppShell>
   )
 }
 
@@ -97,32 +127,30 @@ function CreateCourseCard({ onCreated }: { onCreated: (course: CourseResponse) =
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
-    >
-      <h2 className="font-medium text-slate-900 dark:text-slate-100">New course</h2>
-      <input
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        placeholder="Course name"
-        required
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-      />
-      <input
-        value={description}
-        onChange={(event) => setDescription(event.target.value)}
-        placeholder="Description (optional)"
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-      />
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      <button
-        type="submit"
-        disabled={submitting}
-        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-60"
-      >
+    <form onSubmit={onSubmit} className={cx(PANEL, 'flex flex-col gap-4')}>
+      <div>
+        <Eyebrow>New</Eyebrow>
+        <h3 className="mt-1 mb-0 text-[17px] tracking-[-0.015em]">Create a course</h3>
+      </div>
+      <Field label="Name">
+        <Input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="e.g. Operating Systems"
+          required
+        />
+      </Field>
+      <Field label="Description — optional">
+        <Input
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="One line about what it covers"
+        />
+      </Field>
+      {error && <ErrorText>{error}</ErrorText>}
+      <Button type="submit" variant="primary" disabled={submitting} className="self-start">
         {submitting ? 'Creating…' : 'Create course'}
-      </button>
+      </Button>
     </form>
   )
 }
@@ -131,32 +159,36 @@ function JoinCourseCard() {
   const navigate = useNavigate()
   const [value, setValue] = useState('')
 
-  function onSubmit(event: FormEvent) {
-    event.preventDefault()
+  function submit() {
     const token = parseInviteToken(value)
     if (token) navigate(`/join/${token}`)
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
-    >
-      <h2 className="font-medium text-slate-900 dark:text-slate-100">Join a course</h2>
-      <input
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder="Paste an invite link or token"
-        required
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-      />
-      <button
-        type="submit"
-        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-      >
+    <Panel className="flex flex-col gap-4">
+      <div>
+        <Eyebrow>Invited</Eyebrow>
+        <h3 className="mt-1 mb-0 text-[17px] tracking-[-0.015em]">Join a course</h3>
+      </div>
+      <Field label="Invite link or token">
+        <Input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              submit()
+            }
+          }}
+          placeholder="Paste it here"
+          className="font-mono text-[12.5px]"
+        />
+      </Field>
+      <Button onClick={submit} disabled={!value.trim()} className="self-start">
         Continue
-      </button>
-    </form>
+      </Button>
+      <Meta>The token is the last segment of the link.</Meta>
+    </Panel>
   )
 }
 

@@ -1,1 +1,256 @@
 @import "tailwindcss";
+
+/* Self-hosted variable fonts — bundled by Vite, so no CDN request and no flash of
+   fallback text. Space Grotesk is the display face (headings, scores, numerals),
+   Instrument Sans carries body/UI, JetBrains Mono carries meta: counts, page numbers,
+   filenames, status pills. */
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design tokens
+
+   Every colour in the app is one of these names — no component carries a literal
+   hex, and none carries a `dark:` variant.
+
+   The palette is the Codeforces rating ladder. The whole ladder is declared below;
+   `--accent` points at one rung of it, so a rank change is a one-line edit. The
+   rest is a near-black ground biased slightly blue, four elevation steps, and
+   three levels of ink.
+
+   This is a single dark theme on purpose. The ladder has no light-mode
+   counterpart, so rather than invent one, `color-scheme` is pinned to dark and the
+   old light/`data-theme` machinery is gone.
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* The ladder, in full. Only two rungs are painted today (see --accent below);
+     the others exist so promoting one is a single edit. */
+  --cf-newbie: #918f8e;
+  --cf-pupil: #4dae60;
+  --cf-specialist: #26c9c0;
+  --cf-expert: #4f7cff;
+  --cf-cm: #b05be0;
+  --cf-master: #ff9a2e;
+  --cf-gm: #ff4646;
+
+  /* Elevation: four steps, each one lighter than the last. Dark UIs separate
+     surfaces by adding light, so `ground-2` sits ABOVE ground, not below it. */
+  --ground: #0a0c0e;
+  --ground-2: #0f1215;
+  --surface: #161b1f;
+  --surface-2: #1c2227;
+
+  /* The reference palette also carries --panel: --surface at 72%, for glass that
+     sits over a portrait. Not adopted — nothing in StudyLoop floats over imagery,
+     and translucency where nothing shows through is just a cheaper opaque. */
+
+  --ink: #e7edf2;
+  --ink-2: #9aa8b4;
+  /* The reference value here is #5f6c78, which measures 3.6:1 on ground and fails
+     AA for small text. This tier carries 10–13px mono meta throughout the app, so
+     it uses the lift the palette notes recommend — 4.6:1, still visibly a step
+     below --ink-2. */
+  --ink-muted: #6b7885;
+
+  /* Hairlines are --ink at low alpha, not grey. That is what keeps a border
+     reading as the same material as the text sitting next to it. */
+  --line: rgb(231 237 242 / 0.11);
+  --line-soft: rgb(231 237 242 / 0.06);
+  --line-strong: rgb(231 237 242 / 0.28);
+
+  /* One accent. Specialist cyan, because that is the current rank. */
+  --accent: var(--cf-specialist);
+  --accent-deep: #0f4d4a;
+  --on-accent: #04120f;
+  /* Expert blue — the peak rank. Spent in exactly one place (your own messages in
+     chat) so the "cyan now, blue at peak" pairing actually appears on screen. */
+  --accent-2: var(--cf-expert);
+
+  /* Status pulls from the ladder rather than inventing a second palette:
+     pupil green reads as pass, master orange as in-progress, grandmaster red as
+     fail. The tinted backgrounds are mixed from the foreground, so a ladder edit
+     carries through instead of leaving a stale wash behind. */
+  --ok: var(--cf-pupil);
+  --ok-bg: color-mix(in srgb, var(--ok) 14%, var(--ground));
+  --warn: var(--cf-master);
+  --warn-bg: color-mix(in srgb, var(--warn) 13%, var(--ground));
+  --bad: var(--cf-gm);
+  --bad-bg: color-mix(in srgb, var(--bad) 13%, var(--ground));
+
+  /* Ambient key light. Never a fill — it only appears as a radial gradient at low
+     alpha, so it reads as light in the scene rather than as a third accent. */
+  --warm: #f0b95c;
+
+  --scrim: rgb(4 6 8 / 0.66);
+  --elev: 0 1px 2px rgb(0 0 0 / 0.45), 0 10px 30px rgb(0 0 0 / 0.35);
+
+  color-scheme: dark;
+}
+
+/* Expose the tokens to Tailwind as utility names. `inline` makes the generated
+   utility reference var(--ground) directly, so changing a token repaints without
+   Tailwind regenerating anything. */
+@theme inline {
+  --color-ground: var(--ground);
+  --color-ground-2: var(--ground-2);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-muted: var(--ink-muted);
+
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-deep: var(--accent-deep);
+  --color-accent-2: var(--accent-2);
+  --color-on-accent: var(--on-accent);
+
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+
+  --color-warm: var(--warm);
+  --color-scrim: var(--scrim);
+
+  --font-display: "Space Grotesk Variable", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-sans: "Instrument Sans Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* Three radii, deliberately. Controls are nearly square, cards get a soft 8px,
+     pills go full round. Nothing else. */
+  --radius-ctl: 4px;
+  --radius-card: 8px;
+
+  --shadow-card: var(--elev);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Base
+   ───────────────────────────────────────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15.5px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings are display type with the tracking pulled in — that tightness is most
+   of what separates this from a default sans-serif layout. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+/* Every figure in the app (scores, page numbers, counts) lines up in columns. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The ambient key light, as a gradient rather than a fill. `color-mix` takes the
+   token, so this follows --warm instead of hardcoding its channels — rgb() cannot
+   take a var for its parts, which is the usual reason these get written longhand. */
+.warm-key {
+  background-image: radial-gradient(
+    62% 55% at 28% 22%,
+    color-mix(in srgb, var(--warm) 20%, transparent),
+    transparent 70%
+  );
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* One focus treatment everywhere, keyboard-only. Full-strength accent (9.5:1 on
+   ground) — accent-deep is the dim rim colour and would be invisible here. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Form controls inherit the app font instead of the browser's default UI font. */
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-muted);
+}
+
+/* Native controls (radio, number spinners, select arrow) are painted by the OS in
+   its own accent colour; this pulls them into the palette. */
+input,
+textarea,
+select {
+  accent-color: var(--accent);
+}
+
+/* Scrollbars, so the recessed wells in chat and the PDF drawer don't get a bright
+   system-grey bar down the side. */
+* {
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   The flashcard flip — the one piece of motion that needs real 3D, which utility
+   classes can't express cleanly.
+   ───────────────────────────────────────────────────────────────────────────── */
+.flip-scene {
+  perspective: 1200px;
+}
+
+.flip-card {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 300ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.flip-card.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.flip-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flip-face-back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+}

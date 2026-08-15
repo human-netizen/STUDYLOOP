@@ -4,7 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <!-- Painted before React mounts, so the first frame isn't a white flash. The app is a
+         single dark theme, so there is one value here and no media query. A meta tag cannot
+         take a CSS variable, so --ground is written out longhand. -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0c0e" />
+    <title>StudyLoop</title>
+    <style>
+      html { background: #0a0c0e }
+    </style>
   </head>
   <body>
     <div id="root"></div>

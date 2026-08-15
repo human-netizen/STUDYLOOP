@@ -9,7 +9,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (initializing) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-slate-400">
+      <div className="flex min-h-screen items-center justify-center font-mono text-[12px] tracking-[0.08em] text-ink-muted uppercase">
         Loading…
       </div>
     )
