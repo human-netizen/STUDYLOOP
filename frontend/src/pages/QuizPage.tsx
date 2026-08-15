@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { ApiError, quizzesApi } from '../lib/api'
 import type { AnswerInput, AttemptResponse, GradedAnswer, Quiz, QuizQuestionView } from '../lib/types'
 import { AppShell, BackLink } from '../components/AppShell'
@@ -89,7 +89,15 @@ export function QuizPage() {
             </h1>
           </div>
 
-          {result && <ScoreBanner score={result.score} total={result.total} onRetake={retake} />}
+          {result && (
+            <ScoreBanner
+              score={result.score}
+              total={result.total}
+              cardsEnrolled={result.cardsEnrolled}
+              courseId={id}
+              onRetake={retake}
+            />
+          )}
 
           <ol className="m-0 flex list-none flex-col gap-4 p-0">
             {quiz.questions.map((question) => {
@@ -123,7 +131,19 @@ export function QuizPage() {
   )
 }
 
-function ScoreBanner({ score, total, onRetake }: { score: number; total: number; onRetake: () => void }) {
+function ScoreBanner({
+  score,
+  total,
+  cardsEnrolled,
+  courseId,
+  onRetake,
+}: {
+  score: number
+  total: number
+  cardsEnrolled: number
+  courseId: string
+  onRetake: () => void
+}) {
   const pct = total === 0 ? 0 : Math.round((score / total) * 100)
   return (
     <div className="mb-10 rounded-card border border-line bg-surface p-6 shadow-card">
@@ -144,6 +164,19 @@ function ScoreBanner({ score, total, onRetake }: { score: number; total: number;
       <div className="mt-5 h-[6px] overflow-hidden rounded-full bg-ground-2">
         <div className="h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${pct}%` }} />
       </div>
+      {/* The loop closing: what you missed is already waiting in the review queue. */}
+      {cardsEnrolled > 0 && (
+        <p className="mt-4 mb-0 font-mono text-[11.5px] tracking-[0.06em] text-ink-muted uppercase">
+          <span className="tnum">{cardsEnrolled}</span> missed question
+          {cardsEnrolled === 1 ? '' : 's'} added to{' '}
+          <Link
+            to={`/courses/${courseId}/review`}
+            className="text-ink underline decoration-accent underline-offset-4"
+          >
+            today's review
+          </Link>
+        </p>
+      )}
     </div>
   )
 }

@@ -188,6 +188,9 @@ export interface AttemptResponse {
   total: number
   createdAt: string
   answers: GradedAnswer[]
+  // How many missed questions became new review cards (0 on a perfect score, and 0 on a
+  // retake where those questions already have cards).
+  cardsEnrolled: number
 }
 
 export interface AttemptSummary {
@@ -218,4 +221,36 @@ export interface CreateFlashcardRequest {
   back: string
   sourceDocumentId?: string | null
   sourcePage?: number | null
+}
+
+// --- Spaced repetition (com.studyloop.backend.review.dto) ---
+
+// A card that is due, with enough of its SM-2 state to show how well it's known.
+export interface ReviewCard {
+  cardId: string
+  courseId: string
+  courseName: string
+  front: string
+  back: string
+  sourceDocumentId: string | null
+  sourcePage: number | null
+  dueOn: string
+  intervalDays: number
+  repetitions: number
+  lapses: number
+  easeFactor: number
+}
+
+// What grading a card did to its schedule. `lapsed` means the grade was below 3, so the card
+// restarted and comes back tomorrow.
+export interface ReviewResult {
+  cardId: string
+  grade: number
+  lapsed: boolean
+  dueOn: string
+  intervalDays: number
+  repetitions: number
+  lapses: number
+  easeFactor: number
+  remainingToday: number
 }

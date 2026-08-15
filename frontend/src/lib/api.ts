@@ -16,6 +16,8 @@ import type {
   Quiz,
   QuizSummary,
   RegisterRequest,
+  ReviewCard,
+  ReviewResult,
   SubmitAttemptRequest,
   TokenResponse,
   UserResponse,
@@ -207,6 +209,19 @@ export const flashcardsApi = {
     request<Flashcard>(`/courses/${courseId}/flashcards`, { method: 'POST', body, auth: true }),
   remove: (courseId: string, cardId: string) =>
     request<void>(`/courses/${courseId}/flashcards/${cardId}`, { method: 'DELETE', auth: true }),
+}
+
+// The review queue spans every course, so these hang off /review rather than /courses/{id}.
+// Pass courseId to narrow the queue to one course.
+export const reviewApi = {
+  queue: (courseId?: string) =>
+    request<ReviewCard[]>(`/review/queue${courseId ? `?courseId=${courseId}` : ''}`, { auth: true }),
+  dueCount: (courseId?: string) =>
+    request<{ due: number }>(`/review/due-count${courseId ? `?courseId=${courseId}` : ''}`, {
+      auth: true,
+    }),
+  grade: (cardId: string, grade: number) =>
+    request<ReviewResult>(`/review/${cardId}`, { method: 'POST', body: { grade }, auth: true }),
 }
 
 export const invitesApi = {

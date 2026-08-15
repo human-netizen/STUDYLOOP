@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
-import { Link, NavLink, useParams } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link, NavLink, useLocation, useParams } from 'react-router-dom'
+import { reviewApi } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { Button, Eyebrow } from './ui'
 import { cx } from '../lib/style'
@@ -39,6 +40,7 @@ export function AppShell({
 function Rail({ courseName }: { courseName?: string }) {
   const { id: courseId } = useParams()
   const { user, logout } = useAuth()
+  const dueCount = useDueCount()
 
   return (
     <aside className="flex flex-col gap-6 border-b border-line bg-ground-2 px-5 py-6 sm:px-8 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:py-8 lg:pr-5 lg:pl-7">
@@ -53,15 +55,17 @@ function Rail({ courseName }: { courseName?: string }) {
 
       <nav className="-mx-1 flex gap-1 overflow-x-auto lg:mx-0 lg:flex-col lg:overflow-visible">
         <RailLink to="/" index="01" label="Your courses" end />
+        <RailLink to="/review" index="02" label="Review" end badge={dueCount} />
         {courseId && (
           <>
             <div className="hidden pt-4 pb-1 lg:block">
               <Eyebrow className="truncate px-1.5">{courseName ?? 'Course'}</Eyebrow>
             </div>
-            <RailLink to={`/courses/${courseId}`} index="02" label="Overview" end />
-            <RailLink to={`/courses/${courseId}/chat`} index="03" label="Ask" />
-            <RailLink to={`/courses/${courseId}/quizzes`} index="04" label="Quizzes" />
-            <RailLink to={`/courses/${courseId}/flashcards`} index="05" label="Flashcards" />
+            <RailLink to={`/courses/${courseId}`} index="03" label="Overview" end />
+            <RailLink to={`/courses/${courseId}/chat`} index="04" label="Ask" />
+            <RailLink to={`/courses/${courseId}/quizzes`} index="05" label="Quizzes" />
+            <RailLink to={`/courses/${courseId}/flashcards`} index="06" label="Flashcards" />
+            <RailLink to={`/courses/${courseId}/review`} index="07" label="Review this course" end />
           </>
         )}
       </nav>
@@ -86,16 +90,43 @@ function Rail({ courseName }: { courseName?: string }) {
   )
 }
 
+// How many cards are due right now, for the badge on the Review link. Re-read on every route
+// change, which is when the number can have moved (you just graded a card, or a quiz enrolled
+// one). A failure leaves the badge off rather than breaking the rail.
+function useDueCount(): number {
+  const [due, setDue] = useState(0)
+  const location = useLocation()
+
+  useEffect(() => {
+    let active = true
+    reviewApi
+      .dueCount()
+      .then((result) => {
+        if (active) setDue(result.due)
+      })
+      .catch(() => {
+        if (active) setDue(0)
+      })
+    return () => {
+      active = false
+    }
+  }, [location.pathname])
+
+  return due
+}
+
 function RailLink({
   to,
   index,
   label,
   end,
+  badge,
 }: {
   to: string
   index: string
   label: string
   end?: boolean
+  badge?: number
 }) {
   return (
     <NavLink
@@ -112,6 +143,11 @@ function RailLink({
     >
       <span className="tnum font-mono text-[10.5px] text-ink-muted">{index}</span>
       {label}
+      {badge != null && badge > 0 && (
+        <span className="tnum ml-auto rounded-full bg-accent px-1.5 font-mono text-[10px] text-on-accent">
+          {badge}
+        </span>
+      )}
     </NavLink>
   )
 }

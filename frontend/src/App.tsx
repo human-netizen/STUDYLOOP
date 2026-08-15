@@ -7,6 +7,7 @@ import { ChatPage } from './pages/ChatPage'
 import { QuizzesPage } from './pages/QuizzesPage'
 import { QuizPage } from './pages/QuizPage'
 import { FlashcardsPage } from './pages/FlashcardsPage'
+import { ReviewPage } from './pages/ReviewPage'
 import { JoinPage } from './pages/JoinPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
@@ -60,6 +61,23 @@ function App() {
         element={
           <ProtectedRoute>
             <FlashcardsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* The queue spans every course, so it also lives at the top level. */}
+      <Route
+        path="/review"
+        element={
+          <ProtectedRoute>
+            <ReviewPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/courses/:id/review"
+        element={
+          <ProtectedRoute>
+            <ReviewPage />
           </ProtectedRoute>
         }
       />
