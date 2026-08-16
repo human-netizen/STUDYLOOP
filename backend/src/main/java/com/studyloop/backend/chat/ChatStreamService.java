@@ -2,6 +2,7 @@ package com.studyloop.backend.chat;
 
 import com.studyloop.backend.chat.dto.ChatRequest;
 import com.studyloop.backend.chat.dto.Citation;
+import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,8 +45,12 @@ public class ChatStreamService {
         return emitter;
     }
 
+    // Runs on the chat executor, not the request thread, so AiUsageAttributionFilter's scope isn't
+    // in force here — the actor is re-established for the length of the turn. Without it the whole
+    // streaming path, which is how the UI actually asks questions, would bill to nobody and count
+    // against nobody's budget.
     private void run(UUID actorId, UUID courseId, ChatRequest request, SseEmitter emitter) {
-        try {
+        try (var ignored = AiUsageContext.actor(actorId)) {
             PreparedTurn prepared = chatService.prepare(actorId, courseId, request);
             send(emitter, "meta", new MetaEvent(prepared.conversationId(), prepared.citations(),
                     prepared.questionEventId()));

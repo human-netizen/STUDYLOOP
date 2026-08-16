@@ -127,6 +127,33 @@ studyloop:
     # decide how often that cost is paid in the background instead of in front of someone.
     cluster-interval: ${ANALYTICS_CLUSTER_INTERVAL:PT15M}
     cluster-initial-delay: ${ANALYTICS_CLUSTER_INITIAL_DELAY:PT2M}
+  quota:
+    # Phase 10: the two guardrails on the paid surface, both per user. They are separate switches
+    # because they fail differently — a rate limit clears in seconds, a spent budget does not.
+    rate-limit:
+      # Off (RATE_LIMIT_ENABLED=false) removes the limiter entirely, which is the comparison to
+      # run if a demo starts answering 429 unexpectedly.
+      enabled: ${RATE_LIMIT_ENABLED:true}
+      # Endpoints that call the model or the embedder: chat, search, quizzes, flashcards,
+      # summaries. A token bucket, so the allowance refills continuously rather than resetting on
+      # a boundary — 20 is far above anyone typing questions and far below anything scripted.
+      ai-requests: ${RATE_LIMIT_AI_REQUESTS:20}
+      ai-window: ${RATE_LIMIT_AI_WINDOW:1m}
+      # Uploads get their own, much smaller allowance: one PDF is an embedding call per batch of
+      # chunks plus a summary call, so request count is a poor proxy for what it costs.
+      uploads: ${RATE_LIMIT_UPLOADS:10}
+      upload-window: ${RATE_LIMIT_UPLOAD_WINDOW:1h}
+      # How often idle buckets are swept out of memory. Not a limit, just housekeeping.
+      prune-interval: ${RATE_LIMIT_PRUNE_INTERVAL:PT10M}
+    budget:
+      enabled: ${TOKEN_BUDGET_ENABLED:true}
+      # Input + output tokens one user may spend per window, read from the ai_usage_events ledger.
+      # 200k is roughly 60 grounded chat answers or a dozen quiz generations — generous for a
+      # student, and a hard ceiling on what one compromised account can cost in a day.
+      tokens: ${TOKEN_BUDGET_TOKENS:200000}
+      # Rolling, not calendar: spend ages out gradually instead of everyone resetting at the same
+      # midnight, and there is no question of whose midnight it is.
+      window: ${TOKEN_BUDGET_WINDOW:24h}
   pricing:
     # USD per million tokens, used to price each recorded provider call for /admin/costs. These
     # are Cohere's published list prices; a model with no entry here is still recorded, just

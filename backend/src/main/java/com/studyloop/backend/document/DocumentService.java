@@ -67,7 +67,8 @@ public class DocumentService {
 
         // Kick off ingestion only after this transaction commits (the listener is bound to
         // AFTER_COMMIT), so the async worker always finds the row.
-        eventPublisher.publishEvent(new DocumentUploadedEvent(document.getId()));
+        eventPublisher.publishEvent(
+                new DocumentUploadedEvent(document.getId(), actor.getUser().getId()));
 
         return new UploadOutcome(DocumentResponse.from(document, courseId), true);
     }

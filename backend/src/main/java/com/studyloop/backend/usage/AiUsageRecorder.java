@@ -25,7 +25,7 @@ public class AiUsageRecorder {
                        int inputTokens, int outputTokens) {
         try {
             ledger.write(provider, model, AiUsageContext.current(fallbackOperation),
-                    inputTokens, outputTokens);
+                    AiUsageContext.currentActor(), inputTokens, outputTokens);
         } catch (RuntimeException e) {
             log.warn("Could not record {} usage for model {}: {}", provider, model, e.getMessage());
         }

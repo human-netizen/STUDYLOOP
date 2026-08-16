@@ -3,17 +3,25 @@ package com.studyloop.backend.usage;
 import com.studyloop.backend.config.PricingProperties;
 import com.studyloop.backend.config.PricingProperties.ModelPrice;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
-// The two pieces of usage accounting that need no database: the pricing arithmetic, and the
-// thread-local that tells the recorder which feature a call belongs to. Plain JUnit, no Spring
-// context — both are pure logic, and a cached ApplicationContext for them would cost a Supabase
-// connection to test something that never touches one.
+// The parts of usage accounting that need no database: the pricing arithmetic, the thread-local
+// that tells the recorder which feature a call belongs to and whose allowance it comes out of, and
+// the filter that opens that scope for a request. Plain JUnit, no Spring context — all of it is
+// pure logic (the filter runs against a mock request), and a cached ApplicationContext for them
+// would cost a Supabase connection to test something that never touches one.
 class UsageAccountingTest {
 
     private static final PricingProperties PRICING = new PricingProperties(Map.of(
@@ -89,5 +97,82 @@ class UsageAccountingTest {
             assertEquals(AiOperation.SUMMARY, AiUsageContext.current(AiOperation.OTHER));
         }
         assertEquals(AiOperation.OTHER, AiUsageContext.current(AiOperation.OTHER));
+    }
+
+    // ── whose allowance (Phase 10) ──────────────────────────────────────────────────────────
+
+    @Test
+    void withNoActorInScopeACallBelongsToNobody() {
+        assertNull(AiUsageContext.currentActor());
+    }
+
+    // The two axes are set in different places — the actor once per request, the operation several
+    // times inside it — so an operation scope opened partway through must not make the call
+    // anonymous. This is what keeps quiz generation billed to the student who asked for it.
+    @Test
+    void labellingTheFeatureKeepsWhoeverIsPayingForIt() {
+        UUID student = UUID.randomUUID();
+
+        try (var request = AiUsageContext.actor(student)) {
+            try (var work = AiUsageContext.of(AiOperation.QUIZ_GENERATION)) {
+                assertEquals(AiOperation.QUIZ_GENERATION, AiUsageContext.current(AiOperation.OTHER));
+                assertEquals(student, AiUsageContext.currentActor());
+            }
+            assertEquals(student, AiUsageContext.currentActor());
+        }
+        assertNull(AiUsageContext.currentActor());
+    }
+
+    // Request threads are pooled and reused. An actor that outlived its request would bill the
+    // next person's questions to the previous one.
+    @Test
+    void closingAnActorScopeRestoresTheOneBeneathIt() {
+        UUID outer = UUID.randomUUID();
+        UUID inner = UUID.randomUUID();
+
+        try (var first = AiUsageContext.actor(outer)) {
+            try (var second = AiUsageContext.actor(inner)) {
+                assertEquals(inner, AiUsageContext.currentActor());
+            }
+            assertEquals(outer, AiUsageContext.currentActor());
+        }
+        assertNull(AiUsageContext.currentActor());
+    }
+
+    // The filter that opens that scope for a request, exercised against a mock request rather than
+    // a running server — all it does is read the authenticated principal and clean up afterwards,
+    // and both halves are worth pinning down.
+    @Test
+    void theFilterNamesTheAuthenticatedCallerForTheLengthOfTheRequest() throws Exception {
+        UUID student = UUID.randomUUID();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(student.toString(), null, List.of()));
+        UUID[] seenInside = new UUID[1];
+
+        try {
+            new AiUsageAttributionFilter().doFilter(
+                    new MockHttpServletRequest("POST", "/api/v1/courses/x/chat"),
+                    new MockHttpServletResponse(),
+                    (req, res) -> seenInside[0] = AiUsageContext.currentActor());
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+
+        assertEquals(student, seenInside[0]);
+        assertNull(AiUsageContext.currentActor(), "the scope must not outlive the request");
+    }
+
+    // An anonymous request reaches nothing that costs money, but it must not inherit whatever the
+    // thread was last used for either.
+    @Test
+    void anAnonymousRequestIsAttributedToNobody() throws Exception {
+        UUID[] seenInside = {UUID.randomUUID()};
+
+        new AiUsageAttributionFilter().doFilter(
+                new MockHttpServletRequest("GET", "/api/v1/courses"),
+                new MockHttpServletResponse(),
+                (req, res) -> seenInside[0] = AiUsageContext.currentActor());
+
+        assertNull(seenInside[0]);
     }
 }

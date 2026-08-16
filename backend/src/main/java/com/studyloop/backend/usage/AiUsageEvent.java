@@ -44,6 +44,13 @@ public class AiUsageEvent {
     @Column(nullable = false, length = 40)
     private AiOperation operation;
 
+    // Whose allowance this came out of, or null when nobody's — a scheduled sweep has no actor.
+    // A plain column rather than a @ManyToOne User: nothing here ever reads the user back, and a
+    // mapped association would drag a lazy proxy into a table written from inside other people's
+    // transactions.
+    @Column(name = "user_id")
+    private UUID userId;
+
     @Column(name = "input_tokens", nullable = false)
     private int inputTokens;
 

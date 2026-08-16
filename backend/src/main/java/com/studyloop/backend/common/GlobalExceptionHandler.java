@@ -27,8 +27,13 @@ import com.studyloop.backend.quiz.NoQuizMaterialException;
 import com.studyloop.backend.review.ReviewCardNotFoundException;
 import com.studyloop.backend.quiz.QuizGenerationException;
 import com.studyloop.backend.quiz.QuizNotFoundException;
+import com.studyloop.backend.usage.QuotaExceededException;
+import com.studyloop.backend.usage.RateLimitExceededException;
+import com.studyloop.backend.usage.TokenBudgetExceededException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -293,6 +298,45 @@ public class GlobalExceptionHandler {
                 HttpStatus.NOT_FOUND, ex.getMessage());
         problem.setTitle("Review card not found");
         return problem;
+    }
+
+    // Phase 10's two guards. Both are 429 and both carry Retry-After, because the client's correct
+    // response to either is the same: wait the stated time, then retry. What differs is how long
+    // and why, so `reason` is a machine-readable field and the numbers travel with it — a UI that
+    // showed "too many requests" for an exhausted daily allowance would send someone into a retry
+    // loop that cannot succeed for hours.
+    @ExceptionHandler(RateLimitExceededException.class)
+    ResponseEntity<ProblemDetail> handleRateLimit(RateLimitExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+        problem.setTitle("Too many requests");
+        problem.setProperty("reason", "RATE_LIMIT");
+        problem.setProperty("limit", ex.getLimit());
+        problem.setProperty("windowSeconds", ex.getWindow().toSeconds());
+        problem.setProperty("retryAfterSeconds", ex.retryAfterSeconds());
+        return retryable(problem, ex);
+    }
+
+    @ExceptionHandler(TokenBudgetExceededException.class)
+    ResponseEntity<ProblemDetail> handleTokenBudget(TokenBudgetExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+        problem.setTitle("AI allowance used up");
+        problem.setProperty("reason", "TOKEN_BUDGET");
+        problem.setProperty("usedTokens", ex.getUsedTokens());
+        problem.setProperty("limitTokens", ex.getLimitTokens());
+        problem.setProperty("windowSeconds", ex.getWindow().toSeconds());
+        problem.setProperty("retryAfterSeconds", ex.retryAfterSeconds());
+        return retryable(problem, ex);
+    }
+
+    // ResponseEntity rather than a bare ProblemDetail, only because Retry-After is a header and
+    // there is no other way to set one from here.
+    private static ResponseEntity<ProblemDetail> retryable(ProblemDetail problem,
+                                                           QuotaExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(ex.retryAfterSeconds()))
+                .body(problem);
     }
 
     // A @PreAuthorize check failing (e.g. non-admin hitting /admin/**) throws this.

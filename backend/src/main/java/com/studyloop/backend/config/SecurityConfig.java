@@ -2,6 +2,7 @@ package com.studyloop.backend.config;
 
 import com.studyloop.backend.security.JwtAuthenticationFilter;
 import com.studyloop.backend.security.JwtService;
+import com.studyloop.backend.usage.AiUsageAttributionFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -78,7 +79,10 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtService),
-                        UsernamePasswordAuthenticationFilter.class);
+                        UsernamePasswordAuthenticationFilter.class)
+                // Immediately after the filter that establishes who is calling, so every provider
+                // call made while serving this request is billed to them (Phase 10).
+                .addFilterAfter(new AiUsageAttributionFilter(), JwtAuthenticationFilter.class);
         return http.build();
     }
 }

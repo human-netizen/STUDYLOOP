@@ -11,11 +11,14 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
-// The dashboard's aggregates, as native SQL. Grouping by day needs date_trunc, and summing
-// numeric into BigDecimal without a round trip through double needs the driver's own mapping —
-// neither is expressible in JPQL, so this follows ChunkSearchRepository's precedent and drops to
-// JdbcTemplate. Everything here is read-only; AiUsageEventRepository does the writing.
+// Everything that reads the ledger in aggregate: the dashboard's numbers, and the one query the
+// per-user token budget asks before an expensive request. Native SQL, because grouping by day
+// needs date_trunc and summing numeric into BigDecimal without a round trip through double needs
+// the driver's own mapping — neither is expressible in JPQL, so this follows
+// ChunkSearchRepository's precedent and drops to JdbcTemplate. Everything here is read-only;
+// AiUsageEventRepository does the writing.
 @Repository
 @RequiredArgsConstructor
 class AiUsageStatsRepository {
@@ -76,6 +79,30 @@ class AiUsageStatsRepository {
                 Long.class);
         return count == null ? 0L : count;
     }
+
+    // What one user has spent inside the budget window, and when the oldest call still counted
+    // was made. Both in one statement because the second is only meaningful alongside the first:
+    // the window rolls, so the moment the user gets headroom back is when that oldest row ages
+    // out of it. Deliberately one row and one index range scan — this runs before every gated
+    // request, so it must cost about as much as the authorization check next to it.
+    UserSpend spendSince(UUID userId, Instant since) {
+        UserSpend spend = jdbc.queryForObject("""
+                select coalesce(sum(input_tokens + output_tokens), 0) as tokens,
+                       min(occurred_at)                               as oldest
+                from ai_usage_events
+                where user_id = ? and occurred_at >= ?
+                """,
+                (rs, row) -> {
+                    Timestamp oldest = rs.getTimestamp("oldest");
+                    return new UserSpend(rs.getLong("tokens"),
+                            oldest == null ? null : oldest.toInstant());
+                },
+                userId, Timestamp.from(since));
+        return spend == null ? new UserSpend(0L, null) : spend;
+    }
+
+    // oldest is null exactly when tokens is 0 — the user has made no billable call in the window.
+    record UserSpend(long tokens, Instant oldest) { }
 
     // The average price of one grounded answer, which is what a cache hit avoids paying.
     BigDecimal averageAnswerCost() {

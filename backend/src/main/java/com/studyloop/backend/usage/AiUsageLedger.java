@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 // The write half of usage tracking, split from AiUsageRecorder for the same reason
 // DocumentSummaryStore is split from DocumentSummaryService: @Transactional comes from a proxy,
@@ -28,7 +29,7 @@ class AiUsageLedger {
     private final PricingProperties pricing;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void write(String provider, String model, AiOperation operation,
+    public void write(String provider, String model, AiOperation operation, UUID userId,
                       int inputTokens, int outputTokens) {
         BigDecimal cost = pricing.priceFor(model).cost(inputTokens, outputTokens);
 
@@ -36,6 +37,7 @@ class AiUsageLedger {
         event.setProvider(provider);
         event.setModel(model);
         event.setOperation(operation);
+        event.setUserId(userId);
         event.setInputTokens(Math.max(inputTokens, 0));
         event.setOutputTokens(Math.max(outputTokens, 0));
         event.setCostUsd(cost);
