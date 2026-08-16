@@ -4,6 +4,7 @@ import { RegisterPage } from './pages/RegisterPage'
 import { CoursesPage } from './pages/CoursesPage'
 import { CourseDetailPage } from './pages/CourseDetailPage'
 import { ChatPage } from './pages/ChatPage'
+import { CourseSearchPage } from './pages/CourseSearchPage'
 import { CourseForumPage } from './pages/CourseForumPage'
 import { ForumThreadPage } from './pages/ForumThreadPage'
 import { QuizzesPage } from './pages/QuizzesPage'
@@ -59,6 +60,15 @@ function App() {
         element={
           <ProtectedRoute>
             <ForumThreadPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* The other way into the same retrieval: passages instead of an answer. Any member. */}
+      <Route
+        path="/courses/:id/search"
+        element={
+          <ProtectedRoute>
+            <CourseSearchPage />
           </ProtectedRoute>
         }
       />

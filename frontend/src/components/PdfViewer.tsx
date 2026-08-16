@@ -3,7 +3,6 @@ import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import { ApiError, documentsApi } from '../lib/api'
-import type { Citation } from '../lib/types'
 import { Button, ErrorText, Eyebrow, Loading, Meta } from './ui'
 
 // pdf.js runs its parser in a Web Worker. Vite bundles the worker file and hands us a URL for
@@ -13,27 +12,38 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString()
 
-// A right-side drawer that renders a cited PDF, opened at the citation's page. Fetches the
-// bytes once (auth-guarded), then lets the reader page around. Remounted by the parent (keyed
-// on documentId) when a citation points at a different document.
+// A place in a document to open at. A Citation satisfies this, and so does a search hit — the
+// viewer needs a file and a page, not the chunk text behind them.
+export interface PdfTarget {
+  documentId: string
+  filename: string
+  pageNumber: number | null
+  // The [n] marker, when the target came from a citation. Search results carry no number.
+  index?: number
+}
+
+// A right-side drawer that renders a PDF, opened at the target's page. Fetches the bytes once
+// (auth-guarded), then lets the reader page around. Remounted by the parent (keyed on
+// documentId) when the target points at a different document.
 export function PdfViewer({
   courseId,
-  citation,
+  target,
   onClose,
 }: {
   courseId: string
-  citation: Citation
+  target: PdfTarget
   onClose: () => void
 }) {
   const [fileUrl, setFileUrl] = useState<string | null>(null)
   const [numPages, setNumPages] = useState<number | null>(null)
-  const [page, setPage] = useState(citation.pageNumber ?? 1)
+  const [page, setPage] = useState(target.pageNumber ?? 1)
   const [error, setError] = useState<string | null>(null)
 
-  // Jump to the cited page whenever the active citation changes (same document, new [n]).
+  // Jump to the new page whenever the target changes within the same document (another [n], or
+  // another passage in the same lecture).
   useEffect(() => {
-    setPage(citation.pageNumber ?? 1)
-  }, [citation])
+    setPage(target.pageNumber ?? 1)
+  }, [target])
 
   // Load the PDF bytes into an object URL; revoke it on cleanup so we don't leak blobs.
   useEffect(() => {
@@ -42,7 +52,7 @@ export function PdfViewer({
     setError(null)
     setFileUrl(null)
     documentsApi
-      .fileBlob(courseId, citation.documentId)
+      .fileBlob(courseId, target.documentId)
       .then((blob) => {
         if (!active) return
         url = URL.createObjectURL(blob)
@@ -55,7 +65,7 @@ export function PdfViewer({
       active = false
       if (url) URL.revokeObjectURL(url)
     }
-  }, [courseId, citation.documentId])
+  }, [courseId, target.documentId])
 
   // Close on Escape for keyboard users.
   useEffect(() => {
@@ -80,8 +90,8 @@ export function PdfViewer({
       <aside className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-line bg-surface">
         <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
           <div className="min-w-0">
-            <Eyebrow>Source [{citation.index}]</Eyebrow>
-            <p className="m-0 truncate font-mono text-[13px] text-ink">{citation.filename}</p>
+            <Eyebrow>{target.index != null ? `Source [${target.index}]` : 'Source'}</Eyebrow>
+            <p className="m-0 truncate font-mono text-[13px] text-ink">{target.filename}</p>
           </div>
           <Button size="sm" onClick={onClose}>
             Close
@@ -99,7 +109,7 @@ export function PdfViewer({
             </Button>
             <Meta>
               Page {clampedPage} / {numPages}
-              {citation.pageNumber != null && ` · cited ${citation.pageNumber}`}
+              {target.pageNumber != null && ` · opened at ${target.pageNumber}`}
             </Meta>
             <Button
               variant="quiet"

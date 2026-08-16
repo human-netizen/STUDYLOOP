@@ -25,6 +25,7 @@ import type {
   RegisterRequest,
   ReviewCard,
   ReviewResult,
+  SearchResponse,
   SubmitAttemptRequest,
   TokenResponse,
   UserResponse,
@@ -55,29 +56,61 @@ export const tokenStore = {
 
 // Thrown for any non-2xx response. `message` comes from the RFC 7807 ProblemDetail the
 // backend returns; `fieldErrors` carries per-field validation messages when present.
+// `reason` and `retryAfterSeconds` are set on the 429s the quota guards produce.
 export class ApiError extends Error {
   readonly status: number
   readonly fieldErrors?: Record<string, string>
+  readonly reason?: string
+  readonly retryAfterSeconds?: number
 
-  constructor(status: number, message: string, fieldErrors?: Record<string, string>) {
+  constructor(
+    status: number,
+    message: string,
+    fieldErrors?: Record<string, string>,
+    reason?: string,
+    retryAfterSeconds?: number,
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.fieldErrors = fieldErrors
+    this.reason = reason
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
 async function toError(res: Response): Promise<ApiError> {
   let message = res.statusText
   let fieldErrors: Record<string, string> | undefined
+  let reason: string | undefined
+  let retryAfterSeconds: number | undefined
   try {
     const body = await res.json()
     message = body.detail ?? body.title ?? message
     if (body.errors) fieldErrors = body.errors as Record<string, string>
+    if (typeof body.reason === 'string') reason = body.reason
+    if (typeof body.retryAfterSeconds === 'number') retryAfterSeconds = body.retryAfterSeconds
   } catch {
     // non-JSON body — keep the status text
   }
-  return new ApiError(res.status, message, fieldErrors)
+  return new ApiError(res.status, message, fieldErrors, reason, retryAfterSeconds)
+}
+
+// The message to put in front of someone whose request was refused, with the wait folded in.
+// "Too many requests" and "you're out of allowance until tomorrow" both arrive as 429 and need
+// very different reactions from the reader, so the two are never collapsed into one sentence.
+export function errorMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof ApiError)) return fallback
+  if (err.status !== 429 || err.retryAfterSeconds == null) return err.message
+  return `${err.message} Try again in ${humanWait(err.retryAfterSeconds)}.`
+}
+
+function humanWait(seconds: number): string {
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} seconds`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return minutes === 1 ? 'a minute' : `${minutes} minutes`
+  const hours = Math.round(seconds / 3600)
+  return hours === 1 ? 'an hour' : `${hours} hours`
 }
 
 interface RequestOptions {
@@ -273,6 +306,16 @@ export const forumApi = {
     request<ForumThreadDetail>(
       `/courses/${courseId}/forum/threads/${threadId}/answers/${answerId}/accept`,
       { method: 'POST', auth: true },
+    ),
+}
+
+// Search a course's materials. The same retrieval the assistant runs, returned as passages
+// instead of an answer — one embedding call, no generation. Any member may search.
+export const searchApi = {
+  query: (courseId: string, q: string, limit?: number) =>
+    request<SearchResponse>(
+      `/courses/${courseId}/search?q=${encodeURIComponent(q)}${limit ? `&limit=${limit}` : ''}`,
+      { auth: true },
     ),
 }
 

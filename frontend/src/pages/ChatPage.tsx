@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError, chatApi, coursesApi, flashcardsApi, forumApi } from '../lib/api'
+import { ApiError, chatApi, coursesApi, errorMessage, flashcardsApi, forumApi } from '../lib/api'
 import type { Citation, CourseResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import { PdfViewer } from '../components/PdfViewer'
@@ -93,7 +93,9 @@ export function ChatPage() {
         },
       )
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'The assistant is unavailable right now.'
+      // Covers the quota refusals too: a 429 arrives here with the wait already folded in, so
+      // "you've used this period's allowance" doesn't read as "the assistant is broken".
+      const message = errorMessage(err, 'The assistant is unavailable right now.')
       setError(message)
       updateLast((turn) => ({
         ...turn,
@@ -176,7 +178,7 @@ export function ChatPage() {
         <PdfViewer
           key={activeCitation.documentId}
           courseId={id}
-          citation={activeCitation}
+          target={activeCitation}
           onClose={() => setActiveCitation(null)}
         />
       )}

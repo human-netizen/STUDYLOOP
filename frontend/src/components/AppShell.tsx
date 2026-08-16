@@ -69,13 +69,16 @@ function Rail({ courseName }: { courseName?: string }) {
             {/* Directly under Ask, because that is where threads come from: the forum is what a
                 refusal turns into. */}
             <RailLink to={`/courses/${courseId}/forum`} index="05" label="Forum" />
-            <RailLink to={`/courses/${courseId}/quizzes`} index="06" label="Quizzes" />
-            <RailLink to={`/courses/${courseId}/flashcards`} index="07" label="Flashcards" />
-            <RailLink to={`/courses/${courseId}/review`} index="08" label="Review this course" end />
+            {/* The same retrieval as Ask, returned as passages. Kept a separate destination
+                rather than a box on the chat page: you arrive wanting one or the other. */}
+            <RailLink to={`/courses/${courseId}/search`} index="06" label="Search" />
+            <RailLink to={`/courses/${courseId}/quizzes`} index="07" label="Quizzes" />
+            <RailLink to={`/courses/${courseId}/flashcards`} index="08" label="Flashcards" />
+            <RailLink to={`/courses/${courseId}/review`} index="09" label="Review this course" end />
             {/* Same rule as the Spend link: hidden for a plain MEMBER rather than offered and
                 refused. The page still handles a 403 for anyone who pastes the URL. */}
             {teaches && (
-              <RailLink to={`/courses/${courseId}/confusion`} index="09" label="Confusion" end />
+              <RailLink to={`/courses/${courseId}/confusion`} index="10" label="Confusion" end />
             )}
           </>
         )}

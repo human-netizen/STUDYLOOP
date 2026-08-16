@@ -150,6 +150,41 @@ export interface ChatDoneEvent {
   conversationId: string
 }
 
+// --- Search (com.studyloop.backend.retrieval.dto) ---
+
+// A snippet arrives pre-split: `match` runs are the words the query matched. The split is done on
+// the server so the matching rule (which counts "indexing" as a match for "index") lives in one
+// place rather than being re-implemented here and drifting.
+export interface SnippetPart {
+  text: string
+  match: boolean
+}
+
+// One passage. `similarity` is the raw cosine against the query — the same number the assistant's
+// confidence gate reads — and is null when the passage was found lexically only.
+export interface SearchHit {
+  chunkId: string
+  pageNumber: number | null
+  similarity: number | null
+  score: number
+  snippet: SnippetPart[]
+}
+
+// Every hit inside one document, so a lecture that matched five times is one result.
+export interface SearchDocument {
+  documentId: string
+  filename: string
+  source: DocumentSourceKind
+  hitCount: number
+  hits: SearchHit[]
+}
+
+export interface SearchResponse {
+  query: string
+  hitCount: number
+  documents: SearchDocument[]
+}
+
 // --- Quizzes (com.studyloop.backend.quiz.dto) ---
 
 export type QuestionType = 'MULTIPLE_CHOICE' | 'SHORT_ANSWER'
