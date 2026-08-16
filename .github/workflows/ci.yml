@@ -26,9 +26,16 @@ jobs:
       - name: Build and test
         run: ./mvnw -B verify
         env:
-          DB_URL: ${{ secrets.DB_URL }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          # CI only ever runs the suite, so every datasource here points at the dedicated test
+          # project (Phase 10.1) — the development database is not reachable from this job at all.
+          # DB_* still has to resolve because main's application.yml binds it before the test
+          # profile overrides it; TEST_DB_* is what the suite actually connects with.
+          DB_URL: ${{ secrets.TEST_DB_URL }}
+          DB_USERNAME: ${{ secrets.TEST_DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
+          TEST_DB_URL: ${{ secrets.TEST_DB_URL }}
+          TEST_DB_USERNAME: ${{ secrets.TEST_DB_USERNAME }}
+          TEST_DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
   # Verify the deployment images build from a clean context. No registry push — that only needs

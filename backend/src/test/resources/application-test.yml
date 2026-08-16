@@ -1,0 +1,15 @@
+# Phase 10.1: the suite gets its own Supabase project, never the one the app runs against.
+#
+# Only the datasource is redirected. Flyway, the AI stubs, the quota defaults and everything else
+# stay exactly as main's application.yml declares them, so a test still exercises the real
+# configuration rather than a simplified copy of it.
+#
+# The placeholders have no defaults on purpose. A missing TEST_DB_URL fails the context outright,
+# which is the entire point of this file: the failure this profile exists to prevent is a suite
+# that quietly falls back to the development database and deletes something in it. A loud startup
+# failure is recoverable; a truncated demo course the day before a viva is not.
+spring:
+  datasource:
+    url: ${TEST_DB_URL}
+    username: ${TEST_DB_USERNAME}
+    password: ${TEST_DB_PASSWORD}
