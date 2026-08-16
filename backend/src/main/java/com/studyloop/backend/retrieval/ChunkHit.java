@@ -1,5 +1,7 @@
 package com.studyloop.backend.retrieval;
 
+import com.studyloop.backend.document.DocumentSource;
+
 import java.util.UUID;
 
 // A raw chunk row returned by one search strategy, before fusion. Ranking (position in the
@@ -10,6 +12,7 @@ record ChunkHit(
         UUID id,
         UUID documentId,
         String filename,
+        DocumentSource source,
         Integer pageNumber,
         String content,
         int tokenCount,

@@ -9,10 +9,13 @@ import java.util.UUID;
 // the model. Either the turn already has its answer — the confidence gate refused it, or the
 // semantic cache had it — or it is answerable and carries the grounded prompt to stream against.
 //
-// The two settled cases are deliberately not distinguished here. From the streaming layer's point
-// of view they are identical: text that exists already, emitted as a single delta, no model call,
-// and the assistant turn is persisted by prepare() itself. Only the answerable case leaves work
-// for completeTurn().
+// The two settled cases are still not distinguished for the purpose of *streaming* them: both are
+// text that exists already, emitted as a single delta, no model call, with the assistant turn
+// persisted by prepare() itself. Only the answerable case leaves work for completeTurn().
+//
+// A refusal does carry one thing a cache hit cannot — the id of the question_events row it just
+// wrote — because that is what "ask the class" attaches a forum thread to (Phase 9.2). It rides
+// along in the meta event; the stream's control flow never looks at it.
 public record PreparedTurn(
         UUID conversationId,
         List<Citation> citations,
@@ -20,7 +23,9 @@ public record PreparedTurn(
         // Non-null exactly when the turn needs nothing further from the model.
         String finalAnswer,
         // Non-null when a fresh answer is worth remembering — see CacheWrite.
-        CacheWrite cacheWrite
+        CacheWrite cacheWrite,
+        // Non-null only on a refusal, and only while question logging is switched on.
+        UUID questionEventId
 ) {
 
     public boolean isAnswered() {
@@ -28,12 +33,16 @@ public record PreparedTurn(
     }
 
     static PreparedTurn answered(UUID conversationId, List<Citation> citations, String answer) {
-        return new PreparedTurn(conversationId, citations, List.of(), answer, null);
+        return new PreparedTurn(conversationId, citations, List.of(), answer, null, null);
+    }
+
+    static PreparedTurn refused(UUID conversationId, String answer, UUID questionEventId) {
+        return new PreparedTurn(conversationId, List.of(), List.of(), answer, null, questionEventId);
     }
 
     static PreparedTurn answerable(UUID conversationId, List<Citation> citations,
                                    List<LlmMessage> messages, CacheWrite cacheWrite) {
-        return new PreparedTurn(conversationId, citations, messages, null, cacheWrite);
+        return new PreparedTurn(conversationId, citations, messages, null, cacheWrite, null);
     }
 
     // Carries the question's embedding forward from prepare() to completeTurn(), which is the

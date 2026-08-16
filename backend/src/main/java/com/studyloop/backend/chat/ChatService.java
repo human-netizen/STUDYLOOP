@@ -1,5 +1,6 @@
 package com.studyloop.backend.chat;
 
+import com.studyloop.backend.analytics.QuestionLogService;
 import com.studyloop.backend.chat.PreparedTurn.CacheWrite;
 import com.studyloop.backend.chat.SemanticCacheService.CacheProbe;
 import com.studyloop.backend.chat.SemanticCacheService.CachedAnswer;
@@ -18,7 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 // The RAG orchestrator: retrieve the most relevant chunks for a question, ground the model on
 // them, and persist the turn so follow-ups have context. The model is told to answer only from
@@ -48,6 +52,7 @@ public class ChatService {
     private final ChatMessageRepository messageRepository;
     private final ChatProperties chatProperties;
     private final SemanticCacheService semanticCache;
+    private final QuestionLogService questionLog;
 
     // The non-streaming turn, kept as the simple fallback to /chat/stream. It shares prepare()
     // and completeTurn() with the streaming path rather than restating them.
@@ -61,12 +66,13 @@ public class ChatService {
     public ChatResponse chat(UUID actorId, UUID courseId, ChatRequest request) {
         PreparedTurn prepared = prepare(actorId, courseId, request);
         if (prepared.isAnswered()) {
-            return new ChatResponse(prepared.conversationId(), prepared.finalAnswer(), prepared.citations());
+            return new ChatResponse(prepared.conversationId(), prepared.finalAnswer(),
+                    prepared.citations(), prepared.questionEventId());
         }
 
         String answer = chatClient.complete(prepared.messages());
         completeTurn(prepared, answer);
-        return new ChatResponse(prepared.conversationId(), answer, prepared.citations());
+        return new ChatResponse(prepared.conversationId(), answer, prepared.citations(), null);
     }
 
     // The fast DB half of a streaming turn: resolve the thread, try the cache, retrieve, gate,
@@ -95,6 +101,12 @@ public class ChatService {
         if (probe.isHit()) {
             CachedAnswer cached = probe.hit();
             saveMessage(conversation, ChatRole.ASSISTANT, cached.answer());
+            // Still a question the class asked, so it still counts toward confusion analytics.
+            // Who paid for the answer is a cost concern, not a teaching one. No retrieval ran, so
+            // the lecture attribution comes from the citations stored with the cached answer, and
+            // there is no top similarity to report.
+            questionLog.recordGrounded(courseId, actorId, question, probe.questionVector(), null,
+                    documentIdsOf(cached.citations()));
             return PreparedTurn.answered(conversation.getId(), cached.citations(), cached.answer());
         }
 
@@ -105,12 +117,31 @@ public class ChatService {
                 actorId, courseId, question, probe.questionVector(), RETRIEVAL_K);
         List<RetrievedChunk> chunks = retrieval.chunks();
 
+        // Whichever half of the turn embedded the question, analytics reuses that vector rather
+        // than asking the provider for a third copy of it.
+        float[] questionVector =
+                probe.questionVector() != null ? probe.questionVector() : retrieval.queryVector();
+        Double topSimilarity = retrieval.topVectorSimilarity().isPresent()
+                ? retrieval.topVectorSimilarity().getAsDouble()
+                : null;
+
         // Confidence gate: if nothing relevant came back, refuse deterministically instead of
         // letting the model answer from weak or absent context (and skip the provider call).
         if (shouldRefuse(retrieval)) {
             saveMessage(conversation, ChatRole.ASSISTANT, NOT_IN_MATERIALS);
-            return PreparedTurn.answered(conversation.getId(), List.of(), NOT_IN_MATERIALS);
+            // The most valuable row this table gets: a question the corpus could not answer. Its
+            // id goes back to the client so the refusal can be escalated to the forum as *this*
+            // question rather than as a copy of its text.
+            UUID questionEventId =
+                    questionLog.recordRefused(courseId, actorId, question, questionVector, topSimilarity);
+            return PreparedTurn.refused(conversation.getId(), NOT_IN_MATERIALS, questionEventId);
         }
+
+        // Logged here rather than after generation on purpose: the question was asked and the
+        // materials could answer it, both of which are settled facts before the model speaks.
+        // Waiting for the answer would lose every turn where the provider then times out.
+        questionLog.recordGrounded(courseId, actorId, question, questionVector, topSimilarity,
+                chunks.stream().map(RetrievedChunk::documentId).collect(Collectors.toSet()));
 
         // system prompt (numbered sources) → prior turns, which now end with the question we
         // just saved, so there's no need to append it again.
@@ -157,6 +188,15 @@ public class ChatService {
                 && retrieval.topVectorSimilarity().getAsDouble() < threshold;
         boolean noLexical = retrieval.lexicalHitCount() == 0;
         return weakSemantic && noLexical;
+    }
+
+    // The distinct documents a cached answer cites — the lecture attribution for a cache hit,
+    // recovered from the citations rather than by re-running retrieval to find out.
+    private static Set<UUID> documentIdsOf(List<Citation> citations) {
+        return citations.stream()
+                .map(Citation::documentId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
     }
 
     private ChatConversation resolveConversation(UUID conversationId, UUID courseId, UUID actorId,

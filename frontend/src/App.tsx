@@ -4,10 +4,13 @@ import { RegisterPage } from './pages/RegisterPage'
 import { CoursesPage } from './pages/CoursesPage'
 import { CourseDetailPage } from './pages/CourseDetailPage'
 import { ChatPage } from './pages/ChatPage'
+import { CourseForumPage } from './pages/CourseForumPage'
+import { ForumThreadPage } from './pages/ForumThreadPage'
 import { QuizzesPage } from './pages/QuizzesPage'
 import { QuizPage } from './pages/QuizPage'
 import { FlashcardsPage } from './pages/FlashcardsPage'
 import { ReviewPage } from './pages/ReviewPage'
+import { CourseConfusionPage } from './pages/CourseConfusionPage'
 import { JoinPage } from './pages/JoinPage'
 import { AdminCostsPage } from './pages/AdminCostsPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
@@ -41,6 +44,24 @@ function App() {
           </ProtectedRoute>
         }
       />
+      {/* Where a refused question goes. Open to every member — the whole point is that a
+          classmate can answer what the materials couldn't. */}
+      <Route
+        path="/courses/:id/forum"
+        element={
+          <ProtectedRoute>
+            <CourseForumPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/courses/:id/forum/:threadId"
+        element={
+          <ProtectedRoute>
+            <ForumThreadPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/courses/:id/quizzes"
         element={
@@ -62,6 +83,16 @@ function App() {
         element={
           <ProtectedRoute>
             <FlashcardsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Instructor-only, but routed for everyone: the page renders the 403 as a message, so a
+          pasted link doesn't dead-end. */}
+      <Route
+        path="/courses/:id/confusion"
+        element={
+          <ProtectedRoute>
+            <CourseConfusionPage />
           </ProtectedRoute>
         }
       />

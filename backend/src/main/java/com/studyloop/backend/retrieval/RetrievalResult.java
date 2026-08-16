@@ -11,6 +11,12 @@ import java.util.OptionalDouble;
 public record RetrievalResult(
         List<RetrievedChunk> chunks,
         OptionalDouble topVectorSimilarity,
-        int lexicalHitCount
+        int lexicalHitCount,
+        // The vector the semantic half actually searched with — the caller's, if it passed one,
+        // otherwise the one embedded here. Null when no embedding provider is configured, so no
+        // vector search ran at all. Handed back so a caller that needs the question's embedding
+        // for something else (Phase 9.1 logs it for clustering) reuses this one instead of paying
+        // the provider to embed the same string twice.
+        float[] queryVector
 ) {
 }

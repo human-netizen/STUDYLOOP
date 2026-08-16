@@ -12,6 +12,7 @@ import com.studyloop.backend.document.DocumentChunk;
 import com.studyloop.backend.document.DocumentChunkRepository;
 import com.studyloop.backend.document.DocumentNotFoundException;
 import com.studyloop.backend.document.DocumentRepository;
+import com.studyloop.backend.document.DocumentSource;
 import com.studyloop.backend.document.DocumentStatus;
 import com.studyloop.backend.quiz.dto.GenerateQuizRequest;
 import com.studyloop.backend.quiz.dto.QuizResponse;
@@ -126,10 +127,14 @@ public class QuizService {
     // ── generation internals ────────────────────────────────────────────────────────────────
 
     // Named documents (each scoped to the course, 404 if foreign) or, when none are named, every
-    // READY document in the course. Only READY documents have chunks to quiz on.
+    // READY uploaded document in the course. Only READY documents have chunks to quiz on, and
+    // "quiz me on this course" means the material, not the forum answers the corpus also holds —
+    // a named id is still honoured, since asking for one is asking for it.
     private List<Document> resolveDocuments(UUID courseId, List<UUID> documentIds) {
         if (documentIds == null || documentIds.isEmpty()) {
-            return documentRepository.findByCourseSpaceIdOrderByCreatedAtDesc(courseId).stream()
+            return documentRepository
+                    .findByCourseSpaceIdAndSourceOrderByCreatedAtDesc(courseId, DocumentSource.UPLOAD)
+                    .stream()
                     .filter(document -> document.getStatus() == DocumentStatus.READY)
                     .toList();
         }

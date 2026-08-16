@@ -47,7 +47,8 @@ public class ChatStreamService {
     private void run(UUID actorId, UUID courseId, ChatRequest request, SseEmitter emitter) {
         try {
             PreparedTurn prepared = chatService.prepare(actorId, courseId, request);
-            send(emitter, "meta", new MetaEvent(prepared.conversationId(), prepared.citations()));
+            send(emitter, "meta", new MetaEvent(prepared.conversationId(), prepared.citations(),
+                    prepared.questionEventId()));
 
             if (prepared.isAnswered()) {
                 // The confidence gate refused, or the semantic cache already had this answer.
@@ -91,7 +92,9 @@ public class ChatStreamService {
         }
     }
 
-    public record MetaEvent(UUID conversationId, List<Citation> citations) { }
+    // questionEventId is non-null only when the gate refused — it is the client's handle for
+    // escalating that refusal to the forum.
+    public record MetaEvent(UUID conversationId, List<Citation> citations, UUID questionEventId) { }
 
     public record DeltaEvent(String text) { }
 

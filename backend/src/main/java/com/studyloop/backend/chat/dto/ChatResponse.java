@@ -9,6 +9,9 @@ import java.util.UUID;
 public record ChatResponse(
         UUID conversationId,
         String answer,
-        List<Citation> citations
+        List<Citation> citations,
+        // Set only when the confidence gate refused: the id of the recorded question, which the
+        // client passes back to open a forum thread against this exact refusal (Phase 9.2).
+        UUID questionEventId
 ) {
 }

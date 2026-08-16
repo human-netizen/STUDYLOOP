@@ -1,5 +1,7 @@
 package com.studyloop.backend.retrieval;
 
+import com.studyloop.backend.document.DocumentSource;
+
 import java.util.UUID;
 
 // A chunk that hybrid retrieval surfaced for a query, plus its fused RRF score (higher = more
@@ -10,6 +12,9 @@ public record RetrievedChunk(
         UUID chunkId,
         UUID documentId,
         String filename,
+        // Uploaded material, or text written back from an accepted forum answer. The client needs
+        // it to know whether there is a file to open behind the citation.
+        DocumentSource source,
         // 1-based page the chunk starts on; null if the source had no page information.
         Integer pageNumber,
         String content,
@@ -20,7 +25,7 @@ public record RetrievedChunk(
 
     static RetrievedChunk of(ChunkHit hit, double score) {
         return new RetrievedChunk(
-                hit.id(), hit.documentId(), hit.filename(), hit.pageNumber(),
+                hit.id(), hit.documentId(), hit.filename(), hit.source(), hit.pageNumber(),
                 hit.content(), hit.tokenCount(), score, hit.cosineSimilarity());
     }
 }

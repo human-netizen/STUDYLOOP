@@ -58,7 +58,9 @@ public class RetrievalService {
 
         String trimmed = query == null ? "" : query.trim();
         if (trimmed.isEmpty()) {
-            return new RetrievalResult(List.of(), OptionalDouble.empty(), 0);
+            // Nothing was embedded, so there is no vector to hand back — not even the caller's,
+            // which was computed for a query we are refusing to run.
+            return new RetrievalResult(List.of(), OptionalDouble.empty(), 0, null);
         }
         int topN = clampLimit(limit);
 
@@ -81,7 +83,7 @@ public class RetrievalService {
                 : OptionalDouble.of(vectorHits.get(0).cosineSimilarity());
 
         List<RetrievedChunk> fused = fuse(List.of(vectorHits, textHits), topN);
-        return new RetrievalResult(fused, topSimilarity, textHits.size());
+        return new RetrievalResult(fused, topSimilarity, textHits.size(), vector);
     }
 
     // Reciprocal Rank Fusion: a chunk at 0-based rank r in a list contributes 1/(K + r + 1);

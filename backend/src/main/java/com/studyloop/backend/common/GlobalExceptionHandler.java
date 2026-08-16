@@ -19,6 +19,8 @@ import com.studyloop.backend.document.NoSummaryMaterialException;
 import com.studyloop.backend.document.SummaryGenerationException;
 import com.studyloop.backend.document.UnsupportedDocumentTypeException;
 import com.studyloop.backend.flashcard.FlashcardGenerationException;
+import com.studyloop.backend.forum.ForumAnswerNotFoundException;
+import com.studyloop.backend.forum.ForumThreadNotFoundException;
 import com.studyloop.backend.flashcard.FlashcardNotFoundException;
 import com.studyloop.backend.flashcard.NoFlashcardMaterialException;
 import com.studyloop.backend.quiz.NoQuizMaterialException;
@@ -238,6 +240,22 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "The quiz could not be generated. Please try again.");
         problem.setTitle("Quiz generation failed");
+        return problem;
+    }
+
+    @ExceptionHandler(ForumThreadNotFoundException.class)
+    ProblemDetail handleForumThreadNotFound(ForumThreadNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Discussion not found");
+        return problem;
+    }
+
+    @ExceptionHandler(ForumAnswerNotFoundException.class)
+    ProblemDetail handleForumAnswerNotFound(ForumAnswerNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Reply not found");
         return problem;
     }
 

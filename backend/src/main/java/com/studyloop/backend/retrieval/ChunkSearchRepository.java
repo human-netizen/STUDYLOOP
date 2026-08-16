@@ -1,5 +1,6 @@
 package com.studyloop.backend.retrieval;
 
+import com.studyloop.backend.document.DocumentSource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -11,6 +12,10 @@ import java.util.UUID;
 // The two halves of hybrid search, run as native SQL because both lean on pgvector / Postgres
 // full-text features Hibernate doesn't model. Each method returns chunks best-first for a
 // single course, already scoped to READY documents; the service fuses the two rankings.
+//
+// Both halves search the whole corpus, forum-derived documents included: an answer the class
+// worked out and an instructor accepted is course knowledge, and the point of writing it back
+// was for retrieval to find it. `d.source` rides along so a citation can say which it was.
 @Repository
 @RequiredArgsConstructor
 class ChunkSearchRepository {
@@ -22,6 +27,7 @@ class ChunkSearchRepository {
             UUID.fromString(rs.getString("id")),
             UUID.fromString(rs.getString("document_id")),
             rs.getString("filename"),
+            DocumentSource.valueOf(rs.getString("source")),
             (Integer) rs.getObject("page_number"),
             rs.getString("content"),
             rs.getInt("token_count"),
@@ -31,6 +37,7 @@ class ChunkSearchRepository {
             UUID.fromString(rs.getString("id")),
             UUID.fromString(rs.getString("document_id")),
             rs.getString("filename"),
+            DocumentSource.valueOf(rs.getString("source")),
             (Integer) rs.getObject("page_number"),
             rs.getString("content"),
             rs.getInt("token_count"),
@@ -42,7 +49,7 @@ class ChunkSearchRepository {
     // 1 - distance as the cosine similarity so the caller can gate on the top match's strength.
     List<ChunkHit> vectorSearch(UUID courseId, String queryVectorLiteral, int limit) {
         return jdbc.query("""
-                select c.id, c.document_id, d.filename, c.page_number, c.content, c.token_count,
+                select c.id, c.document_id, d.filename, d.source, c.page_number, c.content, c.token_count,
                        1 - (c.embedding <=> cast(? as vector)) as cosine_similarity
                 from document_chunks c
                 join documents d on d.id = c.document_id
@@ -59,7 +66,7 @@ class ChunkSearchRepository {
     // vocabulary with the query come back.
     List<ChunkHit> fullTextSearch(UUID courseId, String query, int limit) {
         return jdbc.query("""
-                select c.id, c.document_id, d.filename, c.page_number, c.content, c.token_count
+                select c.id, c.document_id, d.filename, d.source, c.page_number, c.content, c.token_count
                 from document_chunks c
                 join documents d on d.id = c.document_id
                 where d.course_space_id = ?

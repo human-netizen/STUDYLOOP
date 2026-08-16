@@ -57,9 +57,16 @@ public class Document {
     private String sha256;
 
     // Path relative to the storage root where the bytes live ("{courseId}/{sha256}"), so
-    // the root can differ between dev and cloud without rewriting rows.
-    @Column(name = "storage_path", nullable = false, length = 512)
+    // the root can differ between dev and cloud without rewriting rows. Null for a FORUM
+    // document, whose text was never a file.
+    @Column(name = "storage_path", length = 512)
     private String storagePath;
+
+    // Uploaded file or text grown from an accepted forum answer (Phase 9.2). Defaults here as
+    // well as in the DDL so a Document built in code doesn't have to remember to say so.
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private DocumentSource source = DocumentSource.UPLOAD;
 
     // Filled by the extraction step (Phase 4.3); null until then.
     @Column(name = "page_count")

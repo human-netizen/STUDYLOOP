@@ -1,5 +1,6 @@
 package com.studyloop.backend.chat.dto;
 
+import com.studyloop.backend.document.DocumentSource;
 import com.studyloop.backend.retrieval.RetrievedChunk;
 
 import java.util.UUID;
@@ -12,6 +13,9 @@ public record Citation(
         UUID chunkId,
         UUID documentId,
         String filename,
+        // UPLOAD sources open in the PDF viewer; a FORUM source has no file, so the client shows
+        // it as what it is — an answer the class wrote — rather than offering a dead link.
+        DocumentSource documentSource,
         Integer pageNumber,
         String snippet
 ) {
@@ -24,6 +28,7 @@ public record Citation(
                 chunk.chunkId(),
                 chunk.documentId(),
                 chunk.filename(),
+                chunk.source(),
                 chunk.pageNumber(),
                 snippet(chunk.content()));
     }

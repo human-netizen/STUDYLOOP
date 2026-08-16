@@ -3,13 +3,18 @@ import type {
   AttemptSummary,
   ChatDoneEvent,
   ChatMetaEvent,
+  ConfusionReport,
   CostSummary,
   CourseResponse,
   CreateCourseRequest,
   CreateFlashcardRequest,
+  CreateThreadRequest,
   DocumentResponse,
   DocumentSummary,
   Flashcard,
+  ForumThreadDetail,
+  ForumThreadStatus,
+  ForumThreadSummary,
   GenerateFlashcardsRequest,
   GenerateQuizRequest,
   InvitePreviewResponse,
@@ -237,6 +242,49 @@ export const reviewApi = {
     }),
   grade: (cardId: string, grade: number) =>
     request<ReviewResult>(`/review/${cardId}`, { method: 'POST', body: { grade }, auth: true }),
+}
+
+// The course forum. Every member may read, ask and answer; only managers may accept an answer,
+// because accepting writes it into the course's corpus — the detail response says which you are
+// via `canAccept`, so the UI never has to guess.
+export const forumApi = {
+  list: (courseId: string, status?: ForumThreadStatus) =>
+    request<ForumThreadSummary[]>(
+      `/courses/${courseId}/forum/threads${status ? `?status=${status}` : ''}`,
+      { auth: true },
+    ),
+  get: (courseId: string, threadId: string) =>
+    request<ForumThreadDetail>(`/courses/${courseId}/forum/threads/${threadId}`, { auth: true }),
+  // Escalating the same refusal twice returns the thread that already exists, so this is safe to
+  // call from a button somebody double-clicks.
+  open: (courseId: string, body: CreateThreadRequest) =>
+    request<ForumThreadDetail>(`/courses/${courseId}/forum/threads`, {
+      method: 'POST',
+      body,
+      auth: true,
+    }),
+  answer: (courseId: string, threadId: string, body: string) =>
+    request<ForumThreadDetail>(`/courses/${courseId}/forum/threads/${threadId}/answers`, {
+      method: 'POST',
+      body: { body },
+      auth: true,
+    }),
+  accept: (courseId: string, threadId: string, answerId: string) =>
+    request<ForumThreadDetail>(
+      `/courses/${courseId}/forum/threads/${threadId}/answers/${answerId}/accept`,
+      { method: 'POST', auth: true },
+    ),
+}
+
+// Instructors and owners only — a plain MEMBER gets a 403, so the rail hides the link rather
+// than offering a page that always fails. `days` bounds the counts and the lecture heat; topic
+// clusters ignore it by design.
+export const analyticsApi = {
+  confusion: (courseId: string, days?: number) =>
+    request<ConfusionReport>(
+      `/courses/${courseId}/analytics/confusion${days ? `?days=${days}` : ''}`,
+      { auth: true },
+    ),
 }
 
 // Admin-only. A non-admin token gets a 403 here, so callers should gate the UI on the user's

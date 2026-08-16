@@ -13,6 +13,11 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
 
     List<Document> findByCourseSpaceIdOrderByCreatedAtDesc(UUID courseSpaceId);
 
+    // "The material you uploaded", as distinct from the whole corpus: forum-derived documents are
+    // retrievable but are not files anyone put here, so they don't belong in a materials list or
+    // in a document picker.
+    List<Document> findByCourseSpaceIdAndSourceOrderByCreatedAtDesc(UUID courseSpaceId, DocumentSource source);
+
     // Scopes a lookup to a course, so a document id from another course reads as 404.
     Optional<Document> findByIdAndCourseSpaceId(UUID id, UUID courseSpaceId);
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { ApiError, chatApi, coursesApi, flashcardsApi } from '../lib/api'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ApiError, chatApi, coursesApi, flashcardsApi, forumApi } from '../lib/api'
 import type { Citation, CourseResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import { PdfViewer } from '../components/PdfViewer'
@@ -9,15 +9,20 @@ import { cx } from '../lib/style'
 
 // One rendered turn in the thread. Assistant turns grow token-by-token while `streaming`, and
 // carry the citations the answer's [n] markers refer to.
+//
+// `questionEventId` is set only when the assistant refused: it is the handle for escalating that
+// exact question to the forum, so a refusal is an offer rather than a dead end.
 interface Turn {
   role: 'user' | 'assistant'
   text: string
   citations: Citation[]
   streaming: boolean
+  questionEventId: string | null
 }
 
 export function ChatPage() {
   const { id = '' } = useParams()
+  const navigate = useNavigate()
 
   const [course, setCourse] = useState<CourseResponse | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
@@ -58,8 +63,8 @@ export function ChatPage() {
     setSending(true)
     setTurns((current) => [
       ...current,
-      { role: 'user', text: question, citations: [], streaming: false },
-      { role: 'assistant', text: '', citations: [], streaming: true },
+      { role: 'user', text: question, citations: [], streaming: false, questionEventId: null },
+      { role: 'assistant', text: '', citations: [], streaming: true, questionEventId: null },
     ])
 
     try {
@@ -69,7 +74,11 @@ export function ChatPage() {
         {
           onMeta: (meta) => {
             setConversationId(meta.conversationId)
-            updateLast((turn) => ({ ...turn, citations: meta.citations }))
+            updateLast((turn) => ({
+              ...turn,
+              citations: meta.citations,
+              questionEventId: meta.questionEventId,
+            }))
           },
           onDelta: (text) => updateLast((turn) => ({ ...turn, text: turn.text + text })),
           onDone: () => updateLast((turn) => ({ ...turn, streaming: false })),
@@ -129,6 +138,7 @@ export function ChatPage() {
               question={turns[i - 1]?.text ?? ''}
               courseId={id}
               onCite={setActiveCitation}
+              onEscalated={(threadId) => navigate(`/courses/${id}/forum/${threadId}`)}
             />
           ),
         )}
@@ -191,13 +201,16 @@ function AssistantBubble({
   question,
   courseId,
   onCite,
+  onEscalated,
 }: {
   turn: Turn
   question: string
   courseId: string
   onCite: (c: Citation) => void
+  onEscalated: (threadId: string) => void
 }) {
   const answered = !turn.streaming && turn.text.trim().length > 0
+  const refused = !turn.streaming && turn.questionEventId != null
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-card rounded-bl-[2px] border border-line bg-surface px-4 py-3 text-sm text-ink-2">
@@ -209,23 +222,87 @@ function AssistantBubble({
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {turn.citations.map((c) => (
                 <li key={c.index}>
-                  <button
-                    type="button"
-                    onClick={() => onCite(c)}
-                    className="tnum cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-[11.5px] text-ink-muted underline decoration-transparent underline-offset-2 transition duration-150 hover:text-ink hover:decoration-accent"
-                  >
-                    [{c.index}] {c.filename}
-                    {c.pageNumber != null && ` · p.${c.pageNumber}`}
-                  </button>
+                  <SourceLink citation={c} onCite={onCite} />
                 </li>
               ))}
             </ul>
           </div>
         )}
-        {answered && question && (
+        {/* A refusal is the one answer with something better to offer than itself. */}
+        {refused && (
+          <AskTheClassButton
+            courseId={courseId}
+            question={question}
+            questionEventId={turn.questionEventId!}
+            onEscalated={onEscalated}
+          />
+        )}
+        {answered && question && !refused && (
           <SaveFlashcardButton courseId={courseId} front={question} back={turn.text} />
         )}
       </div>
+    </div>
+  )
+}
+
+// A citation is a link to a page in a PDF — unless it came from the forum, which has no file
+// behind it. Those render as plain text saying what they are rather than as a click that
+// would open an empty viewer.
+function SourceLink({ citation, onCite }: { citation: Citation; onCite: (c: Citation) => void }) {
+  if (citation.documentSource === 'FORUM') {
+    return (
+      <span className="tnum block font-mono text-[11.5px] text-ink-muted">
+        [{citation.index}] {citation.filename} · answered by the class
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onCite(citation)}
+      className="tnum cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-[11.5px] text-ink-muted underline decoration-transparent underline-offset-2 transition duration-150 hover:text-ink hover:decoration-accent"
+    >
+      [{citation.index}] {citation.filename}
+      {citation.pageNumber != null && ` · p.${citation.pageNumber}`}
+    </button>
+  )
+}
+
+// Turns a refusal into a forum thread about that exact question. Idempotent on the backend: the
+// same refusal always resolves to the same thread, so this can't split one question into two.
+function AskTheClassButton({
+  courseId,
+  question,
+  questionEventId,
+  onEscalated,
+}: {
+  courseId: string
+  question: string
+  questionEventId: string
+  onEscalated: (threadId: string) => void
+}) {
+  const [state, setState] = useState<'idle' | 'posting' | 'error'>('idle')
+
+  async function escalate() {
+    setState('posting')
+    try {
+      const thread = await forumApi.open(courseId, { title: question, questionEventId })
+      onEscalated(thread.id)
+    } catch {
+      setState('error')
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-line-soft pt-2.5">
+      <Button variant="primary" size="sm" onClick={() => void escalate()} disabled={state === 'posting'}>
+        {state === 'posting' ? 'Opening…' : 'Ask the class'}
+      </Button>
+      <p className="mt-2 mb-0 text-[12px] text-ink-muted">
+        {state === 'error'
+          ? 'Could not open a discussion — try again.'
+          : 'Posts it to the course forum. An accepted answer becomes course material, so the assistant can answer it next time.'}
+      </p>
     </div>
   )
 }

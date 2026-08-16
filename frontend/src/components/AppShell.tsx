@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useParams } from 'react-router-dom'
-import { reviewApi } from '../lib/api'
+import { coursesApi, reviewApi } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { Button, Eyebrow } from './ui'
 import { cx } from '../lib/style'
+import type { MembershipRole } from '../lib/types'
 
 // The frame every signed-in page sits in: a sticky 232px rail on the left holding the brand,
 // the navigation, and the account block; the page itself in the column beside it.
@@ -41,6 +42,8 @@ function Rail({ courseName }: { courseName?: string }) {
   const { id: courseId } = useParams()
   const { user, logout } = useAuth()
   const dueCount = useDueCount()
+  const courseRole = useCourseRole(courseId)
+  const teaches = courseRole === 'OWNER' || courseRole === 'INSTRUCTOR'
 
   return (
     <aside className="flex flex-col gap-6 border-b border-line bg-ground-2 px-5 py-6 sm:px-8 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:py-8 lg:pr-5 lg:pl-7">
@@ -63,9 +66,17 @@ function Rail({ courseName }: { courseName?: string }) {
             </div>
             <RailLink to={`/courses/${courseId}`} index="03" label="Overview" end />
             <RailLink to={`/courses/${courseId}/chat`} index="04" label="Ask" />
-            <RailLink to={`/courses/${courseId}/quizzes`} index="05" label="Quizzes" />
-            <RailLink to={`/courses/${courseId}/flashcards`} index="06" label="Flashcards" />
-            <RailLink to={`/courses/${courseId}/review`} index="07" label="Review this course" end />
+            {/* Directly under Ask, because that is where threads come from: the forum is what a
+                refusal turns into. */}
+            <RailLink to={`/courses/${courseId}/forum`} index="05" label="Forum" />
+            <RailLink to={`/courses/${courseId}/quizzes`} index="06" label="Quizzes" />
+            <RailLink to={`/courses/${courseId}/flashcards`} index="07" label="Flashcards" />
+            <RailLink to={`/courses/${courseId}/review`} index="08" label="Review this course" end />
+            {/* Same rule as the Spend link: hidden for a plain MEMBER rather than offered and
+                refused. The page still handles a 403 for anyone who pastes the URL. */}
+            {teaches && (
+              <RailLink to={`/courses/${courseId}/confusion`} index="09" label="Confusion" end />
+            )}
           </>
         )}
         {/* Admins get one extra destination. Hidden rather than shown-and-refused: a link that
@@ -116,6 +127,35 @@ function useDueCount(): number {
   }, [location.pathname])
 
   return due
+}
+
+// The caller's role in the course being viewed, for the links only teachers see. Fetched here
+// rather than threaded down as a prop: the rail is rendered by every course page, and a prop
+// only some of them pass would make the link appear and vanish as you navigate. A failure
+// resolves to null, which hides the link — the backend refuses the request anyway.
+function useCourseRole(courseId: string | undefined): MembershipRole | null {
+  const [role, setRole] = useState<MembershipRole | null>(null)
+
+  useEffect(() => {
+    if (!courseId) {
+      setRole(null)
+      return
+    }
+    let active = true
+    coursesApi
+      .get(courseId)
+      .then((course) => {
+        if (active) setRole(course.myRole)
+      })
+      .catch(() => {
+        if (active) setRole(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [courseId])
+
+  return role
 }
 
 function RailLink({

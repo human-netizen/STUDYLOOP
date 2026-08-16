@@ -106,6 +106,27 @@ studyloop:
     min-similarity: ${SEMANTIC_CACHE_MIN_SIMILARITY:0.97}
     # Backstop only — uploading a document already clears that course's cache outright.
     ttl: ${SEMANTIC_CACHE_TTL:30d}
+  analytics:
+    # Phase 9.1: every chat question is recorded — its embedding, whether the corpus could ground
+    # an answer, and which lectures it landed on — so an instructor can see what the class is
+    # stuck on. Set false (ANALYTICS_ENABLED) to answer questions without keeping them.
+    enabled: ${ANALYTICS_ENABLED:true}
+    # Cosine similarity two questions must reach to count as the same topic. Far below the
+    # semantic cache's 0.97, and for the opposite reason: the cache is deciding whether to reuse
+    # an answer, where a near-miss is a wrong answer, while this is deciding whether two students
+    # are confused about the same thing. At 0.82 "what is a closure" groups with "how do closures
+    # capture variables"; at 0.95 every rewording becomes its own topic and the page says nothing.
+    cluster-threshold: ${ANALYTICS_CLUSTER_THRESHOLD:0.82}
+    # Newest N questions per course fed to the clusterer. Bounds the work and keeps the picture
+    # current — what the class struggled with in week 1 is not today's problem.
+    cluster-window: ${ANALYTICS_CLUSTER_WINDOW:500}
+    # How many topics and individual unanswered questions the API returns.
+    max-topics: ${ANALYTICS_MAX_TOPICS:20}
+    max-ungrounded: ${ANALYTICS_MAX_UNGROUNDED:25}
+    # The warming sweep. The instructor page recomputes stale clusters itself, so these only
+    # decide how often that cost is paid in the background instead of in front of someone.
+    cluster-interval: ${ANALYTICS_CLUSTER_INTERVAL:PT15M}
+    cluster-initial-delay: ${ANALYTICS_CLUSTER_INITIAL_DELAY:PT2M}
   pricing:
     # USD per million tokens, used to price each recorded provider call for /admin/costs. These
     # are Cohere's published list prices; a model with no entry here is still recorded, just

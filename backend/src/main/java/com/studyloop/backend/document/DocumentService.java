@@ -72,10 +72,15 @@ public class DocumentService {
         return new UploadOutcome(DocumentResponse.from(document, courseId), true);
     }
 
+    // Uploaded material only. A course's corpus can also contain documents this system wrote from
+    // accepted forum answers (Phase 9.2) — they are retrievable and citable, but they are not
+    // files anyone uploaded, they have nothing to download, and listing them here would put rows
+    // in the materials table that no upload put there. The forum shows them where they belong.
     @Transactional(readOnly = true)
     public List<DocumentResponse> list(UUID actorId, UUID courseId) {
         courseAccess.requireMember(actorId, courseId);
-        return documentRepository.findByCourseSpaceIdOrderByCreatedAtDesc(courseId)
+        return documentRepository
+                .findByCourseSpaceIdAndSourceOrderByCreatedAtDesc(courseId, DocumentSource.UPLOAD)
                 .stream()
                 .map(document -> DocumentResponse.from(document, courseId))
                 .toList();
@@ -96,6 +101,12 @@ public class DocumentService {
         courseAccess.requireMember(actorId, courseId);
         Document document = documentRepository.findByIdAndCourseSpaceId(documentId, courseId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        // A forum-derived source has no file behind it. The client is not supposed to offer it as
+        // one (citations carry their source), so this is the guard for a hand-typed URL rather
+        // than a state the UI can reach — 404, because there is no file here to serve.
+        if (document.getStoragePath() == null) {
+            throw new DocumentNotFoundException(documentId);
+        }
         byte[] bytes = storageService.read(document.getStoragePath());
         return new DocumentContent(bytes, document.getFilename(), document.getContentType());
     }

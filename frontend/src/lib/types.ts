@@ -111,14 +111,21 @@ export interface DocumentSummary {
 
 // One numbered source an answer was grounded on. `index` is the [n] marker the model writes
 // inline; the viewer maps it to a document + page.
+//
+// `documentSource` says whether there is a file behind it. UPLOAD opens in the PDF viewer; FORUM
+// is an accepted forum answer written back into the corpus, which has no file and no page. Older
+// cached answers predate the field, so treat anything that isn't 'FORUM' as openable.
 export interface Citation {
   index: number
   chunkId: string
   documentId: string
   filename: string
+  documentSource: DocumentSourceKind | null
   pageNumber: number | null
   snippet: string
 }
+
+export type DocumentSourceKind = 'UPLOAD' | 'FORUM'
 
 // The non-streaming chat reply. The streaming endpoint delivers the same pieces as SSE events
 // (see ChatStreamEvents below) rather than one body.
@@ -126,12 +133,17 @@ export interface ChatResponse {
   conversationId: string
   answer: string
   citations: Citation[]
+  questionEventId: string | null
 }
 
 // Payloads of the SSE events the /chat/stream endpoint emits, keyed by event name.
+//
+// `questionEventId` is set only when the confidence gate refused — it is the handle for turning
+// that refusal into a forum thread about this exact question.
 export interface ChatMetaEvent {
   conversationId: string
   citations: Citation[]
+  questionEventId: string | null
 }
 
 export interface ChatDoneEvent {
@@ -312,4 +324,111 @@ export interface ReviewResult {
   lapses: number
   easeFactor: number
   remainingToday: number
+}
+
+// --- Confusion analytics (com.studyloop.backend.analytics.dto) ---
+
+export interface ConfusionTotals {
+  questionsAsked: number
+  ungrounded: number
+  ungroundedRate: number
+  distinctAskers: number
+}
+
+// One row of the heatmap. `share` is this lecture's fraction of all lecture-attributed
+// questions — what the bar length encodes.
+export interface LectureHeat {
+  documentId: string
+  filename: string
+  questionCount: number
+  distinctAskers: number
+  share: number
+  lastAskedAt: string
+}
+
+export interface TopicLecture {
+  documentId: string
+  filename: string
+  questionCount: number
+}
+
+// A group of questions that mean roughly the same thing. `label` is a real student question —
+// the one closest to the group's centre — not a generated topic name.
+export interface TopicCluster {
+  label: string
+  questionCount: number
+  ungroundedCount: number
+  distinctAskers: number
+  lectures: TopicLecture[]
+  lastAskedAt: string
+}
+
+// A question the confidence gate refused. No asker: the backend never sends one. `threadId` is
+// the forum discussion it was escalated into, or null while nobody has escalated it.
+export interface UngroundedQuestion {
+  question: string
+  topSimilarity: number | null
+  askedAt: string
+  questionEventId: string
+  threadId: string | null
+}
+
+export interface ConfusionReport {
+  windowDays: number
+  totals: ConfusionTotals
+  lectures: LectureHeat[]
+  topics: TopicCluster[]
+  ungrounded: UngroundedQuestion[]
+  clustersComputedAt: string | null
+}
+
+// --- Forum (com.studyloop.backend.forum.dto) ---
+
+export type ForumThreadStatus = 'OPEN' | 'ANSWERED'
+
+// One reply. Names are on the wire here, unlike the confusion report — that page is a
+// measurement of the class, this is a conversation.
+export interface ForumAnswer {
+  id: string
+  body: string
+  authorName: string
+  accepted: boolean
+  createdAt: string
+}
+
+// A row in the forum list. `inCorpus` means the accepted answer is now material the assistant can
+// retrieve; `fromRefusal` means the thread came from a question chat couldn't answer.
+export interface ForumThreadSummary {
+  id: string
+  title: string
+  status: ForumThreadStatus
+  authorName: string
+  answerCount: number
+  inCorpus: boolean
+  fromRefusal: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+// `canAccept` is decided by the backend rather than inferred from a role here: accepting writes
+// into the course's corpus, so the button should appear for exactly the people it will let through.
+export interface ForumThreadDetail {
+  id: string
+  title: string
+  body: string | null
+  status: ForumThreadStatus
+  authorName: string
+  questionEventId: string | null
+  acceptedAnswerId: string | null
+  inCorpus: boolean
+  canAccept: boolean
+  answers: ForumAnswer[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateThreadRequest {
+  title: string
+  body?: string | null
+  questionEventId?: string | null
 }
