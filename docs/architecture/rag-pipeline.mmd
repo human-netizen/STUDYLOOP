@@ -1,0 +1,78 @@
+%% StudyLoop — RAG architecture: Pipes and Filters, split into a write path and a read path.
+%% Paste into https://mermaid.live, or view inline on GitHub / in VS Code (Markdown Preview Mermaid).
+flowchart TB
+
+    subgraph WRITE["INGESTION PIPELINE — async, off the request thread"]
+        direction TB
+        UP["PDF upload<br/><i>202 Accepted, returns immediately</i>"]
+        EV{{"DocumentUploadedEvent<br/><i>@TransactionalEventListener AFTER_COMMIT</i>"}}
+        EX["<b>EXTRACTING</b><br/>PdfTextExtractor · PDFBox<br/><i>bytes → page texts</i>"]
+        CK["<b>CHUNKING</b><br/>TextChunker<br/><i>400 words, 60-word overlap</i>"]
+        EB["<b>EMBEDDING</b><br/>DocumentEmbeddingService<br/><i>768-d vectors, batched</i>"]
+        RDY(["<b>READY</b>"])
+        FAIL(["<b>FAILED</b><br/><i>message recorded</i>"])
+
+        UP --> EV --> EX --> CK --> EB --> RDY
+        EX -.->|throws| FAIL
+        CK -.->|throws| FAIL
+        EB -.->|throws| FAIL
+    end
+
+    subgraph STORE["PostgreSQL + pgvector · Supabase"]
+        direction TB
+        CHUNKS[("<b>document_chunks</b><br/>embedding 768-d · HNSW cosine<br/>content_tsv · GIN, generated column")]
+        CACHE[("<b>chat_cache_entries</b><br/>question_embedding · HNSW cosine<br/>answer + citations jsonb")]
+    end
+
+    subgraph READ["QUERY PIPELINE — synchronous, per question"]
+        direction TB
+        Q["question"]
+        E1["embed once<br/><i>EmbeddingClient — reused downstream</i>"]
+        PROBE{"<b>1. semantic cache</b><br/>nearest question ≥ 0.97 cosine?<br/><i>opening questions only</i>"}
+
+        subgraph HYB["2. hybrid retrieval — RetrievalService"]
+            direction TB
+            VEC["<b>semantic</b><br/>vector search<br/><i>HNSW, top-20</i>"]
+            LEX["<b>lexical</b><br/>full-text search<br/><i>plainto_tsquery, top-20</i>"]
+            RRF["<b>Reciprocal Rank Fusion</b><br/><i>score += 1 / (60 + rank + 1)</i><br/>→ top-6 chunks"]
+            VEC --> RRF
+            LEX --> RRF
+        end
+
+        GATE{"<b>3. confidence gate</b><br/>top cosine &lt; 0.25<br/><b>AND</b> zero lexical hits?"}
+        PROMPT["<b>4. prompt assembly</b><br/>system: 6 numbered sources, cite &#91;n&#93;<br/>+ last 10 turns of history"]
+        LLM["<b>5. generate</b><br/>Cohere chat · SSE token stream"]
+        PERSIST["persist turn + write cache<br/><i>refusals never cached</i>"]
+
+        ANS(["<b>answer + citations</b>"])
+        HIT(["<b>cached answer</b><br/><i>0 provider calls</i>"])
+        NO(["<b>“I don't have that in<br/>this course's materials”</b><br/><i>0 provider calls</i>"])
+
+        Q --> E1 --> PROBE
+        PROBE -->|hit| HIT
+        PROBE -->|miss| HYB
+        RRF --> GATE
+        GATE -->|refuse| NO
+        GATE -->|pass| PROMPT --> LLM --> PERSIST --> ANS
+    end
+
+    %% ── where the two paths meet ──────────────────────────────
+    CK   -->|"writes text + tsv"| CHUNKS
+    EB   -->|"writes vectors"| CHUNKS
+    CHUNKS --> VEC
+    CHUNKS --> LEX
+    RDY  -->|"<b>invalidate</b> this course's cache —<br/>new material can answer old refusals"| CACHE
+    CACHE -.->|probe| PROBE
+    PERSIST -->|store| CACHE
+
+    classDef stage fill:#dae8fc,stroke:#4a6fa5,stroke-width:1px,color:#12243d
+    classDef gate fill:#ffe6cc,stroke:#b8791f,stroke-width:1px,color:#3d2a0a
+    classDef good fill:#d5e8d4,stroke:#5a8a4a,stroke-width:1px,color:#16300f
+    classDef stop fill:#f8cecc,stroke:#a8443f,stroke-width:1px,color:#3d1210
+    classDef db fill:#e1d5e7,stroke:#7a579a,stroke-width:1px,color:#2a1a3d
+
+    class UP,EX,CK,EB,E1,PROMPT,LLM,PERSIST,VEC,LEX,RRF,Q stage
+    class EV,PROBE,GATE gate
+    class RDY,ANS,HIT good
+    class FAIL,NO stop
+    class CHUNKS,CACHE db

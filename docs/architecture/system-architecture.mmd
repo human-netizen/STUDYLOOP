@@ -1,0 +1,114 @@
+%% StudyLoop — system architecture.
+%% Style: layered (n-tier) Spring Boot monolith, packaged by feature, serving a React SPA over REST.
+%% Paste into https://mermaid.live, or view inline on GitHub / in VS Code (Markdown Preview Mermaid).
+flowchart TB
+
+    subgraph CLIENT["CLIENT — React 19 + TypeScript SPA, bundled by Vite"]
+        direction LR
+        PAGES["<b>pages/</b><br/>Login · Register · Join<br/>Courses · CourseDetail · Chat<br/>Quizzes · Quiz · Flashcards<br/>Review · AdminCosts"]
+        COMPS["<b>components/</b><br/>AppShell · ProtectedRoute<br/>PdfViewer · ui"]
+        LIBAU["<b>lib/auth.tsx</b><br/><i>React context; JWT + user<br/>kept in localStorage</i>"]
+        LIBA["<b>lib/api.ts</b><br/><i>the single fetch wrapper —<br/>attaches Authorization: Bearer,<br/>normalises every error</i>"]
+
+        PAGES --> LIBA
+        COMPS --> LIBA
+        LIBAU -->|token| LIBA
+    end
+
+    subgraph BACK["SPRING BOOT 3 · Java 21 — one deployable, packaged by feature not by layer"]
+        direction TB
+
+        subgraph SEC["1 — SECURITY FILTER CHAIN · stateless, no sessions"]
+            direction LR
+            CORS["<b>CORS</b><br/><i>allowed origins from config;<br/>preflight cached 1h</i>"]
+            JWT["<b>JwtAuthenticationFilter</b><br/><i>verify HS256 → SecurityContext<br/>principal = the user's UUID</i>"]
+            AUTHZ["<b>authorizeHttpRequests</b><br/><i>/auth/** and /actuator/health open,<br/>anyRequest authenticated → 401</i>"]
+            METH["<b>@EnableMethodSecurity</b><br/><i>@PreAuthorize ADMIN on<br/>/admin and /admin/costs</i>"]
+            CORS --> JWT --> AUTHZ --> METH
+        end
+
+        subgraph WEB["2 — WEB LAYER · @RestController — HTTP shape only, zero business rules"]
+            direction LR
+            C1["<b>AuthController</b><br/><b>UserController</b><br/><i>/auth · /users</i>"]
+            C2["<b>CourseController</b><br/><b>CourseInvite</b> · <b>Invite</b><br/><i>/courses · /invites</i>"]
+            C3["<b>DocumentController</b><br/><i>/courses/:id/documents</i><br/><i>202 on upload</i>"]
+            C4["<b>ChatController</b><br/><i>/chat · /chat/stream</i><br/><i>SSE token stream</i>"]
+            C5["<b>QuizController</b><br/><b>FlashcardController</b><br/><b>ReviewController</b>"]
+            C6["<b>RetrievalController</b><br/><b>AdminController</b><br/><b>CostController</b>"]
+        end
+
+        subgraph SVC["3 — SERVICE LAYER · @Service — business rules and the @Transactional boundary"]
+            direction LR
+            S1["<b>AuthService</b> · <b>UserService</b><br/>JwtService<br/><i>BCrypt, token mint</i>"]
+            S2["<b>CourseService</b> · <b>InviteService</b><br/><b>CourseAccess</b><br/><i>every feature's membership<br/>and role gate</i>"]
+            S3["<b>DocumentService</b><br/><b>DocumentIngestionService</b><br/><i>PdfTextExtractor · TextChunker<br/>DocumentEmbeddingService</i>"]
+            S4["<b>ChatService</b> · <b>ChatStreamService</b><br/><b>RetrievalService</b><br/><b>SemanticCacheService</b><br/><i>hybrid retrieval + RRF</i>"]
+            S5["<b>QuizService</b> · QuizGradingService<br/><b>FlashcardService</b><br/><b>ReviewService</b> · Sm2Scheduler"]
+            S6["<b>DocumentSummaryService</b><br/><b>CostService</b> · AiUsageRecorder"]
+        end
+
+        subgraph REPO["4 — PERSISTENCE · Spring Data JPA, plus hand-written SQL where JPA cannot reach"]
+            direction LR
+            R1["<b>JPA repositories</b><br/><i>User · CourseSpace · Membership<br/>Invite · Document · Chunk<br/>Conversation · Message · Quiz<br/>Attempt · Flashcard · ReviewState</i>"]
+            R2["<b>ChunkSearchRepository</b><br/><i>native SQL — pgvector cosine<br/>and plainto_tsquery; JPQL can<br/>express neither</i>"]
+            R3["<b>SemanticCacheRepository</b><br/><i>native SQL — nearest<br/>cached question</i>"]
+            R4["<b>AiUsageStatsRepository</b><br/><i>native SQL — cost rollups</i>"]
+        end
+
+        subgraph PORT["5 — PROVIDER PORTS · interfaces, so no service ever names a vendor"]
+            direction LR
+            P1["<b>EmbeddingClient</b><br/><i>embed · isConfigured</i><br/>Cohere | Google | Ollama"]
+            P2["<b>ChatClient</b><br/><i>complete · stream · isConfigured</i><br/>Cohere"]
+            P3["<b>DocumentStorageService</b><br/><i>content-addressed bytes</i>"]
+        end
+
+        subgraph CROSS["CROSS-CUTTING · applies to every request above"]
+            direction LR
+            X1["<b>GlobalExceptionHandler</b><br/><i>@RestControllerAdvice —<br/>one JSON error shape</i>"]
+            X2["<b>AsyncConfig</b><br/><i>thread pool that runs<br/>ingestion off the request</i>"]
+            X3["<b>@ConfigurationProperties</b><br/><i>Jwt · Chat · Embedding · Storage<br/>Cors · Pricing · SemanticCache</i>"]
+            X4["<b>AiUsageLedger</b><br/><i>every provider call<br/>priced and recorded</i>"]
+        end
+    end
+
+    subgraph INFRA["INFRASTRUCTURE"]
+        direction LR
+        PG[("<b>PostgreSQL + pgvector</b><br/>Supabase · 14 Flyway migrations<br/><i>HNSW cosine index on embeddings<br/>GIN index on generated tsvector</i>")]
+        FS[("<b>local filesystem</b><br/><i>PDF bytes at courseId/sha256</i>")]
+
+        subgraph PROV["external AI providers — swappable adapters"]
+            direction LR
+            CO["<b>Cohere</b><br/><i>command-r-08-2024 · embed-v4.0</i>"]
+            GO["<b>Google</b><br/><i>gemini-embedding-001</i>"]
+            OL["<b>Ollama</b><br/><i>qwen3-embedding · local, offline</i>"]
+        end
+    end
+
+    %% ── the request's path down the layers ────────────────────
+    LIBA -->|"REST /api/v1/** · JSON over HTTP<br/>SSE for chat streaming"| CORS
+    METH --> WEB
+    WEB -->|"DTO in, DTO out —<br/>entities never cross this line"| SVC
+    SVC --> REPO
+    SVC --> PORT
+    REPO --> PG
+    P3 --> FS
+    P1 --> PROV
+    P2 --> CO
+
+    classDef client fill:#d5e8d4,stroke:#5a8a4a,stroke-width:1px,color:#16300f
+    classDef sec fill:#ffe6cc,stroke:#b8791f,stroke-width:1px,color:#3d2a0a
+    classDef web fill:#dae8fc,stroke:#4a6fa5,stroke-width:1px,color:#12243d
+    classDef svc fill:#d0e8f2,stroke:#3f7d99,stroke-width:1px,color:#0d2732
+    classDef repo fill:#e1d5e7,stroke:#7a579a,stroke-width:1px,color:#2a1a3d
+    classDef port fill:#fff2cc,stroke:#b0972f,stroke-width:1px,color:#3a3007
+    classDef cross fill:#f0f0f0,stroke:#8c8c8c,stroke-width:1px,color:#262626
+    classDef infra fill:#f8cecc,stroke:#a8443f,stroke-width:1px,color:#3d1210
+
+    class PAGES,COMPS,LIBA,LIBAU client
+    class CORS,JWT,AUTHZ,METH sec
+    class C1,C2,C3,C4,C5,C6 web
+    class S1,S2,S3,S4,S5,S6 svc
+    class R1,R2,R3,R4 repo
+    class P1,P2,P3 port
+    class X1,X2,X3,X4 cross
+    class PG,FS,CO,GO,OL infra
