@@ -182,8 +182,12 @@ function OperationRow({ row, total }: { row: OperationCost; total: number }) {
       <div className="flex items-center gap-4 px-5 py-3.5">
         <div className="min-w-0 flex-1">
           <p className="m-0 truncate text-[15px] font-medium text-ink">{label(row.operation)}</p>
+          {/* Reranking is billed per search, not per token, so its row genuinely has no token
+              counts — saying so beats printing "0 in · 0 out" beside a real cost. */}
           <Meta>
-            {count(row.calls)} calls · {count(row.inputTokens)} in · {count(row.outputTokens)} out
+            {row.inputTokens === 0 && row.outputTokens === 0 && row.costUsd > 0
+              ? `${count(row.calls)} calls · billed per search, not per token`
+              : `${count(row.calls)} calls · ${count(row.inputTokens)} in · ${count(row.outputTokens)} out`}
           </Meta>
           {/* The bar makes the ordering readable at a glance; the number is the real answer. */}
           <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-surface-2">
@@ -249,6 +253,7 @@ const LABELS: Record<string, string> = {
   FLASHCARD_GENERATION: 'Flashcard generation',
   EMBED_DOCUMENTS: 'Document embeddings',
   EMBED_QUERY: 'Question embeddings',
+  RERANK: 'Reranking',
   OTHER: 'Unlabelled',
 }
 

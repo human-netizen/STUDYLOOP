@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { ApiError, coursesApi, forumApi } from '../lib/api'
 import type { ForumAnswer, ForumThreadDetail } from '../lib/types'
 import { AppShell, BackLink } from '../components/AppShell'
+import { Markdown } from '../components/Markdown'
 import {
   Button,
   Empty,
@@ -86,7 +87,9 @@ export function ForumThreadPage() {
           />
 
           {thread.body && (
-            <Panel className="mb-8 text-sm whitespace-pre-wrap text-ink-2">{thread.body}</Panel>
+            <Panel className="mb-8">
+              <Markdown text={thread.body} className="text-sm text-ink-2" />
+            </Panel>
           )}
 
           {thread.inCorpus && (
@@ -173,7 +176,7 @@ function AnswerCard({
         </Meta>
         {answer.accepted && <Pill tone="ok">Accepted</Pill>}
       </div>
-      <p className="m-0 text-sm leading-relaxed whitespace-pre-wrap text-ink-2">{answer.body}</p>
+      <Markdown text={answer.body} className="text-sm leading-relaxed text-ink-2" />
       {canAccept && !answer.accepted && (
         <div>
           <Button size="sm" onClick={() => void accept()} disabled={accepting}>

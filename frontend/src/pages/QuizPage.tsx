@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ApiError, quizzesApi } from '../lib/api'
 import type { AnswerInput, AttemptResponse, GradedAnswer, Quiz, QuizQuestionView } from '../lib/types'
 import { AppShell, BackLink } from '../components/AppShell'
+import { Markdown } from '../components/Markdown'
 import { Button, ErrorText, Eyebrow, Loading, Pill, TextArea } from '../components/ui'
 import { cx } from '../lib/style'
 
@@ -311,9 +312,10 @@ function ReviewQuestion({ graded }: { graded: GradedAnswer }) {
       )}
 
       {graded.explanation && (
-        <p className="mt-4 ml-8 border-t border-line-soft pt-3 text-sm text-ink-2">
-          {graded.explanation}
-        </p>
+        <Markdown
+          text={graded.explanation}
+          className="mt-4 ml-8 border-t border-line-soft pt-3 text-sm text-ink-2"
+        />
       )}
     </li>
   )

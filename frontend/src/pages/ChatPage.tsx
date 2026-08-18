@@ -3,9 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, chatApi, coursesApi, errorMessage, flashcardsApi, forumApi } from '../lib/api'
 import type { Citation, CourseResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
+import { Markdown } from '../components/Markdown'
 import { PdfViewer } from '../components/PdfViewer'
 import { Button, ErrorText, Eyebrow } from '../components/ui'
-import { cx } from '../lib/style'
 
 // One rendered turn in the thread. Assistant turns grow token-by-token while `streaming`, and
 // carry the citations the answer's [n] markers refer to.
@@ -216,8 +216,12 @@ function AssistantBubble({
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-card rounded-bl-[2px] border border-line bg-surface px-4 py-3 text-sm text-ink-2">
-        <AnswerText text={turn.text} citations={turn.citations} onCite={onCite} />
-        {turn.streaming && <span className="ml-0.5 inline-block animate-pulse text-accent">▋</span>}
+        <Markdown
+          text={turn.text}
+          citations={turn.citations}
+          onCite={onCite}
+          streaming={turn.streaming}
+        />
         {!turn.streaming && turn.citations.length > 0 && (
           <div className="mt-3 border-t border-line-soft pt-2">
             <Eyebrow className="mb-1.5">Sources</Eyebrow>
@@ -350,43 +354,3 @@ function SaveFlashcardButton({
   )
 }
 
-// Renders answer text with inline [n] markers turned into clickable chips that open the matching
-// citation. Markers without a matching citation are left as plain text.
-function AnswerText({
-  text,
-  citations,
-  onCite,
-}: {
-  text: string
-  citations: Citation[]
-  onCite: (c: Citation) => void
-}) {
-  const parts = text.split(/(\[\d+\])/g)
-  return (
-    <span className="whitespace-pre-wrap">
-      {parts.map((part, i) => {
-        const match = part.match(/^\[(\d+)\]$/)
-        if (match) {
-          const index = Number(match[1])
-          const citation = citations.find((c) => c.index === index)
-          if (citation) {
-            return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => onCite(citation)}
-                className={cx(
-                  'tnum mx-0.5 cursor-pointer rounded-[3px] border border-accent-deep bg-surface-2 px-1 align-baseline',
-                  'font-mono text-[10.5px] text-ink transition duration-150 hover:bg-accent hover:text-on-accent',
-                )}
-              >
-                {part}
-              </button>
-            )
-          }
-        }
-        return <span key={i}>{part}</span>
-      })}
-    </span>
-  )
-}

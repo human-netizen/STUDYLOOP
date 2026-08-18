@@ -227,6 +227,87 @@ select {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   Rendered Markdown
+
+   Everything the model writes goes through <Markdown>. Its block elements carry
+   utility classes like the rest of the app; what's here is the part utilities
+   can't reach — the classes highlight.js and KaTeX generate inside the tree.
+
+   The syntax theme is written against the tokens rather than imported from
+   highlight.js. Every shipped theme carries forty literal hexes from a different
+   palette, which would put the one thing in the app that isn't the ladder right
+   in the middle of an answer. These are ladder rungs already declared above.
+   ───────────────────────────────────────────────────────────────────────────── */
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-name {
+  color: var(--cf-cm);
+}
+
+.hljs-string,
+.hljs-symbol,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--cf-pupil);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-deletion {
+  color: var(--cf-master);
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--accent);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property {
+  color: var(--ink);
+}
+
+.hljs-meta,
+.hljs-punctuation,
+.hljs-operator {
+  color: var(--ink-2);
+}
+
+/* KaTeX ships its own colour and size; both should follow the text they sit in. */
+.katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+
+/* A long displayed formula scrolls inside itself rather than widening the bubble
+   it sits in — the same rule the tables and code blocks follow. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    The flashcard flip — the one piece of motion that needs real 3D, which utility
    classes can't express cleanly.
    ───────────────────────────────────────────────────────────────────────────── */

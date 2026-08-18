@@ -8,6 +8,7 @@ import type {
   DocumentSummary,
 } from '../lib/types'
 import { AppShell } from '../components/AppShell'
+import { Markdown } from '../components/Markdown'
 import {
   Button,
   Empty,
@@ -322,9 +323,10 @@ function DocumentRow({ courseId, document }: { courseId: string; document: Docum
               {summary.summary ? (
                 <>
                   <Eyebrow className="mb-1.5">Summary</Eyebrow>
-                  <p className="m-0 max-w-[70ch] text-sm leading-relaxed text-ink-2">
-                    {summary.summary}
-                  </p>
+                  <Markdown
+                    text={summary.summary}
+                    className="max-w-[70ch] text-sm leading-relaxed text-ink-2"
+                  />
 
                   {summary.terms.length > 0 && (
                     <>
