@@ -7,12 +7,12 @@ import com.studyloop.backend.chat.SemanticCacheService.CachedAnswer;
 import com.studyloop.backend.chat.dto.ChatRequest;
 import com.studyloop.backend.chat.dto.ChatResponse;
 import com.studyloop.backend.chat.dto.Citation;
-import com.studyloop.backend.config.ChatProperties;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
 import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievalService;
 import com.studyloop.backend.retrieval.RetrievedChunk;
+import com.studyloop.backend.retrieval.SectionExpander;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,9 +50,10 @@ public class ChatService {
     private final ChatClient chatClient;
     private final ChatConversationRepository conversationRepository;
     private final ChatMessageRepository messageRepository;
-    private final ChatProperties chatProperties;
+    private final ConfidenceGate confidenceGate;
     private final SemanticCacheService semanticCache;
     private final QuestionLogService questionLog;
+    private final SectionExpander sectionExpander;
 
     // The non-streaming turn, kept as the simple fallback to /chat/stream. It shares prepare()
     // and completeTurn() with the streaming path rather than restating them.
@@ -127,7 +128,7 @@ public class ChatService {
 
         // Confidence gate: if nothing relevant came back, refuse deterministically instead of
         // letting the model answer from weak or absent context (and skip the provider call).
-        if (shouldRefuse(retrieval)) {
+        if (confidenceGate.shouldRefuse(retrieval)) {
             saveMessage(conversation, ChatRole.ASSISTANT, NOT_IN_MATERIALS);
             // The most valuable row this table gets: a question the corpus could not answer. Its
             // id goes back to the client so the refusal can be escalated to the forum as *this*
@@ -145,8 +146,11 @@ public class ChatService {
 
         // system prompt (numbered sources) → prior turns, which now end with the question we
         // just saved, so there's no need to append it again.
+        //
+        // The sources are the retrieved chunks expanded to their sections (13.5): retrieval picked
+        // them on precision, and the model reads them with the surrounding paragraph it needs.
         List<LlmMessage> messages = new ArrayList<>();
-        messages.add(LlmMessage.system(buildSystemPrompt(chunks)));
+        messages.add(LlmMessage.system(buildSystemPrompt(chunks, sectionExpander.expand(chunks))));
         messages.addAll(replayHistory(conversation.getId()));
 
         // Cache only what the cache could ever serve: an opening question, answered from the
@@ -169,25 +173,6 @@ public class ChatService {
             semanticCache.store(write.courseId(), write.question(), write.questionVector(),
                     answer, prepared.citations());
         }
-    }
-
-    // Refuse when there's simply nothing to answer from, or when the semantic match is too weak
-    // AND no chunk matched the query's words either. Keeping the lexical escape hatch means an
-    // exact-keyword question still answers even if its embedding sits below the threshold; only
-    // genuinely off-topic questions (weak on both signals) get the canned refusal. A threshold
-    // of 0 disables the semantic half of the gate, leaving only the empty-result case.
-    private boolean shouldRefuse(RetrievalResult retrieval) {
-        if (retrieval.chunks().isEmpty()) {
-            return true;
-        }
-        double threshold = chatProperties.minSimilarity();
-        if (threshold <= 0) {
-            return false;
-        }
-        boolean weakSemantic = retrieval.topVectorSimilarity().isPresent()
-                && retrieval.topVectorSimilarity().getAsDouble() < threshold;
-        boolean noLexical = retrieval.lexicalHitCount() == 0;
-        return weakSemantic && noLexical;
     }
 
     // The distinct documents a cached answer cites — the lecture attribution for a cache hit,
@@ -237,7 +222,10 @@ public class ChatService {
         messageRepository.save(message);
     }
 
-    private static String buildSystemPrompt(List<RetrievedChunk> chunks) {
+    // `sources` is one passage per chunk, in the same order — the chunk's own text, or the section
+    // it belongs to. The citation label still comes from the chunk, so [3] means the page retrieval
+    // actually matched even when the model was shown the pages around it.
+    private static String buildSystemPrompt(List<RetrievedChunk> chunks, List<String> sources) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("""
                 You are StudyLoop's study assistant. Answer the student's question using ONLY the \
@@ -259,7 +247,13 @@ public class ChatService {
             if (chunk.pageNumber() != null) {
                 prompt.append(", p.").append(chunk.pageNumber());
             }
-            prompt.append(")\n").append(chunk.content().strip()).append("\n\n");
+            // Where the passage sits in the document. Cheap for the model and worth having: it is
+            // the difference between "expected search time is O(log n)" as a floating claim and as
+            // a claim about skiplists.
+            if (chunk.sectionPath() != null) {
+                prompt.append(" · ").append(chunk.sectionPath());
+            }
+            prompt.append(")\n").append(sources.get(i).strip()).append("\n\n");
         }
         return prompt.toString();
     }

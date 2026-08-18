@@ -1,0 +1,349 @@
+{
+  "_comment": [
+    "Golden set for the retrieval evaluation harness. Every question is answerable from the",
+    "committed fixture corpus (see README.md in this directory) except those marked UNANSWERABLE,",
+    "which are answerable from nothing in it and exist to measure the confidence gate.",
+    "",
+    "'document' names a FixtureDocument constant; 'pages' are 1-based physical pages of THAT file,",
+    "not of the original book. Grading credits a retrieved chunk when its document matches and the",
+    "chunk COVERS an expected page — chunks record both ends of their page span as of Phase 13.",
+    "",
+    "pageTolerance was 1 until Phase 13, and it was slack the old chunker made necessary: a fixed",
+    "window recorded only where it started, so a fact at the top of page N could sit in a chunk",
+    "stamped N-1 and the harness had to accept either. Accepting either also credited retrievals",
+    "that landed one page away and never held the answer. Section-shaped chunks know where they",
+    "end, so the slack is gone and 0 means what it says.",
+    "",
+    "Sixty questions, not twenty. At twenty, one question is worth five points, so a real 8% gain",
+    "and pure noise are the same number — and twelve separate changes are measured against this.",
+    "",
+    "Five kinds, because they fail differently. FACTUAL is a named quantity that lexical search",
+    "alone often finds. CONCEPTUAL has little vocabulary overlap with its source and leans on the",
+    "dense half. SYNTHESIS needs pages from two places at once, which is the case top-6 truncation",
+    "breaks first. FIGURE_TABLE depends on content a text-only pipeline cannot see, so it is the",
+    "baseline the visual work is judged against. UNANSWERABLE is scored only on refusal.",
+    "",
+    "Each expected page was read out of the fixture PDF and traced to the theorem, lemma or figure",
+    "caption named in 'note'. If a fixture file is re-cut, these page numbers are void."
+  ],
+  "pageTolerance": 0,
+  "questions": [
+
+    { "id": "F01", "kind": "FACTUAL",
+      "question": "What running time does a LinearHashTable guarantee for add, remove and find?",
+      "expected": [{ "document": "HASH_TABLES", "pages": [15] }],
+      "note": "Theorem 5.2 — O(1) expected time per operation" },
+
+    { "id": "F02", "kind": "FACTUAL",
+      "question": "What is the maximum occupancy a LinearHashTable allows before it resizes?",
+      "expected": [{ "document": "HASH_TABLES", "pages": [10] }],
+      "note": "if (2*(q+1) > t.length) resize(); // max 50% occupancy" },
+
+    { "id": "F03", "kind": "FACTUAL",
+      "question": "At what minimum occupancy does a LinearHashTable shrink its table?",
+      "expected": [{ "document": "HASH_TABLES", "pages": [11] }],
+      "note": "if (8*n < t.length) resize(); // min 12.5% occupancy" },
+
+    { "id": "F04", "kind": "FACTUAL",
+      "question": "In a ChainedHashTable, what is the expected length of the list at t[hash(x)]?",
+      "expected": [{ "document": "HASH_TABLES", "pages": [5] }],
+      "note": "Lemma 5.2 — at most n_x + 2" },
+
+    { "id": "F05", "kind": "FACTUAL",
+      "question": "What is the expected height of a skiplist containing n elements?",
+      "expected": [{ "document": "SKIPLISTS", "pages": [13] }],
+      "note": "Lemma 4.4 — at most log n + 2" },
+
+    { "id": "F06", "kind": "FACTUAL",
+      "question": "How many nodes does a skiplist with n elements contain in expectation, counting the sentinel?",
+      "expected": [{ "document": "SKIPLISTS", "pages": [14] }],
+      "note": "Lemma 4.5 — 2n + O(log n)" },
+
+    { "id": "F07", "kind": "FACTUAL",
+      "question": "What is the maximum height of a red-black tree storing n values?",
+      "expected": [{ "document": "RED_BLACK_TREES", "pages": [1, 8] }],
+      "note": "stated in the chapter opening and proved as Lemma 9.2 — at most 2 log n" },
+
+    { "id": "F08", "kind": "FACTUAL",
+      "question": "What is the maximum height of a 2-4 tree with n leaves?",
+      "expected": [{ "document": "RED_BLACK_TREES", "pages": [2] }],
+      "note": "Lemma 9.1 — at most log n" },
+
+    { "id": "F09", "kind": "FACTUAL",
+      "question": "How many comparisons does merge-sort perform in the worst case?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [4] }],
+      "note": "Theorem 11.1 — at most n log n comparisons, O(n log n) time" },
+
+    { "id": "F10", "kind": "FACTUAL",
+      "question": "What is the expected number of comparisons quicksort performs on n distinct elements?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [8] }],
+      "note": "Theorem 11.2 — at most 2n ln n + O(n)" },
+
+    { "id": "F11", "kind": "FACTUAL",
+      "question": "How many comparisons does heap-sort perform?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [11] }],
+      "note": "Theorem 11.4 — at most 2n log n + O(n)" },
+
+    { "id": "F12", "kind": "FACTUAL",
+      "question": "What is the running time of counting sort on n integers drawn from 0 to k-1?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [17] }],
+      "note": "Theorem 11.7 — O(n + k)" },
+
+    { "id": "F13", "kind": "FACTUAL",
+      "question": "What is the running time of radix sort on an array of n w-bit integers?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [19] }],
+      "note": "Theorem 11.8 — O((w/d)(n + 2^d))" },
+
+    { "id": "F14", "kind": "FACTUAL",
+      "question": "What is the lower bound on the number of comparisons any deterministic comparison-based sorting algorithm must perform?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [13] }],
+      "note": "Theorem 11.5 — at least log(n!) = n log n - O(n)" },
+
+    { "id": "F15", "kind": "FACTUAL",
+      "question": "How much space does an adjacency matrix use to represent a graph?",
+      "expected": [{ "document": "GRAPHS", "pages": [5] }],
+      "note": "Theorem 12.1 — O(n^2)" },
+
+    { "id": "F16", "kind": "FACTUAL",
+      "question": "How much space does the adjacency list representation of a graph use?",
+      "expected": [{ "document": "GRAPHS", "pages": [9] }],
+      "note": "Theorem 12.2 — O(n + m)" },
+
+    { "id": "F17", "kind": "FACTUAL",
+      "question": "What is the running time of breadth-first search on a graph stored as adjacency lists?",
+      "expected": [{ "document": "GRAPHS", "pages": [12] }],
+      "note": "Theorem 12.3 — O(n + m)" },
+
+    { "id": "F18", "kind": "FACTUAL",
+      "question": "What running time does an unbalanced binary search tree guarantee for add, remove and find?",
+      "expected": [{ "document": "BINARY_TREES", "pages": [14] }],
+      "note": "Theorem 6.1 — O(n) per operation" },
+
+    { "id": "F19", "kind": "FACTUAL",
+      "question": "Starting from an empty B-tree, how many splits, merges and borrows can a sequence of m additions and removals cause?",
+      "expected": [{ "document": "EXTERNAL_MEMORY_SEARCHING", "pages": [20] }],
+      "note": "Lemma 14.1 — at most 3m/2" },
+
+    { "id": "F20", "kind": "FACTUAL",
+      "question": "What running time does a YFastTrie achieve for its SSet operations?",
+      "expected": [{ "document": "DATA_STRUCTURES_FOR_INTEGERS", "pages": [16] }],
+      "note": "Theorem 13.3 — O(log w) expected" },
+
+    { "id": "C01", "kind": "CONCEPTUAL",
+      "question": "What is the difference between a worst-case, an amortized and an expected running time?",
+      "expected": [{ "document": "INTRODUCTION", "pages": [20] }],
+      "note": "the three guarantees are defined together on one page" },
+
+    { "id": "C02", "kind": "CONCEPTUAL",
+      "question": "Why is paying for fire insurance a good analogy for the difference between worst-case and expected cost?",
+      "expected": [{ "document": "INTRODUCTION", "pages": [21] }],
+      "note": "the house-and-insurance worked example" },
+
+    { "id": "C03", "kind": "CONCEPTUAL",
+      "question": "What does big-Oh notation actually denote, and why is writing f(n) = O(g(n)) an abuse of notation?",
+      "expected": [{ "document": "INTRODUCTION", "pages": [12, 13] }],
+      "note": "O(f(n)) denotes a set of functions; membership vs equality" },
+
+    { "id": "C04", "kind": "CONCEPTUAL",
+      "question": "Why does randomly choosing which elements to promote keep a skiplist efficient?",
+      "expected": [{ "document": "SKIPLISTS", "pages": [2] }],
+      "note": "coin tosses and the expected height of the structure" },
+
+    { "id": "C05", "kind": "CONCEPTUAL",
+      "question": "What goes wrong when a hash function distributes keys badly?",
+      "expected": [{ "document": "HASH_TABLES", "pages": [3] }],
+      "note": "good hash spreads keys so expected list length is O(1); a bad one does not" },
+
+    { "id": "C06", "kind": "CONCEPTUAL",
+      "question": "How does a scapegoat tree decide that it has become unbalanced enough to rebuild?",
+      "expected": [{ "document": "SCAPEGOAT_TREES", "pages": [3] }],
+      "note": "height compared against log base 3/2 of q" },
+
+    { "id": "C07", "kind": "CONCEPTUAL",
+      "question": "Why is a binary search tree built from a random permutation likely to be balanced?",
+      "expected": [{ "document": "RANDOM_BINARY_SEARCH_TREES", "pages": [2] }],
+      "note": "every permutation equally likely; balanced trees arise from far more permutations" },
+
+    { "id": "C08", "kind": "CONCEPTUAL",
+      "question": "Why might you prefer a red-black tree over a skiplist or a treap?",
+      "expected": [{ "document": "RED_BLACK_TREES", "pages": [1] }],
+      "note": "worst-case bounds rather than expected ones, which rely on randomization" },
+
+    { "id": "C09", "kind": "CONCEPTUAL",
+      "question": "Why must a correct comparison-based sorting algorithm's comparison tree have at least n! leaves?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [12, 13] }],
+      "note": "two permutations reaching the same leaf would be sorted identically, so one is wrong" },
+
+    { "id": "C10", "kind": "CONCEPTUAL",
+      "question": "What is the external memory model and what does it count as the cost of an algorithm?",
+      "expected": [{ "document": "EXTERNAL_MEMORY_SEARCHING", "pages": [2] }],
+      "note": "blocks transferred between internal and external memory; internal computation is free" },
+
+    { "id": "C11", "kind": "CONCEPTUAL",
+      "question": "Why do B-trees perform better in practice than their running-time bounds suggest?",
+      "expected": [{ "document": "EXTERNAL_MEMORY_SEARCHING", "pages": [23] }],
+      "note": "B is large, so 99% or more of the data sits in leaves and the internal nodes stay cached" },
+
+    { "id": "C12", "kind": "CONCEPTUAL",
+      "question": "How can a graph model which university classes conflict with each other?",
+      "expected": [{ "document": "GRAPHS", "pages": [1] }],
+      "note": "an edge exists when at least one student takes both classes" },
+
+    { "id": "C13", "kind": "CONCEPTUAL",
+      "question": "How is a complete binary tree stored in an array without any pointers?",
+      "expected": [{ "document": "HEAPS", "pages": [2] }],
+      "note": "Eytzinger's method" },
+
+    { "id": "C14", "kind": "CONCEPTUAL",
+      "question": "What is an external node in a binary tree and why is it useful to talk about them?",
+      "expected": [{ "document": "BINARY_TREES", "pages": [2, 3] }],
+      "note": "the nil positions; a tree with n real nodes has n+1 external nodes" },
+
+    { "id": "S01", "kind": "SYNTHESIS",
+      "question": "How does the expected length of a search path in a treap compare with that in a skiplist?",
+      "expected": [
+        { "document": "RANDOM_BINARY_SEARCH_TREES", "pages": [16] },
+        { "document": "SKIPLISTS", "pages": [16] }],
+      "note": "the treap chapter compares the two directly; Theorem 4.3 gives the skiplist bound" },
+
+    { "id": "S02", "kind": "SYNTHESIS",
+      "question": "Which search structures give worst-case O(log n) bounds rather than expected or amortized ones?",
+      "expected": [
+        { "document": "RED_BLACK_TREES", "pages": [1] },
+        { "document": "INTRODUCTION", "pages": [24] }],
+      "note": "the red-black opening claims worst case; Table 1.2 marks E and A on the alternatives" },
+
+    { "id": "S03", "kind": "SYNTHESIS",
+      "question": "Both scapegoat trees and red-black trees support add and remove — how do their time guarantees differ?",
+      "expected": [
+        { "document": "SCAPEGOAT_TREES", "pages": [9] },
+        { "document": "RED_BLACK_TREES", "pages": [21] }],
+      "note": "Theorem 8.1 is amortized O(log n); Theorem 9.1 is worst-case O(log n)" },
+
+    { "id": "S04", "kind": "SYNTHESIS",
+      "question": "How does the analysis of quicksort reuse the analysis of random binary search trees?",
+      "expected": [
+        { "document": "SORTING_ALGORITHMS", "pages": [8] },
+        { "document": "RANDOM_BINARY_SEARCH_TREES", "pages": [3] }],
+      "note": "Lemma 11.1 translates Lemma 7.1 into a statement about pivot comparisons" },
+
+    { "id": "S05", "kind": "SYNTHESIS",
+      "question": "How does a YFastTrie combine an XFastTrie with treaps to reduce space to O(n)?",
+      "expected": [{ "document": "DATA_STRUCTURES_FOR_INTEGERS", "pages": [11, 12] }],
+      "note": "stores O(n/w) values in the xft, the rest in treaps of expected size O(w)" },
+
+    { "id": "S06", "kind": "SYNTHESIS",
+      "question": "Where is the potential method of amortized analysis used, and for which structures?",
+      "expected": [
+        { "document": "ARRAY_BASED_LISTS", "pages": [20] },
+        { "document": "LINKED_LISTS", "pages": [18] }],
+      "note": "Lemma 2.2 for DualArrayDeque balance(); Lemma 3.1 for SEList spread/gather" },
+
+    { "id": "S07", "kind": "SYNTHESIS",
+      "question": "Why is the height of a B-tree so much smaller than that of a binary search tree holding the same keys?",
+      "expected": [
+        { "document": "EXTERNAL_MEMORY_SEARCHING", "pages": [8] },
+        { "document": "BINARY_TREES", "pages": [14] }],
+      "note": "O(log_B n) against O(n) unbalanced / O(log n) balanced" },
+
+    { "id": "S08", "kind": "SYNTHESIS",
+      "question": "Radix sort beats the n log n sorting lower bound — why is that not a contradiction?",
+      "expected": [
+        { "document": "SORTING_ALGORITHMS", "pages": [13, 19] }],
+      "note": "the lower bound applies to comparison-based algorithms; radix sort is not one" },
+
+    { "id": "S09", "kind": "SYNTHESIS",
+      "question": "How does heap-sort use the same structure described in the chapter on priority queues?",
+      "expected": [
+        { "document": "SORTING_ALGORITHMS", "pages": [10, 11] },
+        { "document": "HEAPS", "pages": [7] }],
+      "note": "heapSort builds the implicit binary heap of Theorem 10.1 in place" },
+
+    { "id": "S10", "kind": "SYNTHESIS",
+      "question": "An XFastTrie relies on a USet internally — what does that dependency cost in running time?",
+      "expected": [
+        { "document": "DATA_STRUCTURES_FOR_INTEGERS", "pages": [9, 10] },
+        { "document": "HASH_TABLES", "pages": [15] }],
+      "note": "constant expected time per USet operation, which is what makes find O(log w) expected" },
+
+    { "id": "T01", "kind": "FIGURE_TABLE",
+      "question": "In the worked example of a ChainedHashTable, how many items are stored and how long is the table?",
+      "expected": [{ "document": "HASH_TABLES", "pages": [2] }],
+      "note": "Figure 5.1 caption — n = 14 and t.length = 16" },
+
+    { "id": "T02", "kind": "FIGURE_TABLE",
+      "question": "Which table summarises the running times of every SSet and priority queue implementation in the book?",
+      "expected": [{ "document": "INTRODUCTION", "pages": [23, 24] }],
+      "note": "Table 1.2, spanning the two pages of the summary" },
+
+    { "id": "T03", "kind": "FIGURE_TABLE",
+      "question": "Which two functions are plotted against each other to show that a smaller growth rate eventually wins?",
+      "expected": [{ "document": "INTRODUCTION", "pages": [16] }],
+      "note": "Figure 1.5 — plots of 15n versus 2n log n" },
+
+    { "id": "T04", "kind": "FIGURE_TABLE",
+      "question": "Is there a diagram showing which chapters depend on which other chapters?",
+      "expected": [{ "document": "INTRODUCTION", "pages": [25] }],
+      "note": "Figure 1.6 — the dependency graph between chapters" },
+
+    { "id": "T05", "kind": "FIGURE_TABLE",
+      "question": "What black-height does the worked example of a red-black tree have?",
+      "expected": [{ "document": "RED_BLACK_TREES", "pages": [7] }],
+      "note": "Figure 9.4 caption — black-height 3" },
+
+    { "id": "T06", "kind": "FIGURE_TABLE",
+      "question": "How many passes of counting sort does the radix sort figure use, and on how many bits?",
+      "expected": [{ "document": "SORTING_ALGORITHMS", "pages": [18] }],
+      "note": "Figure 11.8 — w = 8-bit integers, 4 passes" },
+
+    { "id": "T07", "kind": "FIGURE_TABLE",
+      "question": "Which figure shows a graph next to its adjacency matrix?",
+      "expected": [{ "document": "GRAPHS", "pages": [4] }],
+      "note": "Figure 12.2" },
+
+    { "id": "T08", "kind": "FIGURE_TABLE",
+      "question": "How many vertices does the example graph used throughout the chapter have?",
+      "expected": [{ "document": "GRAPHS", "pages": [2] }],
+      "note": "Figure 12.1 caption — a graph with twelve vertices" },
+
+    { "id": "U01", "kind": "UNANSWERABLE",
+      "question": "What is the amortized running time of the union-find disjoint set structure with path compression?",
+      "expected": [],
+      "note": "union-find is not covered anywhere in this book" },
+
+    { "id": "U02", "kind": "UNANSWERABLE",
+      "question": "How does Dijkstra's algorithm compute single-source shortest paths?",
+      "expected": [],
+      "note": "the graph chapter covers only representations, BFS and DFS" },
+
+    { "id": "U03", "kind": "UNANSWERABLE",
+      "question": "What is the running time of Kruskal's minimum spanning tree algorithm?",
+      "expected": [],
+      "note": "spanning forests appear in an exercise; Kruskal's algorithm does not" },
+
+    { "id": "U04", "kind": "UNANSWERABLE",
+      "question": "How does a Bloom filter test set membership, and what is its false positive rate?",
+      "expected": [],
+      "note": "not in this book" },
+
+    { "id": "U05", "kind": "UNANSWERABLE",
+      "question": "What is the master theorem for solving divide-and-conquer recurrences?",
+      "expected": [],
+      "note": "recurrences are solved directly here; the master theorem is never stated" },
+
+    { "id": "U06", "kind": "UNANSWERABLE",
+      "question": "How does a suffix tree support substring search in linear time?",
+      "expected": [],
+      "note": "not in this book" },
+
+    { "id": "U07", "kind": "UNANSWERABLE",
+      "question": "What is the worst-case running time of Timsort?",
+      "expected": [],
+      "note": "not in this book" },
+
+    { "id": "U08", "kind": "UNANSWERABLE",
+      "question": "How do you build a trie over string keys to support autocomplete?",
+      "expected": [],
+      "note": "the hardest refusal: the book covers binary tries over integers at length, so retrieval will return confident-looking trie chunks that cannot answer this" }
+  ]
+}

@@ -46,10 +46,34 @@ public class DocumentChunk {
     @Column(name = "page_number")
     private Integer pageNumber;
 
+    // 1-based page the chunk's text runs to, which is usually pageNumber and occasionally the one
+    // after it. Both ends are recorded because a citation should be able to say where a passage
+    // finishes, and because grading retrieval against "the page the answer is on" needs to know
+    // whether a chunk covered that page rather than merely started near it (Phase 13).
+    @Column(name = "page_end")
+    private Integer pageEnd;
+
+    // The heading trail this chunk sits under — "Chapter 4 > 4.2 Skiplists". Null for text that
+    // stated no structure, and for every chunk written before Phase 13.
+    @Column(name = "section_path", columnDefinition = "text")
+    private String sectionPath;
+
     @Column(nullable = false, columnDefinition = "text")
     private String content;
 
-    // Approximate token count of the content (used later for prompt-budget accounting).
+    // What is embedded and lexically indexed: the context header followed by `content`. Null means
+    // "identical to content", which is what the SQL's coalesce reads and what every pre-13 row has.
+    //
+    // The split exists because content_tsv used to be generated from `content`, so anything added
+    // to help the dense half would have landed in the lexical index too — every chunk in a chapter
+    // sharing its heading text, ts_rank rewarding it, and lexical precision falling. Two columns,
+    // one displayed and one indexed, is the fix.
+    @Column(name = "embed_text", columnDefinition = "text")
+    private String embedText;
+
+    // Token count of `content` — the passage itself, not the context header in front of it — from
+    // a real byte-pair encoder as of Phase 13.1 rather than the chars/4 estimate it used to be.
+    // Same text the chunking ceiling was applied to, so the two numbers can be compared.
     @Column(name = "token_count", nullable = false)
     private int tokenCount;
 

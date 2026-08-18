@@ -12,6 +12,11 @@ public record RetrievalResult(
         List<RetrievedChunk> chunks,
         OptionalDouble topVectorSimilarity,
         int lexicalHitCount,
+        // The best chunk's cross-encoder relevance, empty when the rerank stage did not run.
+        // Present, it is the better of the two confidence signals and the gate reads it instead:
+        // it is calibrated, so a fixed threshold on it means the same thing for every question,
+        // which is exactly what the pair above is not (Phase 12.2).
+        OptionalDouble topRerankScore,
         // The vector the semantic half actually searched with — the caller's, if it passed one,
         // otherwise the one embedded here. Null when no embedding provider is configured, so no
         // vector search ran at all. Handed back so a caller that needs the question's embedding

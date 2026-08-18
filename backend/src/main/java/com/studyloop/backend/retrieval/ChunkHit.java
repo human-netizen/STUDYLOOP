@@ -14,6 +14,10 @@ record ChunkHit(
         String filename,
         DocumentSource source,
         Integer pageNumber,
+        // Both ends of the chunk's page span, and the section it sits in (Phase 13). Null on rows
+        // written by the pre-13 chunker, which recorded neither.
+        Integer pageEnd,
+        String sectionPath,
         String content,
         int tokenCount,
         Double cosineSimilarity

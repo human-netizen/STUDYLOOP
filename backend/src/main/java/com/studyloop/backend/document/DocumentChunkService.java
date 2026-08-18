@@ -30,8 +30,11 @@ public class DocumentChunkService {
             DocumentChunk chunk = new DocumentChunk();
             chunk.setDocument(document);
             chunk.setChunkIndex(source.index());
-            chunk.setPageNumber(source.pageNumber());
+            chunk.setPageNumber(source.pageStart());
+            chunk.setPageEnd(source.pageEnd());
+            chunk.setSectionPath(source.sectionPath());
             chunk.setContent(source.content());
+            chunk.setEmbedText(source.embedText());
             chunk.setTokenCount(source.tokenCount());
             chunkRepository.save(chunk);
         }

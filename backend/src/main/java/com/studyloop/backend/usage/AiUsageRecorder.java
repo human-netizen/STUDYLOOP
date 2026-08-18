@@ -23,9 +23,24 @@ public class AiUsageRecorder {
 
     public void record(String provider, String model, AiOperation fallbackOperation,
                        int inputTokens, int outputTokens) {
+        write(provider, model, fallbackOperation, inputTokens, outputTokens, 0);
+    }
+
+    // For a call the provider bills per search rather than per token — reranking, as of Phase 12.3.
+    // The token counts are zero because there are none, not because they went unread: a rerank call
+    // has no generated output and is not invoiced on its input length. Writing the batch size in
+    // there to make the row look populated would inflate the per-user token budget, which sums that
+    // column, and charge a student for a stage they did not choose to run.
+    public void recordSearch(String provider, String model, AiOperation fallbackOperation,
+                             int searchUnits) {
+        write(provider, model, fallbackOperation, 0, 0, searchUnits);
+    }
+
+    private void write(String provider, String model, AiOperation fallbackOperation,
+                       int inputTokens, int outputTokens, int searchUnits) {
         try {
             ledger.write(provider, model, AiUsageContext.current(fallbackOperation),
-                    AiUsageContext.currentActor(), inputTokens, outputTokens);
+                    AiUsageContext.currentActor(), inputTokens, outputTokens, searchUnits);
         } catch (RuntimeException e) {
             log.warn("Could not record {} usage for model {}: {}", provider, model, e.getMessage());
         }

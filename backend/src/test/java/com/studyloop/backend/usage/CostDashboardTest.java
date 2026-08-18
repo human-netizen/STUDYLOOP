@@ -96,6 +96,30 @@ class CostDashboardTest {
                 .andExpect(jsonPath("$.daily.length()").value(1));
     }
 
+    // Reranking is billed per search, so its rows carry a real cost against zero tokens (Phase
+    // 12.3). Worth its own case because "no tokens" is the shape a dropped or unpriced call also
+    // has, and this is the one operation for which it is correct — the dashboard has to sum it,
+    // rank it by what it cost, and not quietly treat it as a free call.
+    //
+    // The arithmetic that produced the figure is UsageAccountingTest's; what is checked here is
+    // that the row survives the journey to the response intact.
+    @Test
+    void aCallBilledPerSearchShowsItsCostAgainstZeroTokens() throws Exception {
+        record_(AiOperation.RERANK, 0, 0, "0.002000", Instant.now());
+        record_(AiOperation.CHAT_STREAM, 1_000, 500, "0.000450", Instant.now());
+
+        mockMvc.perform(get("/api/v1/admin/costs").header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.calls").value(2))
+                .andExpect(jsonPath("$.totals.inputTokens").value(1_000))
+                .andExpect(jsonPath("$.totals.costUsd").value(0.002450))
+                .andExpect(jsonPath("$.byOperation[0].operation").value("RERANK"))
+                .andExpect(jsonPath("$.byOperation[0].calls").value(1))
+                .andExpect(jsonPath("$.byOperation[0].inputTokens").value(0))
+                .andExpect(jsonPath("$.byOperation[0].outputTokens").value(0))
+                .andExpect(jsonPath("$.byOperation[0].costUsd").value(0.002));
+    }
+
     @Test
     void spendOlderThanTheWindowIsExcluded() throws Exception {
         record_(AiOperation.CHAT, 1_000, 1_000, "0.000750", Instant.now().minus(60, ChronoUnit.DAYS));

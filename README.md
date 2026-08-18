@@ -18,16 +18,17 @@
 
 ## What's built
 
-Seventeen database migrations, 158 tests running against real Postgres + pgvector.
+Eighteen database migrations and 279 tests, the integration ones against real Postgres + pgvector.
 
 | | |
 |---|---|
 | **Accounts** | Register, log in, stay signed in. BCrypt hashing, JWT access + refresh tokens, role-based access on every endpoint. |
 | **Course spaces** | Owners, instructors and members. Invite by share link or by email address; links can be revoked and expire. |
-| **Uploading material** | Drop in a PDF and watch it go through extraction, chunking and embedding without blocking the page. Duplicate files are rejected by content hash, not by filename. |
-| **Grounded answers** | Vector search and full-text search run in parallel and are fused into one ranked set. Answers stream in token by token, carry `[n]` citations, and remember the conversation. |
-| **Refusal** | When nothing in the course matches well enough, StudyLoop says **"not in your materials"** instead of inventing an answer. |
+| **Uploading material** | Drop in a PDF and watch it go through extraction, chunking and embedding without blocking the page. Extraction reads the document's own typography to recover its headings, so a passage is cut where its author ended a section rather than where a word counter ran out. Duplicate files are rejected by content hash, not by filename. |
+| **Grounded answers** | Vector search and full-text search run in parallel and are fused into one ranked set, then a cross-encoder reads the question against each candidate and keeps the six that answer it. Each of those six is expanded to the whole section it came from before the model reads it — matching is done on small passages, answering on whole ones. Answers stream in token by token, carry `[n]` citations, and remember the conversation. |
+| **Refusal** | When nothing in the course matches well enough, StudyLoop says **"not in your materials"** instead of inventing an answer. The decision reads the reranker's calibrated relevance, which is what lets one threshold mean the same thing for every question. |
 | **Citation viewer** | Clicking a citation opens that document at that page. |
+| **Formatted answers** | Answers render with tables, headings, syntax-highlighted code and typeset mathematics. Citations stay clickable inside all of it — including inside a table cell — and raw HTML from the model is never rendered. |
 | **Quizzes** | Multiple-choice and short-answer quizzes generated from chosen lectures, graded automatically with explanations for every answer. |
 | **Flashcards** | Generated from a document, or saved from any answer you want to keep. |
 | **Revision queue** | An SM-2 spaced-repetition schedule. Questions you got wrong enrol themselves; the app tells you what is due today. |
@@ -38,6 +39,7 @@ Seventeen database migrations, 158 tests running against real Postgres + pgvecto
 | **Cost visibility** | Every paid API call is recorded and priced from the provider's own billing figures. An admin dashboard shows spend by feature and by day. |
 | **Answer cache** | Near-identical questions reuse a previous answer instead of paying for it twice. Uploading a document clears the course's cache. |
 | **Usage limits** | Per-user request limits and a rolling token allowance on everything that costs money. |
+| **Measured retrieval** | Answer quality is a number, not an impression. A sixty-question set over a fourteen-document open-licensed textbook — including questions the corpus deliberately cannot answer — scored on Recall@6, MRR and nDCG. The corpus ships with the repository, so the measurement is reproducible. Two changes have been measured this way so far: cross-encoder reranking took Recall@6 from 0.856 to 0.891, and cutting chunks on the document's own section boundaries took it to 0.939 — while the grading rule was tightened in the same run. Refusals on the unanswerable set went 0 of 8 → 6 of 8, with none of the 52 real questions ever refused. |
 
 ## What isn't there yet
 
@@ -49,7 +51,7 @@ Seventeen database migrations, 158 tests running against real Postgres + pgvecto
 
 ## What's coming
 
-- **Better retrieval, measured rather than claimed** — a cross-encoder reranking stage, chunks cut along a document's real structure instead of a fixed window, and generated questions indexed alongside each section so a student's phrasing finds a textbook's. Each change is scored on a fixed question set, so improvement is a number, not an opinion.
+- **Better retrieval, measured rather than claimed** — questions generated at ingest and indexed alongside each section, so a student's phrasing finds a textbook's even when they share no words. Every change is scored on the same fixed question set, so improvement is a number rather than an opinion. (Reranking and structure-aware chunking are done and measured; this is the next one.)
 - **Material that isn't a clean PDF** — scanned pages and broken text layers recovered with a vision model, PowerPoint with its speaker notes, Word documents, and photos of handwritten notes.
 - **Diagrams that answer questions** — figures and tables indexed as images, so "the diagram with the three layers" finds the page.
 - **Typos and vague questions** — misspellings matched anyway, and genuinely unclear questions rewritten before retrieval.
@@ -62,8 +64,8 @@ Seventeen database migrations, 158 tests running against real Postgres + pgvecto
 | Layer | Choice |
 |---|---|
 | Backend | Java 21, Spring Boot 4.1 (Web MVC, Security + JWT, Data JPA, Validation, Actuator) |
-| Database | PostgreSQL on Supabase with **pgvector** · Flyway migrations `V1`–`V17` |
-| AI | Cohere, called directly over Spring's `RestClient` — `embed-v4.0` embeddings truncated to 768-d, Command R for chat |
+| Database | PostgreSQL on Supabase with **pgvector** · Flyway migrations `V1`–`V18` |
+| AI | Cohere, called directly over Spring's `RestClient` — `embed-v4.0` embeddings truncated to 768-d, `rerank-v3.5` over the fused candidates, Command R for chat |
 | Extraction | Apache PDFBox, per page |
 | Frontend | React 19 + Vite + TypeScript + Tailwind 4 · `react-pdf` for the citation viewer |
 | Testing | JUnit 5 + MockMvc against a **second Supabase project** used only by the suite |

@@ -88,6 +88,92 @@ studyloop:
     # real question in novel wording isn't refused, while off-topic queries stay well under it.
     # Tune per corpus; set to 0 to disable. Override with CHAT_MIN_SIMILARITY.
     min-similarity: ${CHAT_MIN_SIMILARITY:0.25}
+    # The same gate on a better signal, used instead of min-similarity whenever the rerank stage
+    # ran (Phase 12.2). A cross-encoder relevance score is calibrated 0..1 — it means the same
+    # thing for every question, which the cosine above does not — so this is one comparison with
+    # no lexical escape hatch behind it.
+    #
+    # Calibrated against the 11.1 golden set rather than by eye, and re-read after Phase 13 changed
+    # what a passage is. On the current corpus the eight unanswerable questions score
+    # 0.021 · 0.103 · 0.244 · 0.246 · 0.260 · 0.310 · 0.346 · 0.347 and the lowest *answerable* one
+    # scores 0.331, so 0.32 refuses six of the eight and none of the fifty-two real questions.
+    #
+    # **This number is a property of the chunking, not of the model.** It was 0.25 through Phase 12,
+    # where the unanswerable set reached 0.479 and the lowest answerable sat at 0.291. Adaptive
+    # chunking moved both ends toward each other from the outside: section-shaped chunks no longer
+    # hand a question about Kruskal a stray paragraph that half-answers it (the unanswerable maximum
+    # fell 0.479 → 0.347), and a whole section answers a real question better than a window across
+    # two of them (the answerable minimum rose 0.291 → 0.331). Left at 0.25 the gate would refuse
+    # four of eight rather than six, purely because the pipeline underneath it improved.
+    #
+    # Two numbers were deliberately not chosen, and the reasoning is the same one Phase 12.2 used.
+    # 0.35 would refuse all eight, at the price of one real question in fifty-two: the wrong trade,
+    # because a student refused an answer the course does contain has no recourse but the search
+    # page, while a weak-context answer still meets a system prompt telling the model to decline.
+    # And 0.331 — the highest threshold that costs nothing — is exactly the lowest answerable score,
+    # which is fitting the boundary to one corpus. 0.32 sits in the gap between 0.310 and 0.331 with
+    # ~0.010 of margin either side; the number rejected in Phase 12 had one thousandth.
+    # 0 disables. Override with CHAT_MIN_RELEVANCE.
+    min-relevance: ${CHAT_MIN_RELEVANCE:0.32}
+  retrieval:
+    # Phase 11.3: one switch per retrieval stage, so an A/B against the golden set is a property
+    # change rather than a code change. Two runs that differ by a rebuild are not comparable —
+    # the "before" pipeline no longer exists to be re-measured. All off is the 11.1 baseline; each
+    # later phase flips its own on once its eval run exists to justify it.
+    stages:
+      # On since Phase 12.1, which is the run that earned it: against the 11.1 baseline on the same
+      # sixty questions, Recall@6 0.856 → 0.891, MRR 0.766 → 0.811, nDCG@6 0.765 → 0.796, and the
+      # confidence gate went from refusing 0 of 8 unanswerable questions to 5. Set false to
+      # reproduce that baseline. A blank COHERE_API_KEY leaves it off whatever this says.
+      rerank: ${RETRIEVAL_RERANK:true}
+      hyde: ${RETRIEVAL_HYDE:false}
+      trigram: ${RETRIEVAL_TRIGRAM:false}
+      visual: ${RETRIEVAL_VISUAL:false}
+      synthetic-queries: ${RETRIEVAL_SYNTHETIC_QUERIES:false}
+    # How the rerank stage runs when stages.rerank is on. The key is the one embeddings and chat
+    # already use; blank leaves the stage off however the switch above is set, so a deployment
+    # without a Cohere key keeps working rather than failing every question.
+    rerank:
+      api-key: ${COHERE_API_KEY:}
+      model: ${COHERE_RERANK_MODEL:rerank-v3.5}
+      # Candidates fused and handed to the cross-encoder before it picks the top k. Reranking six
+      # chunks can only reorder six chunks — the passage RRF put eleventh is the one this stage
+      # exists to promote. 30 is inside the 100 documents Cohere bills as one search unit.
+      candidates: ${RETRIEVAL_RERANK_CANDIDATES:30}
+  chunking:
+    # Phase 13 — how a document is cut up at ingest. Not under retrieval.stages, and the difference
+    # matters: a stage flag makes two pipelines comparable by restarting, and chunking cannot work
+    # that way. The chunks are already in the database when a question arrives, so comparing two
+    # chunkers means re-ingesting the corpus (`-Deval.reset=true`), not flipping a switch.
+    #
+    # A ceiling, not a target. A section that fits becomes one chunk at its own size — 80 tokens or
+    # 460 — and nothing is padded or sliced to reach a number. What this caps is the runaway case:
+    # a 4,000-token chapter written as one section would otherwise become a single vector that is
+    # the average of eight subtopics and a strong match for none of them.
+    max-tokens: ${CHUNK_MAX_TOKENS:500}
+    # Below this a section is a fragment rather than a retrieval unit ("4.2.1 Analysis", one
+    # sentence), so it merges with the sibling after it — never across an H1, never past the
+    # ceiling.
+    min-tokens: ${CHUNK_MIN_TOKENS:120}
+    # Tier 2: embed sentences and cut where adjacent-sentence similarity drops. Only ever runs on a
+    # document with no headings at all — a flat slide export, continuous prose. It costs one
+    # embedding pass over the whole document on top of the pass that embeds the chunks, so a
+    # document that reaches it pays about twice; false sends those documents to the paragraph tier.
+    semantic: ${CHUNK_SEMANTIC:true}
+    # Sentences tier 2 will embed before deciding the pass costs more than the boundaries are worth.
+    semantic-sentence-limit: ${CHUNK_SEMANTIC_SENTENCES:400}
+    # Phase 13.4: prepend the document title and heading path to the *embedded* text. A passage
+    # reading "the expected search time is O(log n)" is a good passage and a hopeless index entry —
+    # what it is about is written three headings above it. false stores no embed_text, so both
+    # indexes fall back to `content`, which is exactly the pre-13.4 pipeline.
+    context-header: ${CHUNK_CONTEXT_HEADER:true}
+    # Phase 13.5: retrieve on chunks, then hand the model the whole section each hit came from.
+    # Retrieval precision and generation context are different budgets — a big chunk embeds to the
+    # average of its subtopics, a big prompt is just a prompt. Citations still point at the chunk.
+    expand-to-section: ${CHUNK_EXPAND_TO_SECTION:true}
+    # Ceiling per source once expanded. Six sources at 1,200 tokens is a ~7k-token prompt; six
+    # unbounded chapters is not affordable and is not more useful.
+    expansion-max-tokens: ${CHUNK_EXPANSION_MAX_TOKENS:1200}
   summary:
     # Phase 8.2: after a document reaches READY, generate its summary + glossary once and cache
     # them. Costs one chat call per document, never repeated. Set false (SUMMARY_AUTO_GENERATE)
@@ -155,10 +241,9 @@ studyloop:
       # midnight, and there is no question of whose midnight it is.
       window: ${TOKEN_BUDGET_WINDOW:24h}
   pricing:
-    # USD per million tokens, used to price each recorded provider call for /admin/costs. These
-    # are Cohere's published list prices; a model with no entry here is still recorded, just
-    # costed at zero. Keys need [brackets] because Spring otherwise reads the dot in a model name
-    # as nesting.
+    # What each recorded provider call costs, for /admin/costs. These are Cohere's published list
+    # prices; a model with no entry here is still recorded, just costed at zero. Keys need
+    # [brackets] because Spring otherwise reads the dot in a model name as nesting.
     models:
       "[command-r-08-2024]":
         input-per-million: 0.15
@@ -167,6 +252,11 @@ studyloop:
       "[embed-v4.0]":
         input-per-million: 0.12
         output-per-million: 0
+      # Reranking bills per search, not per token: one call over a batch of up to 100 passages is
+      # one search unit whatever those passages weigh. $2.00 per 1,000 searches — about $0.002 on
+      # every question, which is why the dashboard needs to show it rather than infer it.
+      "[rerank-v3.5]":
+        per-thousand-searches: 2.00
 
 management:
   endpoints:

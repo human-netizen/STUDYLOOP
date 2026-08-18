@@ -121,12 +121,16 @@ public class ForumCorpusService {
         return text.toString();
     }
 
-    // The chunker windows by word count, so a long answer still splits sensibly. Page numbers are
-    // stripped afterwards: this text never came from a page, and citing "p.1" would invite a click
-    // through to a file that does not exist. Page count 0 for the same reason.
+    // Page numbers are stripped afterwards: this text never came from a page, and citing "p.1"
+    // would invite a click through to a file that does not exist. Page count 0 for the same reason.
+    //
+    // No context header title, unlike an uploaded document. compose() already opens the text with
+    // the question it answers, so the words a student would search for are in the passage itself;
+    // prefixing "Forum · <the same question>" would put a second copy of them in the index and
+    // weight the chunk toward its own title.
     private List<TextChunk> chunk(String text) {
         return textChunker.chunk(List.of(new PageText(1, text))).stream()
-                .map(source -> new TextChunk(source.index(), null, source.content(), source.tokenCount()))
+                .map(TextChunk::withoutPages)
                 .toList();
     }
 

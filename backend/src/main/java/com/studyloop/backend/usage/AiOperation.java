@@ -20,6 +20,9 @@ public enum AiOperation {
     EMBED_DOCUMENTS,
     // Embedding a single question, for retrieval and for the semantic cache probe.
     EMBED_QUERY,
+    // Cross-encoder reranking of a retrieved candidate set (Phase 12.1). The only operation billed
+    // per search rather than per token, so its rows carry a cost against zero tokens.
+    RERANK,
     // A call no scope claimed. A row landing here means an unlabelled call site, not a bug in
     // the caller — it still costs money and still shows up in the total.
     OTHER

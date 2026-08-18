@@ -46,7 +46,7 @@ public class DocumentIngestionService {
             List<PageText> pages = textExtractor.extract(bytes);
 
             statusService.markStatus(documentId, DocumentStatus.CHUNKING);
-            List<TextChunk> chunks = textChunker.chunk(pages);
+            List<TextChunk> chunks = textChunker.chunk(pages, titleOf(document));
             chunkService.replaceChunks(documentId, chunks, pages.size());
 
             statusService.markStatus(documentId, DocumentStatus.EMBEDDING);
@@ -62,6 +62,19 @@ public class DocumentIngestionService {
         // most of all the refusals, which this document may well have just made answerable.
         semanticCache.invalidate(courseId);
         summarizeQuietly(courseId, documentId);
+    }
+
+    // Half of a chunk's context header (13.4), and the only half a document with no headings has.
+    // The filename is what the uploader called the material — "Lecture 07 - Hashing.pdf" — so the
+    // extension and the separators come off and the words go into the indexed text.
+    private static String titleOf(Document document) {
+        String filename = document.getFilename();
+        if (filename == null || filename.isBlank()) {
+            return null;
+        }
+        int dot = filename.lastIndexOf('.');
+        String stem = dot > 0 ? filename.substring(0, dot) : filename;
+        return stem.replaceAll("[_-]+", " ").replaceAll("\\s+", " ").strip();
     }
 
     // Phase 8.2, deliberately after READY and deliberately swallowing its failure: the summary is

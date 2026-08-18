@@ -28,10 +28,14 @@ class AiUsageLedger {
     private final AiUsageEventRepository repository;
     private final PricingProperties pricing;
 
+    // searchUnits is how reranking bills — per call over a batch of passages rather than per token
+    // — and is zero for everything else. It is priced but not stored: for every batch size this
+    // system sends, one call is one search unit, so a column holding it would be a slower way of
+    // writing count(*). The cost it produces is stored, which is what the dashboard sums.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void write(String provider, String model, AiOperation operation, UUID userId,
-                      int inputTokens, int outputTokens) {
-        BigDecimal cost = pricing.priceFor(model).cost(inputTokens, outputTokens);
+                      int inputTokens, int outputTokens, int searchUnits) {
+        BigDecimal cost = pricing.priceFor(model).cost(inputTokens, outputTokens, searchUnits);
 
         AiUsageEvent event = new AiUsageEvent();
         event.setProvider(provider);

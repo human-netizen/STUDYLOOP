@@ -18,6 +18,10 @@ import java.util.UUID;
 // course's chunks, then blend the two rankings with Reciprocal Rank Fusion. RRF needs no score
 // calibration between the two very different scales — it only looks at each chunk's *position*
 // in each list — which makes it a robust default for combining dense and sparse retrieval.
+//
+// That position-only view is also RRF's ceiling, and Phase 12.1's rerank stage is what sits on top
+// of it: fuse deeper than the caller asked for, then let a cross-encoder that has read the query
+// pick the k that come back. Off by default, so this still describes the Phase 11.1 baseline.
 @Service
 @RequiredArgsConstructor
 public class RetrievalService {
@@ -33,6 +37,7 @@ public class RetrievalService {
     private final CourseAccess courseAccess;
     private final EmbeddingClient embeddingClient;
     private final ChunkSearchRepository searchRepository;
+    private final RerankStage rerankStage;
 
     // Any course member may search the course's materials. Returns the fused top-`limit`
     // chunks, best-first; an empty/blank query or a course with no matching chunks yields [].
@@ -60,7 +65,7 @@ public class RetrievalService {
         if (trimmed.isEmpty()) {
             // Nothing was embedded, so there is no vector to hand back — not even the caller's,
             // which was computed for a query we are refusing to run.
-            return new RetrievalResult(List.of(), OptionalDouble.empty(), 0, null);
+            return new RetrievalResult(List.of(), OptionalDouble.empty(), 0, OptionalDouble.empty(), null);
         }
         int topN = clampLimit(limit);
 
@@ -82,8 +87,18 @@ public class RetrievalService {
                 ? OptionalDouble.empty()
                 : OptionalDouble.of(vectorHits.get(0).cosineSimilarity());
 
-        List<RetrievedChunk> fused = fuse(List.of(vectorHits, textHits), topN);
-        return new RetrievalResult(fused, topSimilarity, textHits.size(), vector);
+        // Fusion depth is the rerank stage's call: topN when it is off, ~30 when it is on, so the
+        // cross-encoder has candidates to promote rather than six it can only shuffle.
+        List<RetrievedChunk> fused = fuse(List.of(vectorHits, textHits), rerankStage.candidatePool(topN));
+        List<RetrievedChunk> ranked = rerankStage.apply(trimmed, fused, topN);
+
+        // The head's relevance, empty when nothing reranked. Read from the returned list rather
+        // than tracked separately, so the number the gate sees is the one that actually led the
+        // results — including when the stage failed open and there is no relevance at all.
+        Double topRelevance = ranked.isEmpty() ? null : ranked.get(0).rerankScore();
+        return new RetrievalResult(ranked, topSimilarity, textHits.size(),
+                topRelevance == null ? OptionalDouble.empty() : OptionalDouble.of(topRelevance),
+                vector);
     }
 
     // Reciprocal Rank Fusion: a chunk at 0-based rank r in a list contributes 1/(K + r + 1);

@@ -2,12 +2,19 @@ package com.studyloop.backend.document;
 
 import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
+import com.studyloop.backend.retrieval.RerankClient;
+import com.studyloop.backend.retrieval.RerankException;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -29,6 +36,12 @@ public class StubAiConfig {
     @Primary
     RecordingChatClient recordingChatClient() {
         return new RecordingChatClient();
+    }
+
+    @Bean
+    @Primary
+    StubRerankClient stubRerankClient() {
+        return new StubRerankClient();
     }
 
     // Deterministic 768-dim vectors — enough to exercise storage and search without a real API.
@@ -88,6 +101,82 @@ public class StubAiConfig {
             hash = 31 * hash + text.charAt(i);
         }
         return hash;
+    }
+
+    // A cross-encoder that scores a passage on how much of the question it actually contains.
+    //
+    // Off unless a test switches it on, which is not laziness about coverage but the same reasoning
+    // as blanking the API key in application-test.yml: the rerank stage ships enabled and every
+    // retrieval call goes through it, so a stub that were on by default would silently change the
+    // pipeline under ten test classes written against the fused one — including the refusal tests,
+    // where the gate would start reading a different signal than the one they were built to prove.
+    // RerankPipelineTest turns it on deliberately.
+    //
+    // Word overlap is a crude stand-in for a cross-encoder and a faithful one in the only respect
+    // that matters here: it reads the query and the passage together, so an off-topic question
+    // scores near zero however confidently the vector half retrieved something.
+    public static class StubRerankClient implements RerankClient {
+
+        public volatile boolean configured = false;
+        // Every call throws while this is set, standing in for a provider outage or a rate limit.
+        // Not one-shot like the chat client's failNext: the interesting question is what a whole
+        // turn does with no reranker at all, not what it does with one flaky call.
+        public volatile boolean failing = false;
+        // Scores every passage at this value instead of by overlap. It exists because overlap
+        // cannot express the judgement the gate is most interesting about — "these are the words
+        // you asked for, and this passage still does not answer you" — which is precisely what a
+        // cross-encoder can say and a term index cannot. A test asserting the gate's reaction to
+        // that verdict should state the verdict rather than build a fixture that fakes one.
+        public volatile Double forcedRelevance = null;
+        public final AtomicInteger calls = new AtomicInteger();
+
+        public void reset() {
+            configured = false;
+            failing = false;
+            forcedRelevance = null;
+            calls.set(0);
+        }
+
+        @Override
+        public boolean isConfigured() {
+            return configured;
+        }
+
+        @Override
+        public List<Ranked> rerank(String query, List<String> documents, int topN) {
+            calls.incrementAndGet();
+            if (failing) {
+                throw new RerankException("stub reranker is down");
+            }
+            List<Ranked> ranked = new ArrayList<>(documents.size());
+            for (int index = 0; index < documents.size(); index++) {
+                ranked.add(new Ranked(index, forcedRelevance != null
+                        ? forcedRelevance
+                        : overlap(query, documents.get(index))));
+            }
+            // Best first, and ties broken by the fused position so the ordering is deterministic.
+            return ranked.stream()
+                    .sorted(Comparator.comparingDouble(Ranked::relevance).reversed()
+                            .thenComparingInt(Ranked::index))
+                    .limit(topN)
+                    .toList();
+        }
+
+        private static double overlap(String query, String document) {
+            List<String> terms = words(query);
+            if (terms.isEmpty()) {
+                return 0.0;
+            }
+            Set<String> passage = new HashSet<>(words(document));
+            long matched = terms.stream().distinct().filter(passage::contains).count();
+            return (double) matched / terms.stream().distinct().count();
+        }
+
+        private static List<String> words(String text) {
+            return Arrays.stream(text.toLowerCase(Locale.ROOT).split("[^a-z0-9]+"))
+                    .filter(word -> word.length() >= 3)
+                    .toList();
+        }
     }
 
     // A chat client that returns whatever the test set and counts how often it was asked. The

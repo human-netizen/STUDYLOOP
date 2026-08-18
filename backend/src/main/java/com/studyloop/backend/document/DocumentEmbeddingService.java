@@ -38,7 +38,11 @@ public class DocumentEmbeddingService {
             return;
         }
 
-        List<float[]> vectors = embeddingClient.embed(chunks.stream().map(DocumentChunk::getContent).toList());
+        // The indexed text, not the displayed text: as of Phase 13.4 a chunk carries a context
+        // header — its document's title and heading path — that belongs in the vector and not in
+        // the passage a student reads. Pre-13 rows have no embed_text and fall back to content,
+        // which is the same string this used to pass.
+        List<float[]> vectors = embeddingClient.embed(chunks.stream().map(TextChunker::indexedText).toList());
         if (vectors.size() != chunks.size()) {
             throw new EmbeddingException(
                     "Embedding count mismatch: expected " + chunks.size() + ", got " + vectors.size());

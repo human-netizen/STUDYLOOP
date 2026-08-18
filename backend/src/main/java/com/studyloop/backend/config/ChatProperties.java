@@ -8,8 +8,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 // `minSimilarity` is the confidence gate: if the best retrieved chunk's cosine similarity falls
 // below it (and nothing matched lexically either), chat refuses instead of letting the model
 // answer from weak context. 0 disables the gate.
+//
+// `minRelevance` is the same gate reading a better signal — the cross-encoder's calibrated 0..1
+// relevance, once Phase 12.1's rerank stage is on. Both live here because they are one policy with
+// two inputs, and which one applies depends on whether anything reranked. 0 disables it.
 @ConfigurationProperties(prefix = "studyloop.chat")
-public record ChatProperties(String provider, Cohere cohere, double minSimilarity) {
+public record ChatProperties(String provider, Cohere cohere, double minSimilarity, double minRelevance) {
 
     public record Cohere(String apiKey, String model) { }
 }

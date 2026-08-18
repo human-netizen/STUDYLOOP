@@ -30,6 +30,7 @@
         <java.version>21</java.version>
         <jjwt.version>0.12.6</jjwt.version>
         <pdfbox.version>3.0.3</pdfbox.version>
+        <jtokkit.version>1.1.0</jtokkit.version>
     </properties>
     <dependencies>
         <dependency>
@@ -100,6 +101,13 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>${pdfbox.version}</version>
+        </dependency>
+        <!-- Byte-pair tokenizer (Phase 13.1). Replaces the chars/4 estimate every text budget in
+             the app was built on. Pure Java, no native bits, no network. -->
+        <dependency>
+            <groupId>com.knuddels</groupId>
+            <artifactId>jtokkit</artifactId>
+            <version>${jtokkit.version}</version>
         </dependency>
         <!-- Used directly to parse the embedding provider's JSON response (version from Boot's BOM). -->
         <dependency>

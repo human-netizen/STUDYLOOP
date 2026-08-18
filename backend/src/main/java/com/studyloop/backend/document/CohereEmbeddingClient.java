@@ -4,10 +4,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.studyloop.backend.config.EmbeddingProperties;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,11 +23,18 @@ import java.util.List;
 // chunks without vectors instead of failing.
 public class CohereEmbeddingClient implements EmbeddingClient {
 
+    private static final Logger log = LoggerFactory.getLogger(CohereEmbeddingClient.class);
+
     private static final String EMBED_URL = "https://api.cohere.com/v2/embed";
     private static final String DEFAULT_MODEL = "embed-v4.0";
     private static final int DEFAULT_DIMENSIONS = 768;
     // Cohere caps a single embed call at 96 inputs.
     private static final int MAX_BATCH = 96;
+    // How many times a document's embedding call will wait out a rate limit before giving up. Four
+    // tries spread over ten minutes covers a trial key's per-minute token budget several times
+    // over; past that the problem is not a burst and failing the document is the honest answer.
+    private static final int MAX_RATE_LIMIT_RETRIES = 4;
+    private static final Duration RETRY_WAIT = Duration.ofSeconds(30);
     // The only output sizes embed-v4.0 supports; we pick the smallest that covers our target.
     private static final int[] SUPPORTED_DIMENSIONS = {256, 512, 1024, 1536};
 
@@ -85,7 +95,55 @@ public class CohereEmbeddingClient implements EmbeddingClient {
         return embedBatch(List.of(text), "search_query", AiOperation.EMBED_QUERY).get(0);
     }
 
+    // Waits out the provider's rate limit and tries again — but only when indexing a document.
+    //
+    // The limit that forced this is a token-per-minute one (100,000 on a trial key), so it is
+    // reached by uploading a long PDF or a few short ones together, not by anything unusual. Before
+    // this, that came back as a FAILED document with "429 Too Many Requests" on it: a genuine
+    // upload, correctly extracted, marked broken for a reason the student can neither understand
+    // nor act on, and with no fallback behind it — a chunk that never got a vector is invisible to
+    // semantic search for as long as it exists.
+    //
+    // Deliberately not applied to `embedQuery`, and the distinction is the same one Phase 12.1 made
+    // when it refused to retry inside the rerank client. Ingestion is asynchronous, has a status
+    // machine in front of it, and nobody is waiting; a query is on the request path in front of a
+    // streaming answer, where a minute of sleeping is worse than a slightly weaker result.
     private List<float[]> embedBatch(List<String> batch, String inputType, AiOperation operation) {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return callEmbed(batch, inputType, operation);
+            } catch (EmbeddingException e) {
+                boolean retryable = operation == AiOperation.EMBED_DOCUMENTS
+                        && attempt < MAX_RATE_LIMIT_RETRIES
+                        && isRateLimited(e);
+                if (!retryable) {
+                    throw e;
+                }
+                // Linear, not exponential: the window this is waiting out is a fixed minute, so
+                // doubling would spend the second retry asleep long after the limit had reset.
+                long wait = RETRY_WAIT.toMillis() * (attempt + 1);
+                log.warn("Cohere rate-limited the embedding request; waiting {}s and retrying ({}/{})",
+                        wait / 1000, attempt + 1, MAX_RATE_LIMIT_RETRIES);
+                sleep(wait);
+            }
+        }
+    }
+
+    private static boolean isRateLimited(EmbeddingException e) {
+        String message = e.getMessage();
+        return message != null && (message.contains("429") || message.contains("rate limit"));
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new EmbeddingException("Embedding was interrupted while waiting out a rate limit.");
+        }
+    }
+
+    private List<float[]> callEmbed(List<String> batch, String inputType, AiOperation operation) {
         EmbedRequest request =
                 new EmbedRequest(model, inputType, batch, List.of("float"), requestDimension);
 

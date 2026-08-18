@@ -25,8 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class UsageAccountingTest {
 
     private static final PricingProperties PRICING = new PricingProperties(Map.of(
-            "command-r-08-2024", new ModelPrice(new BigDecimal("0.15"), new BigDecimal("0.60")),
-            "embed-v4.0", new ModelPrice(new BigDecimal("0.12"), BigDecimal.ZERO)));
+            "command-r-08-2024", ModelPrice.perToken(new BigDecimal("0.15"), new BigDecimal("0.60")),
+            "embed-v4.0", ModelPrice.perToken(new BigDecimal("0.12"), BigDecimal.ZERO),
+            "rerank-v3.5", ModelPrice.perSearch(new BigDecimal("2.00"))));
 
     @Test
     void costIsPricedPerMillionTokensAcrossBothDirections() {
@@ -50,6 +51,28 @@ class UsageAccountingTest {
         BigDecimal cost = PRICING.priceFor("embed-v4.0").cost(1_000_000, 999);
 
         assertEquals(new BigDecimal("0.120000"), cost);
+    }
+
+    // Reranking is the one call billed per search rather than per token (Phase 12.3): $2.00 per
+    // thousand searches is $0.002 a question, and one question is one search however many passages
+    // it reranked.
+    @Test
+    void rerankingIsPricedPerSearchRatherThanPerToken() {
+        assertEquals(new BigDecimal("0.002000"),
+                PRICING.priceFor("rerank-v3.5").cost(0, 0, 1));
+        assertEquals(new BigDecimal("1.000000"),
+                PRICING.priceFor("rerank-v3.5").cost(0, 0, 500));
+    }
+
+    // A search-priced model reached through the token path costs nothing, and a token-priced model
+    // is not charged for searches it never made. The two units stay in their own lanes, which is
+    // what lets one ledger row hold either without a column saying which.
+    @Test
+    void eachModelIsOnlyChargedInTheUnitItBillsIn() {
+        assertEquals(new BigDecimal("0.000000"),
+                PRICING.priceFor("rerank-v3.5").cost(1_000_000, 1_000_000));
+        assertEquals(new BigDecimal("0.150000"),
+                PRICING.priceFor("command-r-08-2024").cost(1_000_000, 0, 40));
     }
 
     // Providers are inconsistent about casing, and a price silently missed over capitalisation

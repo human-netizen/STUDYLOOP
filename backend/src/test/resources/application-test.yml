@@ -13,3 +13,13 @@ spring:
     url: ${TEST_DB_URL}
     username: ${TEST_DB_USERNAME}
     password: ${TEST_DB_PASSWORD}
+
+# The one exception to "only the datasource is redirected", added in Phase 12.1 for the same
+# reason. The rerank stage ships on, and unlike the embedding and chat clients it is reached by
+# *any* retrieval call — so a test class that never thought about AI would start billing Cohere the
+# moment it searched a course. Blanked here, the stage switches itself off everywhere; StubAiConfig
+# hands the tests that want it a deterministic reranker instead.
+studyloop:
+  retrieval:
+    rerank:
+      api-key: ""
