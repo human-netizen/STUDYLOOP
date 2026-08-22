@@ -128,6 +128,12 @@ public class ForumCorpusService {
     // the question it answers, so the words a student would search for are in the passage itself;
     // prefixing "Forum · <the same question>" would put a second copy of them in the index and
     // weight the chunk toward its own title.
+    //
+    // No synthetic queries either (Phase 14), and for the same reason rather than as an oversight.
+    // doc2query exists to close the gap between how a textbook writes and how a student searches;
+    // a forum answer is already on the student's side of that gap, because the text opens with the
+    // question a real student typed. Generating more phrasings of it would pay a provider call to
+    // paraphrase a paraphrase.
     private List<TextChunk> chunk(String text) {
         return textChunker.chunk(List.of(new PageText(1, text))).stream()
                 .map(TextChunk::withoutPages)

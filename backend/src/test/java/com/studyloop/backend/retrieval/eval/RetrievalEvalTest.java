@@ -154,6 +154,24 @@ class RetrievalEvalTest {
                             report.rerankFallbacks())
                     .isZero();
         }
+        // Phase 14.3. The corpus is built at ingest, so this flag and the chunks in the database
+        // can disagree, and every number in the report above would be a description of the wrong
+        // pipeline under a header naming the right one. The check is categorical rather than a
+        // coverage floor: a partly generated corpus is possible but a provider failure fails the
+        // ingest, while forgetting -Deval.reset=true after flipping the flag is the mistake that
+        // actually happens, and it lands squarely on one side or the other.
+        if (retrievalProperties.stages().syntheticQueries()) {
+            assertThat(corpus.synthetic())
+                    .as("synthetic queries are on but no chunk in the corpus carries a generated "
+                            + "block — this corpus was ingested without them. Rerun with "
+                            + "-Deval.reset=true")
+                    .isGreaterThan(0);
+        } else {
+            assertThat(corpus.synthetic())
+                    .as("%d chunks carry a synthetic-query block but this run claims the pipeline "
+                            + "without them — rerun with -Deval.reset=true", corpus.synthetic())
+                    .isZero();
+        }
         assertThat(report.recall())
                 .as("Recall@%d collapsed; the harness is not measuring retrieval (see the report above)", K)
                 .isGreaterThanOrEqualTo(RECALL_FLOOR);

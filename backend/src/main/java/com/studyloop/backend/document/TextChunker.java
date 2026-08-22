@@ -113,18 +113,33 @@ public class TextChunker {
         return result;
     }
 
-    private List<SectionBlock> capped(List<SectionBlock> blocks) {
-        List<SectionBlock> result = new ArrayList<>();
+    // Tier 3, plus the one thing the caller cannot work out afterwards: whether a block reaching
+    // here survived intact. A section the recursive splitter handed back unchanged is a section the
+    // document delimited; a section it returned in pieces is a run of text a counter cut up, and
+    // every piece of it carries that. Phase 14 reads the flag: it excludes pieces under the plan's
+    // original eligibility rule, which the fixture corpus then argued out of the default.
+    private List<Piece> capped(List<SectionBlock> blocks) {
+        List<Piece> result = new ArrayList<>();
         for (SectionBlock block : blocks) {
-            result.addAll(recursiveSplitter.split(block, properties.maxTokens()));
+            List<SectionBlock> pieces = recursiveSplitter.split(block, properties.maxTokens());
+            boolean overflow = pieces.size() > 1;
+            for (SectionBlock piece : pieces) {
+                result.add(new Piece(piece, overflow));
+            }
         }
         return result;
     }
 
-    private List<TextChunk> toChunks(List<SectionBlock> blocks, String title) {
-        List<TextChunk> chunks = new ArrayList<>(blocks.size());
+    // A block and how it got its boundaries. Not a field on SectionBlock: the three splitters pass
+    // blocks between each other and none of them has an opinion about this, so it would be a null
+    // everywhere except the four lines above.
+    private record Piece(SectionBlock block, boolean overflow) { }
+
+    private List<TextChunk> toChunks(List<Piece> pieces, String title) {
+        List<TextChunk> chunks = new ArrayList<>(pieces.size());
         int index = 0;
-        for (SectionBlock block : blocks) {
+        for (Piece piece : pieces) {
+            SectionBlock block = piece.block();
             if (block.isEmpty()) {
                 continue;
             }
@@ -135,7 +150,8 @@ public class TextChunker {
             // would make a 480-token section report 495 against a ceiling of 500 and read as a bug
             // to anyone who looked at the column.
             chunks.add(new TextChunk(index++, block.pageStart(), block.pageEnd(), path,
-                    content, embedTextFor(title, path, content), tokenCounter.count(content)));
+                    content, embedTextFor(title, path, content), tokenCounter.count(content),
+                    piece.overflow()));
         }
         if (chunks.isEmpty()) {
             throw new DocumentExtractionException(

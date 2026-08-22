@@ -59,7 +59,16 @@ public record RetrievalProperties(Stages stages, Rerank rerank) {
             boolean trigram,
             // Phase 15: page images embedded by a vision model, for figures text extraction cannot see.
             boolean visual,
-            // Phase 19: questions generated per chunk at ingestion and indexed alongside it.
+            // Phase 14: questions generated per section at ingestion and indexed alongside it.
+            //
+            // The one flag here that is read at *ingest* rather than at query time, which makes it
+            // the one that cannot be A/B'd by a restart: the questions are already inside the text
+            // that was embedded, so comparing the two pipelines means re-ingesting the corpus
+            // (`-Deval.reset=true`), exactly like the chunking settings. It lives here anyway
+            // because the eval report's header is built from these flags, and a second switch that
+            // could disagree with this one would let the header describe a corpus that does not
+            // exist. What is configured over in `studyloop.chunking.synthetic-queries` is the
+            // block's shape, the same split `rerank` already has.
             boolean syntheticQueries
     ) {
 

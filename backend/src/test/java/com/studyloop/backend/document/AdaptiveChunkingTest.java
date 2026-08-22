@@ -99,6 +99,34 @@ class AdaptiveChunkingTest {
     }
 
     @Test
+    void aChunkRemembersWhetherItsBoundariesAreTheDocumentsOrTheCeilings() {
+        List<String> paragraphs = new ArrayList<>();
+        paragraphs.add("# Sorting");
+        for (int i = 0; i < 8; i++) {
+            paragraphs.add(prose(6));
+        }
+        List<TextChunk> overflowed = chunker.chunk(
+                List.of(page(1, paragraphs.toArray(String[]::new))), "Sorting");
+
+        // Phase 14 reads this. Asking a model what questions a mid-section fragment answers gets
+        // questions about wherever the counter stopped, so the flag is what keeps generation off
+        // them — and it is only knowable inside the chunker, which is why it is recorded here
+        // rather than guessed at later from a token count.
+        assertThat(overflowed).hasSizeGreaterThan(1);
+        assertThat(overflowed).allMatch(TextChunk::overflow);
+
+        List<TextChunk> whole = chunker.chunk(List.of(page(1,
+                "# Skiplists",
+                "## 4.1 The Basic Structure",
+                prose(10),
+                "## 4.2 SkiplistSSet",
+                prose(10))), "Skiplists");
+
+        assertThat(whole).hasSize(2);
+        assertThat(whole).noneMatch(TextChunk::overflow);
+    }
+
+    @Test
     void nothingIsDuplicatedBetweenNeighbours() {
         // Overlap is gone. It existed to rescue an idea a counter had cut in half; a boundary the
         // author put there does not cut ideas in half, and duplicating text into the index makes

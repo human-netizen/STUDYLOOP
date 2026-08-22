@@ -14,6 +14,7 @@ import com.studyloop.backend.document.DocumentIngestionService;
 import com.studyloop.backend.document.DocumentRepository;
 import com.studyloop.backend.document.DocumentStatus;
 import com.studyloop.backend.document.DocumentStorageService;
+import com.studyloop.backend.document.SyntheticQueryGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -34,7 +35,7 @@ import java.util.UUID;
 // So this seeds its own everything: its own user, its own course, its own fourteen documents.
 //
 // Seeding is idempotent and the corpus is left in place afterwards rather than torn down. Ingesting
-// the corpus costs fourteen extractions and ~236 embedding calls; a phase that re-runs the eval
+// the corpus costs fourteen extractions and ~282 chunk embeddings; a phase that re-runs the eval
 // four times while tuning a threshold should pay that once, not four times. Nothing else in the
 // suite can see this course — it has its own owner and no other member — and `reset()` rebuilds it
 // from scratch when the pipeline that produced the chunks has itself changed, which is exactly what
@@ -62,7 +63,8 @@ public class EvalCorpus {
     // What the harness needs to run, plus what the report needs to say about the corpus it ran
     // against. `ingested` vs `reused` is the line that explains a slow run, and a run that ingested
     // nothing is the cheap case this class exists to make possible.
-    public record Seeded(UUID courseId, UUID actorId, int documents, int chunks, int ingested, int reused) {
+    public record Seeded(UUID courseId, UUID actorId, int documents, int chunks, int ingested,
+                         int reused, int synthetic) {
 
         public boolean rebuilt() {
             return ingested > 0;
@@ -88,7 +90,28 @@ public class EvalCorpus {
             chunks += (int) chunkRepository.countByDocumentId(document.getId());
         }
         return new Seeded(course.getId(), owner.getId(),
-                FixtureDocument.values().length, chunks, ingested, reused);
+                FixtureDocument.values().length, chunks, ingested, reused,
+                syntheticChunks(course.getId()));
+    }
+
+    // How many of the corpus's chunks carry a Phase 14 synthetic-query block, read out of the text
+    // itself rather than out of a column written to record it.
+    //
+    // It exists because the synthetic-queries flag is the one stage flag consumed at *ingest*: the
+    // questions are inside the string that was embedded, so flipping the property changes nothing
+    // about a corpus already in the database. Without this the easiest mistake in the phase — turn
+    // the flag on, forget `-Deval.reset=true`, read a report headed synthetic-queries=ON that
+    // describes the Phase 13 corpus — produces a number rather than an error. Same family as the
+    // rerank-fallback count: a stage that is invisible by construction gets an instrument.
+    private int syntheticChunks(UUID courseId) {
+        Integer count = jdbcTemplate.queryForObject("""
+                select count(*)
+                from document_chunks c
+                join documents d on d.id = c.document_id
+                where d.course_space_id = ?
+                  and c.embed_text like ?
+                """, Integer.class, courseId, "%" + SyntheticQueryGenerator.MARKER + "%");
+        return count == null ? 0 : count;
     }
 
     // Drops the seeded course outright. Every table that references a course space cascades from

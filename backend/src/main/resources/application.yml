@@ -129,6 +129,23 @@ studyloop:
       hyde: ${RETRIEVAL_HYDE:false}
       trigram: ${RETRIEVAL_TRIGRAM:false}
       visual: ${RETRIEVAL_VISUAL:false}
+      # Phase 14, and off because it was measured, not because it was never tried. Generating a
+      # question list for every section and indexing it beside the section moved Recall@6 from
+      # 0.939 to 0.929, nDCG@6 from 0.828 to 0.823, and MRR not at all, on the same sixty
+      # questions. That is one synthesis question out of sixty changing hands, which is inside
+      # run-to-run noise for a stage whose input is a chat model's output. What it is not is a
+      # gain, and it costs about 40 chat calls and seventeen minutes per fourteen-document
+      # re-ingest. The technique closes a vocabulary gap between how a student asks and how a
+      # textbook writes; this corpus's remaining errors are synthesis and figures, which are
+      # different problems. Turn it on for a corpus whose readers and authors do not share a
+      # vocabulary, and re-measure before trusting it.
+      #
+      # The only flag here that is read at ingest rather than at query time. The generated
+      # questions live inside the text that was embedded, so flipping this changes nothing about
+      # a corpus already in the database: it takes effect on the next ingest, and comparing the
+      # two pipelines means re-ingesting (`-Deval.reset=true`). It sits with the query-time flags
+      # anyway because the eval report's header is built from this block, and a separate switch
+      # that could disagree with it would let the header describe a corpus nobody built.
       synthetic-queries: ${RETRIEVAL_SYNTHETIC_QUERIES:false}
     # How the rerank stage runs when stages.rerank is on. The key is the one embeddings and chat
     # already use; blank leaves the stage off however the switch above is set, so a deployment
@@ -174,6 +191,33 @@ studyloop:
     # Ceiling per source once expanded. Six sources at 1,200 tokens is a ~7k-token prompt; six
     # unbounded chapters is not affordable and is not more useful.
     expansion-max-tokens: ${CHUNK_EXPANSION_MAX_TOKENS:1200}
+    # Phase 14.1 — the shape of the synthetic-query block, not whether it is written. That switch
+    # is retrieval.stages.synthetic-queries above, the same split the rerank stage uses.
+    synthetic-queries:
+      # Questions asked for per section. ZenLearn's generator asks for 15-20 per source file, which
+      # is free there because they land in metadata; here they land in the text that is embedded,
+      # so twenty short questions against a 300-token section drag its vector toward
+      # "question-shaped text" and away from what the section actually says.
+      per-section: ${SYNTHETIC_QUERIES_PER_SECTION:6}
+      # Sections per provider call. The plan said one call per section; on the eval corpus that is
+      # 282 chat calls for a single re-ingest, against a trial key allowing twenty a minute and a
+      # thousand a month. The token bill is identical either way — the call count is what the
+      # provider limits, and eight sections a call makes it thirty.
+      batch-size: ${SYNTHETIC_QUERIES_BATCH:8}
+      # Ceiling on the block as a fraction of the section's own tokens, which is the dilution limit
+      # per-section alone cannot express: six questions is modest against a 400-token section and
+      # half the text of an 80-token one. A section too small for even one question is skipped
+      # before it costs a call.
+      share: ${SYNTHETIC_QUERIES_SHARE:0.20}
+      # The plan's eligibility rule: generate only for sections the document delimited, never for a
+      # piece the 500-token ceiling had to cut out of one. Off, and the measurement is why — on the
+      # fixture corpus it reached 13 chunks out of 282, because a textbook section is routinely
+      # longer than the ceiling, so nearly every chunk is a piece of one. A tier-3 piece is cut on
+      # paragraph boundaries and carries its heading path, so it is coherent prose under a known
+      # topic; and the risk the rule guarded against is already carried by the reranker, which
+      # scores `content` and never sees the generated block. Kept switchable so both sides of that
+      # measurement can be re-run.
+      whole-sections-only: ${SYNTHETIC_QUERIES_WHOLE_SECTIONS_ONLY:false}
   summary:
     # Phase 8.2: after a document reaches READY, generate its summary + glossary once and cache
     # them. Costs one chat call per document, never repeated. Set false (SUMMARY_AUTO_GENERATE)

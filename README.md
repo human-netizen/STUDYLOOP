@@ -18,7 +18,7 @@
 
 ## What's built
 
-Eighteen database migrations and 279 tests, the integration ones against real Postgres + pgvector.
+Eighteen database migrations and 300 tests, the integration ones against real Postgres + pgvector.
 
 | | |
 |---|---|
@@ -39,7 +39,7 @@ Eighteen database migrations and 279 tests, the integration ones against real Po
 | **Cost visibility** | Every paid API call is recorded and priced from the provider's own billing figures. An admin dashboard shows spend by feature and by day. |
 | **Answer cache** | Near-identical questions reuse a previous answer instead of paying for it twice. Uploading a document clears the course's cache. |
 | **Usage limits** | Per-user request limits and a rolling token allowance on everything that costs money. |
-| **Measured retrieval** | Answer quality is a number, not an impression. A sixty-question set over a fourteen-document open-licensed textbook — including questions the corpus deliberately cannot answer — scored on Recall@6, MRR and nDCG. The corpus ships with the repository, so the measurement is reproducible. Two changes have been measured this way so far: cross-encoder reranking took Recall@6 from 0.856 to 0.891, and cutting chunks on the document's own section boundaries took it to 0.939 — while the grading rule was tightened in the same run. Refusals on the unanswerable set went 0 of 8 → 6 of 8, with none of the 52 real questions ever refused. |
+| **Measured retrieval** | Answer quality is a number, not an impression. A sixty-question set over a fourteen-document open-licensed textbook — including questions the corpus deliberately cannot answer — scored on Recall@6, MRR and nDCG. The corpus ships with the repository, so the measurement is reproducible. Three changes have been measured this way so far. Cross-encoder reranking took Recall@6 from 0.856 to 0.891. Cutting chunks on the document's own section boundaries took it to 0.939, while the grading rule was tightened in the same run. Generating questions at upload time and indexing them beside each section — the technique that was supposed to close the gap between how a student asks and how a textbook writes — moved nothing, so it ships switched off: the measurement is the result, and reporting only the changes that worked would make the other two numbers worth less. Refusals on the unanswerable set went 0 of 8 → 6 of 8, with none of the 52 real questions ever refused. |
 
 ## What isn't there yet
 

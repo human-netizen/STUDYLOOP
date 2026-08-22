@@ -117,7 +117,7 @@ class SemanticSplitterTest {
     @Test
     void theStageCanBeTurnedOff() {
         AtomicInteger calls = new AtomicInteger();
-        ChunkingProperties off = new ChunkingProperties(500, 120, false, 400, true, true, 1200);
+        ChunkingProperties off = new ChunkingProperties(500, 120, false, 400, true, true, 1200, null);
 
         assertThat(splitter(topicEmbedder(calls), off).split(blockOf(TWO_TOPICS))).hasSize(1);
         assertThat(calls.get()).as("nothing should have been embedded").isZero();
@@ -126,7 +126,7 @@ class SemanticSplitterTest {
     @Test
     void aDocumentTooLargeToBeWorthAPassIsLeftToTheParagraphTier() {
         AtomicInteger calls = new AtomicInteger();
-        ChunkingProperties tightCap = new ChunkingProperties(500, 120, true, 4, true, true, 1200);
+        ChunkingProperties tightCap = new ChunkingProperties(500, 120, true, 4, true, true, 1200, null);
 
         // The cap is a bill, not a correctness rule: embedding every sentence of a 300-page scan
         // costs a pass over the whole document on top of the pass that embeds the chunks.

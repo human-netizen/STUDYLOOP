@@ -2,7 +2,8 @@ package com.studyloop.backend.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-// Phase 13 — the knobs on the adaptive chunker.
+// Phase 13 — the knobs on the adaptive chunker, and from Phase 14 on the synthetic queries written
+// beside its output.
 //
 // Deliberately not under `studyloop.retrieval.stages`. Those flags exist so an eval run can be
 // reproduced by flipping a property, and chunking cannot work that way: the chunks are already in
@@ -35,7 +36,10 @@ public record ChunkingProperties(
         boolean expandToSection,
         // How much expanded context one source in the prompt may cost. Six sources at 1,200 tokens
         // is a 7,000-token prompt, which is affordable; six unbounded chapters is not.
-        int expansionMaxTokens
+        int expansionMaxTokens,
+        // Phase 14. How the synthetic-query block is shaped, not whether it is written — that is
+        // `studyloop.retrieval.stages.synthetic-queries`, the same split the rerank stage uses.
+        SyntheticQueries syntheticQueries
 ) {
 
     private static final int DEFAULT_MAX_TOKENS = 500;
@@ -61,9 +65,59 @@ public record ChunkingProperties(
         if (expansionMaxTokens <= 0) {
             expansionMaxTokens = DEFAULT_EXPANSION_MAX_TOKENS;
         }
+        if (syntheticQueries == null) {
+            syntheticQueries = SyntheticQueries.defaults();
+        }
     }
 
     public static ChunkingProperties defaults() {
-        return new ChunkingProperties(0, DEFAULT_MIN_TOKENS, true, 0, true, true, 0);
+        return new ChunkingProperties(0, DEFAULT_MIN_TOKENS, true, 0, true, true, 0, null);
+    }
+
+    // Phase 14.1 — doc2query. Questions a student might ask that this section answers, generated
+    // once at ingest and appended to what gets indexed.
+    public record SyntheticQueries(
+            // Questions asked for per section. ZenLearn's generator asks for 15–20 per source file,
+            // which is free there because they land in metadata; here they land in the text that is
+            // embedded, so twenty short questions against a 300-token section drag its vector toward
+            // "question-shaped text" and away from what the section says.
+            int perSection,
+            // Sections per provider call. The plan said one call per section, and on the eval corpus
+            // that is 282 chat calls for one re-ingest — see the class comment on
+            // SyntheticQueryGenerator for why the count, not the token bill, is what forced this.
+            int batchSize,
+            // Ceiling on the block as a fraction of the section's own tokens. This is the dilution
+            // limit that `perSection` alone cannot express: six questions is modest against a
+            // 400-token section and half the text of an 80-token one.
+            double share,
+            // The plan's eligibility rule: generate only for a section the document itself
+            // delimited, never for a piece the 500-token ceiling had to cut out of one. Measured
+            // and turned off — on the fixture corpus it reached 13 chunks out of 282, because a
+            // textbook section is routinely longer than the ceiling. Kept as a switch because the
+            // measurement is the argument, and a reader should be able to re-run the other side.
+            boolean wholeSectionsOnly
+    ) {
+
+        private static final int DEFAULT_PER_SECTION = 6;
+        private static final int DEFAULT_BATCH_SIZE = 8;
+        private static final double DEFAULT_SHARE = 0.20;
+
+        public SyntheticQueries {
+            if (perSection <= 0) {
+                perSection = DEFAULT_PER_SECTION;
+            }
+            if (batchSize <= 0) {
+                batchSize = DEFAULT_BATCH_SIZE;
+            }
+            // A share at or above 1.0 is not a cap at all — the block would be allowed to outweigh
+            // the passage it describes, which is the exact failure the cap exists to prevent.
+            if (share <= 0 || share >= 1.0) {
+                share = DEFAULT_SHARE;
+            }
+        }
+
+        public static SyntheticQueries defaults() {
+            return new SyntheticQueries(0, 0, 0, false);
+        }
     }
 }

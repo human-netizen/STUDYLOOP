@@ -165,6 +165,11 @@ public final class EvalReport {
                 ? "rerank relevance < %s  (cosine rule not used)".formatted(format(relevanceThreshold))
                 : "cosine < %s and no lexical hit".formatted(format(gateThreshold))));
         out.append(line("stages", stages));
+        // Printed on every run rather than only when the stage is on, because zero is the reading
+        // that matters: it is what a baseline must show, and what a synthetic-queries=ON run that
+        // forgot to re-ingest shows as well.
+        out.append(line("synthetic queries", "%d/%d chunks carry a generated block".formatted(
+                corpus.synthetic(), corpus.chunks())));
         if (reranked()) {
             out.append(line("reranked", "%d/%d questions%s".formatted(
                     rows.size() - rerankFallbacks(), rows.size(),

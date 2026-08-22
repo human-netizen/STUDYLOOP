@@ -25,6 +25,7 @@ public class DocumentIngestionService {
     private final DocumentStatusService statusService;
     private final PdfTextExtractor textExtractor;
     private final TextChunker textChunker;
+    private final SyntheticQueryGenerator syntheticQueryGenerator;
     private final DocumentChunkService chunkService;
     private final DocumentEmbeddingService embeddingService;
     private final DocumentSummaryService summaryService;
@@ -47,6 +48,12 @@ public class DocumentIngestionService {
 
             statusService.markStatus(documentId, DocumentStatus.CHUNKING);
             List<TextChunk> chunks = textChunker.chunk(pages, titleOf(document));
+            // Phase 14.1, and deliberately before the chunks are written rather than after. What
+            // it produces goes into embed_text, which is the string the next step embeds and which
+            // content_tsv is generated from — so a second pass would mean re-embedding every chunk
+            // in the document to index text that could have been there the first time. Off by
+            // default, and a no-op that returns the same list when it is.
+            chunks = syntheticQueryGenerator.augment(chunks);
             chunkService.replaceChunks(documentId, chunks, pages.size());
 
             statusService.markStatus(documentId, DocumentStatus.EMBEDDING);
