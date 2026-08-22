@@ -62,7 +62,9 @@ public class FlashcardService {
             throw new FlashcardGenerationException("Flashcard generation provider is not configured.");
         }
 
-        Document document = documentRepository.findByIdAndCourseSpaceId(request.documentId(), courseId)
+        // Visibility-scoped (16.3): this reads the named document's chunks, so a course id plus a
+        // note id would otherwise be enough to generate cards from a classmate's private notes.
+        Document document = documentRepository.findVisibleById(request.documentId(), courseId, actorId)
                 .orElseThrow(() -> new DocumentNotFoundException(request.documentId()));
         if (document.getStatus() != DocumentStatus.READY) {
             throw new NoFlashcardMaterialException("The document has not finished ingesting yet.");
@@ -104,7 +106,7 @@ public class FlashcardService {
         Membership member = courseAccess.requireMember(actorId, courseId);
 
         if (request.sourceDocumentId() != null) {
-            documentRepository.findByIdAndCourseSpaceId(request.sourceDocumentId(), courseId)
+            documentRepository.findVisibleById(request.sourceDocumentId(), courseId, actorId)
                     .orElseThrow(() -> new DocumentNotFoundException(request.sourceDocumentId()));
         }
 

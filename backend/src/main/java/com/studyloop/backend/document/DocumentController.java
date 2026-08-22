@@ -78,9 +78,14 @@ public class DocumentController {
                 UUID.fromString(authentication.getName()), courseId, documentId, refresh);
     }
 
-    // Streams the stored PDF bytes inline so the citation viewer can render the source. Served
-    // to any course member; the browser fetches it with the bearer token and renders it client-
-    // side (react-pdf), so it's returned inline rather than as an attachment.
+    // Streams the stored bytes inline so the citation viewer can render the source. Served to any
+    // course member; the browser fetches it with the bearer token and renders it client-side
+    // (react-pdf), so it's returned inline rather than as an attachment.
+    //
+    // The document's own content type, not a hardcoded PDF one. Phase 16 made that a correctness
+    // matter rather than a tidiness one: a .pptx served as `application/pdf` is a file the browser
+    // hands to a PDF viewer that cannot open it, and the symptom is a blank pane rather than a
+    // download.
     @GetMapping("/{documentId}/file")
     public ResponseEntity<byte[]> file(Authentication authentication,
                                        @PathVariable UUID courseId,
@@ -88,9 +93,17 @@ public class DocumentController {
         DocumentContent content = documentService.getContent(
                 UUID.fromString(authentication.getName()), courseId, documentId);
         return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_PDF)
+                .contentType(mediaType(content.contentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.inline().filename(content.filename()).build().toString())
                 .body(content.bytes());
+    }
+
+    private static MediaType mediaType(String contentType) {
+        try {
+            return MediaType.parseMediaType(contentType);
+        } catch (RuntimeException e) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
     }
 }

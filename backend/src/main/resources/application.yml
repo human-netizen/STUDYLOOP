@@ -264,6 +264,17 @@ studyloop:
     # digits, punctuation and maths operators; GREEK is here because a computer science textbook is
     # full of Theta and epsilon and neither of those is a defect.
     expected-scripts: ${VISION_EXPECTED_SCRIPTS:LATIN,COMMON,GREEK,INHERITED}
+    # Phase 16.3 — how sure the model has to say it is before a block of a photographed note is
+    # written into the course's index.
+    #
+    # Handwriting recognition is wrong routinely rather than exceptionally, and the failure mode is
+    # a plausible wrong reading rather than an obvious one: a guessed recurrence relation looks
+    # exactly like a read one, and it will be cited back to the student as their own note. Blocks
+    # below this are stored and shown and not indexed, so the gap is visible instead of silent.
+    #
+    # 0.6 is deliberately generous. Keeping a doubtful block costs one weak passage among many;
+    # dropping a good one costs a note that answers nothing.
+    min-note-confidence: ${VISION_MIN_NOTE_CONFIDENCE:0.6}
     # Where each of the four signals tips from "this page extracted fine" to "PDFBox is guessing".
     # Configuration rather than constants because the right cut for a scanned handout is not the
     # right cut for a typeset textbook, and a reader who disagrees with a threshold should be able

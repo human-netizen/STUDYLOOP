@@ -1,5 +1,7 @@
 package com.studyloop.backend.document;
 
+import java.util.List;
+
 // Reads a rendered page image and returns what is on it as Markdown (Phase 15.2).
 //
 // An interface for the same reason EmbeddingClient and ChatClient are: the tests need a
@@ -25,4 +27,12 @@ public interface VisionClient {
     // a text index can match. Throws VisionExtractionException on any failure; the caller decides
     // whether that is fatal.
     String readPage(byte[] pngImage, PageDefect hint);
+
+    // What Phase 16.3 adds, and it is a different question rather than the same one with a
+    // different prompt. Reading a typeset page is transcription: the answer is on the page and the
+    // model either sees it or does not. Reading somebody's handwriting is inference, and it is
+    // wrong often enough that a note whose recurrence relation was quietly guessed is worse than a
+    // note missing that line — so the model is asked for its own confidence per block, and the
+    // caller drops what falls below the threshold and shows the student what it dropped.
+    List<TranscribedBlock> readHandwriting(byte[] image, String mimeType);
 }

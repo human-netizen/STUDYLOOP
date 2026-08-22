@@ -74,11 +74,14 @@ function Rail({ courseName }: { courseName?: string }) {
             <RailLink to={`/courses/${courseId}/search`} index="06" label="Search" />
             <RailLink to={`/courses/${courseId}/quizzes`} index="07" label="Quizzes" />
             <RailLink to={`/courses/${courseId}/flashcards`} index="08" label="Flashcards" />
-            <RailLink to={`/courses/${courseId}/review`} index="09" label="Review this course" end />
+            {/* Phase 16.3. Every member has one, and what is in it is theirs until a manager
+                promotes it — so this is not gated the way Confusion and Spend are. */}
+            <RailLink to={`/courses/${courseId}/notes`} index="09" label="Your notes" end />
+            <RailLink to={`/courses/${courseId}/review`} index="10" label="Review this course" end />
             {/* Same rule as the Spend link: hidden for a plain MEMBER rather than offered and
                 refused. The page still handles a 403 for anyone who pastes the URL. */}
             {teaches && (
-              <RailLink to={`/courses/${courseId}/confusion`} index="10" label="Confusion" end />
+              <RailLink to={`/courses/${courseId}/confusion`} index="11" label="Confusion" end />
             )}
           </>
         )}

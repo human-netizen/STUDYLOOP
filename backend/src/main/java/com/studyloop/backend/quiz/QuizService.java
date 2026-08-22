@@ -68,7 +68,7 @@ public class QuizService {
             throw new QuizGenerationException("Quiz generation provider is not configured.");
         }
 
-        List<Document> documents = resolveDocuments(courseId, request.documentIds());
+        List<Document> documents = resolveDocuments(actorId, courseId, request.documentIds());
         String material = gatherMaterial(documents);
         if (material.isBlank()) {
             throw new NoQuizMaterialException(
@@ -130,7 +130,7 @@ public class QuizService {
     // READY uploaded document in the course. Only READY documents have chunks to quiz on, and
     // "quiz me on this course" means the material, not the forum answers the corpus also holds —
     // a named id is still honoured, since asking for one is asking for it.
-    private List<Document> resolveDocuments(UUID courseId, List<UUID> documentIds) {
+    private List<Document> resolveDocuments(UUID actorId, UUID courseId, List<UUID> documentIds) {
         if (documentIds == null || documentIds.isEmpty()) {
             return documentRepository
                     .findByCourseSpaceIdAndSourceOrderByCreatedAtDesc(courseId, DocumentSource.UPLOAD)
@@ -140,7 +140,9 @@ public class QuizService {
         }
         List<Document> documents = new ArrayList<>(documentIds.size());
         for (UUID id : documentIds) {
-            Document document = documentRepository.findByIdAndCourseSpaceId(id, courseId)
+            // Visibility-scoped, not merely course-scoped: naming an id is how a member could
+            // otherwise quiz themselves on a classmate's private note (16.3).
+            Document document = documentRepository.findVisibleById(id, courseId, actorId)
                     .orElseThrow(() -> new DocumentNotFoundException(id));
             if (document.getStatus() == DocumentStatus.READY) {
                 documents.add(document);

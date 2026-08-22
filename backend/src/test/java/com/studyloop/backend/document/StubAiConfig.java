@@ -44,6 +44,12 @@ public class StubAiConfig {
         return new StubRerankClient();
     }
 
+    @Bean
+    @Primary
+    StubVisionClient stubVisionClient() {
+        return new StubVisionClient();
+    }
+
     // Deterministic 768-dim vectors — enough to exercise storage and search without a real API.
     @Bean
     @Primary
@@ -101,6 +107,56 @@ public class StubAiConfig {
             hash = 31 * hash + text.charAt(i);
         }
         return hash;
+    }
+
+    // A vision model that reads whatever the test says is on the page (Phase 16).
+    //
+    // **Unconfigured by default, which is the important part.** The PDF router asks
+    // `isConfigured()` before routing anything, so a stub that were live by default would start
+    // sending fixture pages to it under every document test that imports this config — quietly
+    // replacing PDFBox's text with `MARKDOWN` on any page the gate happened to dislike, and
+    // changing the pipeline under tests written against the extracted text. A test that wants the
+    // reader switches it on and switches it back off, exactly as RerankPipelineTest does.
+    public static class StubVisionClient implements VisionClient {
+
+        public volatile boolean configured = false;
+        public volatile RuntimeException failWith = null;
+        // What a photographed note reads as. Two blocks by default, one of them below the 0.6
+        // threshold, so the default fixture exercises both sides of the confidence rule.
+        public volatile List<TranscribedBlock> blocks = List.of(
+                new TranscribedBlock(0, "# Amortized Analysis\n\nThe expensive resize pays for "
+                        + "the cheap appends before it.", 0.94, false),
+                new TranscribedBlock(1, "T(n) = [illegible] + O(n)", 0.22, false));
+        public final AtomicInteger calls = new AtomicInteger();
+
+        public void reset() {
+            configured = false;
+            failWith = null;
+            calls.set(0);
+        }
+
+        @Override
+        public boolean isConfigured() {
+            return configured;
+        }
+
+        @Override
+        public String readPage(byte[] pngImage, PageDefect hint) {
+            calls.incrementAndGet();
+            if (failWith != null) {
+                throw failWith;
+            }
+            return "# Read by the stub\n\nWhatever was on the page.";
+        }
+
+        @Override
+        public List<TranscribedBlock> readHandwriting(byte[] image, String mimeType) {
+            calls.incrementAndGet();
+            if (failWith != null) {
+                throw failWith;
+            }
+            return blocks;
+        }
     }
 
     // A cross-encoder that scores a passage on how much of the question it actually contains.

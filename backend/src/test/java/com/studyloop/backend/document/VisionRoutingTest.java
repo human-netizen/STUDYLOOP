@@ -33,14 +33,14 @@ class VisionRoutingTest {
     }
 
     private static VisionProperties withCap(int cap) {
-        return new VisionProperties(true, null, null, 0, cap, null, null);
+        return new VisionProperties(true, null, null, 0, cap, null, null, 0);
     }
 
     // ── the ordinary case: nothing to do ────────────────────────────────────────────────────
 
     @Test
     void aCleanDocumentCostsNoVisionCallAtAll() {
-        PdfExtractionRouter.Extraction extraction =
+        Extraction extraction =
                 router().extract(TestPdfs.of(Kind.PROSE, Kind.PROSE, Kind.BLANK));
 
         // The whole economic argument of the phase. A digital textbook routes nothing, so the
@@ -54,8 +54,8 @@ class VisionRoutingTest {
 
     @Test
     void switchingTheRouterOffReproducesThePreviousPipelineExactly() {
-        VisionProperties off = new VisionProperties(false, "a-key", null, 0, 0, null, null);
-        PdfExtractionRouter.Extraction extraction = router(off).extract(TestPdfs.of(Kind.SCANNED));
+        VisionProperties off = new VisionProperties(false, "a-key", null, 0, 0, null, null, 0);
+        Extraction extraction = router(off).extract(TestPdfs.of(Kind.SCANNED));
 
         // Not "routes nothing" — scores nothing. A scanned page under an off router is indexed as
         // the empty text PDFBox produced, which is exactly what Phase 14 shipped.
@@ -68,7 +68,7 @@ class VisionRoutingTest {
 
     @Test
     void aScannedPageIsReplacedByWhatTheModelRead() {
-        PdfExtractionRouter.Extraction extraction =
+        Extraction extraction =
                 router().extract(TestPdfs.of(Kind.PROSE, Kind.SCANNED, Kind.PROSE));
 
         assertThat(vision.calls).isEqualTo(1);
@@ -85,7 +85,7 @@ class VisionRoutingTest {
 
     @Test
     void onlyTheFailingPagesAreSent() {
-        PdfExtractionRouter.Extraction extraction = router().extract(
+        Extraction extraction = router().extract(
                 TestPdfs.of(Kind.PROSE, Kind.SCANNED, Kind.PROSE, Kind.FIGURE, Kind.PROSE));
 
         assertThat(vision.calls).isEqualTo(2);
@@ -106,7 +106,7 @@ class VisionRoutingTest {
     void aBrokenEncodingPageReachesUsableTextThroughTheRouter() {
         // One half of the phase's "done when". The page renders perfectly and extracts as
         // private-use gibberish, so the only route to its content is to look at it.
-        PdfExtractionRouter.Extraction extraction = router().extract(TestPdfs.of(Kind.BROKEN_ENCODING));
+        Extraction extraction = router().extract(TestPdfs.of(Kind.BROKEN_ENCODING));
 
         assertThat(extraction.visionPages()).isEqualTo(1);
         assertThat(extraction.pages().get(0).text()).isEqualTo(MARKDOWN);
@@ -115,7 +115,7 @@ class VisionRoutingTest {
     @Test
     void everyPageOfAScannedDocumentIsRoutedAndTheDocumentIsWhole() {
         // The other half. Nothing in this document extracted, and all of it comes back.
-        PdfExtractionRouter.Extraction extraction =
+        Extraction extraction =
                 router().extract(TestPdfs.of(Kind.SCANNED, Kind.SCANNED, Kind.SCANNED));
 
         assertThat(extraction.visionPages()).isEqualTo(3);
@@ -128,7 +128,7 @@ class VisionRoutingTest {
     @Test
     void aDeploymentWithNoVisionKeyKeepsIngestingRatherThanFailingEveryUpload() {
         vision.configured = false;
-        PdfExtractionRouter.Extraction extraction =
+        Extraction extraction =
                 router().extract(TestPdfs.of(Kind.PROSE, Kind.SCANNED));
 
         // Refusing here would take documents away from an installation that never opted into this
@@ -159,7 +159,7 @@ class VisionRoutingTest {
     void theCapCountsRoutedPagesRatherThanPages() {
         // A 500-page book with three bad pages is not a 500-page bill, and a cap that counted the
         // document's length would refuse it. What is being bounded is provider calls.
-        PdfExtractionRouter.Extraction extraction = router(withCap(2)).extract(TestPdfs.of(
+        Extraction extraction = router(withCap(2)).extract(TestPdfs.of(
                 Kind.PROSE, Kind.PROSE, Kind.SCANNED, Kind.PROSE, Kind.PROSE, Kind.PROSE));
 
         assertThat(extraction.visionPages()).isEqualTo(1);
@@ -226,6 +226,15 @@ class VisionRoutingTest {
                 throw failWith;
             }
             return MARKDOWN;
+        }
+
+        // The PDF router never reads handwriting; HandwrittenNoteReadingTest exercises this half
+        // with its own stub. Failing loudly here is deliberate — a router that started calling it
+        // would be a routing bug, and a stub that quietly returned something would hide it.
+        @Override
+        public List<TranscribedBlock> readHandwriting(byte[] image, String mimeType) {
+            throw new UnsupportedOperationException(
+                    "The PDF router must not read a page as handwriting.");
         }
     }
 }

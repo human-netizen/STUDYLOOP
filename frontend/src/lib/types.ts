@@ -90,6 +90,38 @@ export interface DocumentResponse {
   updatedAt: string
 }
 
+// Whether a document is the course's or one member's (Phase 16.3). A photographed note starts
+// OWNER and becomes COURSE only when a manager promotes it.
+export type DocumentVisibility = 'OWNER' | 'COURSE'
+
+// A digitised handwritten note. Deliberately not a DocumentResponse even though it is the same
+// row: what a note's list needs is whether it is still private, whether it is yours, and whether
+// it has finished being read — and `mine` cannot be computed here, since the caller's own id is
+// not in the payload.
+export interface NoteResponse {
+  id: string
+  courseId: string
+  filename: string
+  status: DocumentStatus
+  // Present only when status is FAILED — usually "the photo was too blurred to read".
+  errorMessage: string | null
+  visibility: DocumentVisibility
+  mine: boolean
+  uploadedById: string
+  createdAt: string
+  updatedAt: string
+}
+
+// One block a vision model read off a photographed page. `indexed` is the field the review screen
+// is built around: false means the model read this text and was not confident enough about it to
+// put it in the course's index — so it is shown, and it answers nothing.
+export interface NoteBlock {
+  ordinal: number
+  content: string
+  confidence: number
+  indexed: boolean
+}
+
 // One entry in a document's auto-generated glossary.
 export interface GlossaryTerm {
   term: string

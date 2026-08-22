@@ -31,6 +31,7 @@
         <jjwt.version>0.12.6</jjwt.version>
         <pdfbox.version>3.0.3</pdfbox.version>
         <jtokkit.version>1.1.0</jtokkit.version>
+        <poi.version>5.5.1</poi.version>
     </properties>
     <dependencies>
         <dependency>
@@ -108,6 +109,15 @@
             <groupId>com.knuddels</groupId>
             <artifactId>jtokkit</artifactId>
             <version>${jtokkit.version}</version>
+        </dependency>
+        <!-- OOXML readers for the Phase 16 formats: .pptx via XSLF and .docx via XWPF. Reading the
+             slide deck itself rather than a PDF export of it is the whole point — a slide's title,
+             body and speaker notes are separate elements in the file, and exporting to PDF flattens
+             all three into positioned text with no hierarchy left to chunk on. Not in Boot's BOM. -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
         </dependency>
         <!-- Used directly to parse the embedding provider's JSON response (version from Boot's BOM). -->
         <dependency>

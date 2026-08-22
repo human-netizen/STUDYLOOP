@@ -68,6 +68,15 @@ public class Document {
     @Column(nullable = false, length = 20)
     private DocumentSource source = DocumentSource.UPLOAD;
 
+    // Who may be answered from this document (Phase 16.3). COURSE for everything a manager
+    // uploaded and everything the forum wrote; OWNER for a photographed note until a manager
+    // promotes it. Retrieval reads this column, not `source` — where the text came from and who
+    // is allowed to see it are different questions, and conflating them is how a private note
+    // becomes retrievable by making it look like material.
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private DocumentVisibility visibility = DocumentVisibility.COURSE;
+
     // Filled by the extraction step (Phase 4.3); null until then.
     @Column(name = "page_count")
     private Integer pageCount;

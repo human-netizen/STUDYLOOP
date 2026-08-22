@@ -46,7 +46,14 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
         // Its own allowance: one upload is an embedding call per batch of chunks plus a summary,
         // so a handful of PDFs costs more than a day of asking questions.
+        //
+        // Notes are on the same allowance, and they belong there more than uploads do. A .pptx is
+        // read locally and only its chunks are embedded; a photograph is a vision call before any
+        // of that even starts, and unlike an upload every member of the course may make one —
+        // Phase 10's ingest surface was sized for the handful of people who could reach it.
         registry.addInterceptor(new QuotaInterceptor(quotaGuard, Kind.UPLOAD, Set.of("POST")))
-                .addPathPatterns("/api/v1/courses/*/documents");
+                .addPathPatterns(
+                        "/api/v1/courses/*/documents",
+                        "/api/v1/courses/*/notes");
     }
 }

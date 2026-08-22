@@ -11,6 +11,7 @@ import { QuizzesPage } from './pages/QuizzesPage'
 import { QuizPage } from './pages/QuizPage'
 import { FlashcardsPage } from './pages/FlashcardsPage'
 import { ReviewPage } from './pages/ReviewPage'
+import { CourseNotesPage } from './pages/CourseNotesPage'
 import { CourseConfusionPage } from './pages/CourseConfusionPage'
 import { JoinPage } from './pages/JoinPage'
 import { AdminCostsPage } from './pages/AdminCostsPage'
@@ -93,6 +94,16 @@ function App() {
         element={
           <ProtectedRoute>
             <FlashcardsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Phase 16.3: photograph a page of handwriting and have it read. Any member — what they
+          add is private to them until a manager promotes it. */}
+      <Route
+        path="/courses/:id/notes"
+        element={
+          <ProtectedRoute>
+            <CourseNotesPage />
           </ProtectedRoute>
         }
       />

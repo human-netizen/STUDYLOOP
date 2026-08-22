@@ -75,11 +75,16 @@ public class RetrievalService {
                 : embeddingClient.isConfigured() ? embeddingClient.embedQuery(trimmed) : null;
         List<ChunkHit> vectorHits = vector != null
                 ? searchRepository.vectorSearch(
-                        courseId, VectorSupport.toLiteral(vector), CANDIDATES_PER_SOURCE)
+                        courseId, actorId, VectorSupport.toLiteral(vector), CANDIDATES_PER_SOURCE)
                 : List.of();
 
         // Lexical half.
-        List<ChunkHit> textHits = searchRepository.fullTextSearch(courseId, trimmed, CANDIDATES_PER_SOURCE);
+        // The actor is passed to both halves, not just checked above: membership decides whether
+        // this course may be searched at all, and Phase 16.3's visibility decides which of its
+        // documents this member may be answered from. A private note is retrievable for the person
+        // who photographed it and invisible to everyone else, in one clause inside the SQL.
+        List<ChunkHit> textHits =
+                searchRepository.fullTextSearch(courseId, actorId, trimmed, CANDIDATES_PER_SOURCE);
 
         // Vector hits come back best-first, so the head is the strongest semantic match. Empty
         // when no embedding provider ran, which the gate reads as "no semantic signal".

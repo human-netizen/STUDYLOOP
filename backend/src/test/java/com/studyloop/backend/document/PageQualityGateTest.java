@@ -101,7 +101,7 @@ class PageQualityGateTest {
         // a property of the corpus, so a corpus that expects nothing but Bengali should read the
         // Latin fixture as foreign — which is the same rule pointing the other way.
         VisionProperties bengali = new VisionProperties(
-                true, null, null, 0, 0, List.of("BENGALI"), null);
+                true, null, null, 0, 0, List.of("BENGALI"), null, 0);
         PageQuality quality;
         try (PDDocument document = Loader.loadPDF(TestPdfs.of(Kind.PROSE))) {
             quality = new PageQualityGate(bengali).score(document).get(0);
@@ -117,7 +117,7 @@ class PageQualityGateTest {
         // entire upload to a vision model because somebody misspelled a configuration value. The
         // names are dropped with a warning and the set falls back to something survivable.
         VisionProperties typos = new VisionProperties(
-                true, null, null, 0, 0, List.of("LATNI", "COMMMON"), null);
+                true, null, null, 0, 0, List.of("LATNI", "COMMMON"), null, 0);
         try (PDDocument document = Loader.loadPDF(TestPdfs.of(Kind.PROSE))) {
             assertThat(new PageQualityGate(typos).score(document).get(0).needsVision()).isFalse();
         }
@@ -211,7 +211,7 @@ class PageQualityGateTest {
         // not a test of arithmetic — it is what makes the fixture report in FixtureCorpusTest an
         // argument rather than an assertion: a reader who thinks 0.25 is wrong can move it.
         VisionProperties strict = new VisionProperties(true, null, null, 0, 0, null,
-                new Thresholds(0, 0, 0.95, 100_000, 0, 0, 0));
+                new Thresholds(0, 0, 0.95, 100_000, 0, 0, 0), 0);
         try (PDDocument document = Loader.loadPDF(TestPdfs.of(Kind.FIGURE))) {
             assertThat(new PageQualityGate(strict).score(document).get(0).needsVision()).isFalse();
         }

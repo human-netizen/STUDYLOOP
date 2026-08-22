@@ -47,12 +47,26 @@ public record VisionProperties(
         // COMMON covers digits, punctuation and maths operators; GREEK is here because a computer
         // science textbook is full of Theta and epsilon and neither is a defect.
         List<String> expectedScripts,
-        Thresholds thresholds
+        Thresholds thresholds,
+        // Phase 16.3. How sure the model has to say it is before a block of a photographed note is
+        // written into the course's index.
+        //
+        // A threshold rather than "keep everything", because handwriting recognition is wrong often
+        // enough that the failure is routine rather than exceptional, and a note is revised from
+        // later: a guessed recurrence relation that reads plausibly is worse than a gap, because a
+        // gap is visible. A threshold rather than "drop everything uncertain and say nothing",
+        // because a dropped block nobody is shown is indistinguishable from a block that was never
+        // on the page — so the low-confidence blocks are stored and displayed, just not indexed.
+        //
+        // 0.6 is deliberately generous. The cost of keeping a doubtful block is one weak passage
+        // among many; the cost of dropping a good one is a note that answers nothing.
+        double minNoteConfidence
 ) {
 
     private static final String DEFAULT_MODEL = "gemini-2.5-flash";
     private static final int DEFAULT_DPI = 150;
     private static final int DEFAULT_MAX_PAGES = 40;
+    private static final double DEFAULT_MIN_NOTE_CONFIDENCE = 0.6;
     // Public because the gate falls back to it when every configured name turns out to be a
     // typo. Falling back to "nothing" there would make every character on every page foreign
     // and route the whole upload to a vision model over a misspelling.
@@ -75,6 +89,11 @@ public record VisionProperties(
         if (thresholds == null) {
             thresholds = Thresholds.defaults();
         }
+        // A confidence at or above 1 admits nothing — no model calls a handwritten page certain —
+        // so it is not a strict setting, it is the notes feature switched off by a typo.
+        if (minNoteConfidence <= 0 || minNoteConfidence >= 1.0) {
+            minNoteConfidence = DEFAULT_MIN_NOTE_CONFIDENCE;
+        }
     }
 
     // The router is only live when it is switched on *and* has somewhere to send a page. Both
@@ -85,7 +104,7 @@ public record VisionProperties(
     }
 
     public static VisionProperties defaults() {
-        return new VisionProperties(true, null, null, 0, 0, null, null);
+        return new VisionProperties(true, null, null, 0, 0, null, null, 0);
     }
 
     // Where each of the four signals tips from "this page extracted fine" to "PDFBox is guessing".

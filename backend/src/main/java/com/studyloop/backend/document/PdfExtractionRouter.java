@@ -40,7 +40,7 @@ import java.util.Map;
 // and logs what it would have routed.
 @Component
 @RequiredArgsConstructor
-public class PdfExtractionRouter {
+public class PdfExtractionRouter implements DocumentExtractor {
 
     private static final Logger log = LoggerFactory.getLogger(PdfExtractionRouter.class);
 
@@ -61,19 +61,26 @@ public class PdfExtractionRouter {
     private final VisionClient visionClient;
     private final VisionProperties properties;
 
-    // What ingestion gets back: the pages as before, plus how many of them a vision model read.
+    @Override
+    public boolean supports(DocumentFormat format) {
+        return format == DocumentFormat.PDF;
+    }
+
+    // Returns the pages as before, plus how many of them a vision model read.
     //
     // The count is returned rather than logged because it is stored — `documents.vision_pages` —
     // and being stored is what lets the eval report describe the corpus from the corpus. Phase 14's
     // synthetic-query flag had no such record and needed a marker string counted out of embed_text
     // to stop a report claiming a pipeline the corpus was not built with.
-    public record Extraction(List<PageText> pages, int visionPages) { }
-
+    //
+    // Phase 16 moved the return type out of this class: three more formats produce the same thing,
+    // and a shared `Extraction` is what lets the ingestion orchestrator stay format-blind.
+    @Override
     public Extraction extract(byte[] pdfBytes) {
         try (PDDocument document = Loader.loadPDF(pdfBytes)) {
             List<PageText> pages = textExtractor.extract(document);
             if (!properties.enabled()) {
-                return new Extraction(pages, 0);
+                return Extraction.of(pages);
             }
             return route(document, pages);
         } catch (IOException e) {
@@ -86,7 +93,7 @@ public class PdfExtractionRouter {
         List<PageQuality> qualities = qualityGate.score(document);
         List<PageQuality> failing = qualities.stream().filter(PageQuality::needsVision).toList();
         if (failing.isEmpty()) {
-            return new Extraction(pages, 0);
+            return Extraction.of(pages);
         }
 
         // Logged at the count and listed at the page, because both questions get asked: "how much
@@ -105,7 +112,7 @@ public class PdfExtractionRouter {
             // at being searched, and nothing else would ever say so.
             log.warn("{} of {} pages extracted badly and no vision key is configured; "
                             + "indexing them as extracted", failing.size(), pages.size());
-            return new Extraction(pages, 0);
+            return Extraction.of(pages);
         }
         if (failing.size() > properties.maxPagesPerDocument()) {
             throw new VisionPageCapExceededException(
@@ -119,7 +126,7 @@ public class PdfExtractionRouter {
             String markdown = readWithRetries(png, quality);
             routed.set(quality.pageNumber() - 1, new PageText(quality.pageNumber(), markdown));
         }
-        return new Extraction(routed, failing.size());
+        return Extraction.withVision(routed, failing.size());
     }
 
     // One page, with a bounded wait for a rate limit and no wait for anything else. A 429 during a

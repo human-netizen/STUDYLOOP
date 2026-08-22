@@ -16,6 +16,14 @@ import java.util.UUID;
 // Both halves search the whole corpus, forum-derived documents included: an answer the class
 // worked out and an instructor accepted is course knowledge, and the point of writing it back
 // was for retrieval to find it. `d.source` rides along so a citation can say which it was.
+//
+// **The one thing not in "the whole corpus" is somebody else's notebook** (Phase 16.3). A
+// photographed note starts visible only to the member who uploaded it, so both queries carry
+// `visibility = 'COURSE' or uploaded_by = actor`. It is one clause and it is load-bearing: this is
+// the only place a private note could reach a stranger, because everything downstream — chat,
+// quizzes, flashcards, the search page — is built on these two methods and inherits whatever they
+// return. Written into the SQL rather than filtered afterwards, so a caller cannot forget it and
+// so the candidate count means what it says.
 @Repository
 @RequiredArgsConstructor
 class ChunkSearchRepository {
@@ -51,7 +59,7 @@ class ChunkSearchRepository {
     // queryVectorLiteral is a pgvector "[...]" text literal cast to vector; chunks without an
     // embedding are skipped so an un-embedded corpus simply yields no vector hits. We also select
     // 1 - distance as the cosine similarity so the caller can gate on the top match's strength.
-    List<ChunkHit> vectorSearch(UUID courseId, String queryVectorLiteral, int limit) {
+    List<ChunkHit> vectorSearch(UUID courseId, UUID actorId, String queryVectorLiteral, int limit) {
         return jdbc.query("""
                 select c.id, c.document_id, d.filename, d.source, c.page_number, c.page_end,
                        c.section_path, c.content, c.token_count,
@@ -60,10 +68,11 @@ class ChunkSearchRepository {
                 join documents d on d.id = c.document_id
                 where d.course_space_id = ?
                   and d.status = 'READY'
+                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)
                   and c.embedding is not null
                 order by c.embedding <=> cast(? as vector)
                 limit ?
-                """, VECTOR_MAPPER, queryVectorLiteral, courseId, queryVectorLiteral, limit);
+                """, VECTOR_MAPPER, queryVectorLiteral, courseId, actorId, queryVectorLiteral, limit);
     }
 
     // Every chunk of one section of one document, in document order — the raw material for
@@ -87,7 +96,7 @@ class ChunkSearchRepository {
     // Lexical matches ranked by ts_rank over the generated content_tsv column (GIN-indexed).
     // plainto_tsquery treats the query as plain words AND-ed together, so only chunks sharing
     // vocabulary with the query come back.
-    List<ChunkHit> fullTextSearch(UUID courseId, String query, int limit) {
+    List<ChunkHit> fullTextSearch(UUID courseId, UUID actorId, String query, int limit) {
         return jdbc.query("""
                 select c.id, c.document_id, d.filename, d.source, c.page_number, c.page_end,
                        c.section_path, c.content, c.token_count
@@ -95,9 +104,10 @@ class ChunkSearchRepository {
                 join documents d on d.id = c.document_id
                 where d.course_space_id = ?
                   and d.status = 'READY'
+                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)
                   and c.content_tsv @@ plainto_tsquery('english', ?)
                 order by ts_rank(c.content_tsv, plainto_tsquery('english', ?)) desc
                 limit ?
-                """, TEXT_MAPPER, courseId, query, query, limit);
+                """, TEXT_MAPPER, courseId, actorId, query, query, limit);
     }
 }

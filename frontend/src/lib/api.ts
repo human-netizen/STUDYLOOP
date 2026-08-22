@@ -19,6 +19,8 @@ import type {
   GenerateQuizRequest,
   InvitePreviewResponse,
   LoginRequest,
+  NoteBlock,
+  NoteResponse,
   PageResponse,
   Quiz,
   QuizSummary,
@@ -221,6 +223,48 @@ export const documentsApi = {
   // single-retry-on-401 refresh as the JSON calls; the caller turns it into an object URL.
   async fileBlob(courseId: string, documentId: string): Promise<Blob> {
     const path = `/courses/${courseId}/documents/${documentId}/file`
+    const get = (token: string | null) =>
+      fetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    let res = await get(tokenStore.getAccess())
+    if (res.status === 401 && (await tryRefresh())) {
+      res = await get(tokenStore.getAccess())
+    }
+    if (!res.ok) throw await toError(res)
+    return res.blob()
+  },
+}
+
+// Digitised handwritten notes (Phase 16.3). A separate surface from documents, because the rules
+// differ on every axis: any member may add one, only images are accepted, only its owner (and a
+// manager reviewing it) may read it, and only a manager may make it part of the course's corpus.
+export const notesApi = {
+  // Your own notes, plus every note this course has promoted. Never anybody else's private ones —
+  // a list that showed more than search does would disclose that a note exists.
+  list: (courseId: string) =>
+    request<NoteResponse[]>(`/courses/${courseId}/notes`, { auth: true }),
+  upload: (courseId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return upload<DocumentResponse>(`/courses/${courseId}/notes`, form)
+  },
+  // The review view: every block the model read, kept or dropped, with the confidence it reported.
+  blocks: (courseId: string, noteId: string) =>
+    request<NoteBlock[]>(`/courses/${courseId}/notes/${noteId}/blocks`, { auth: true }),
+  promote: (courseId: string, noteId: string) =>
+    request<NoteResponse>(`/courses/${courseId}/notes/${noteId}/promote`, {
+      method: 'POST',
+      auth: true,
+    }),
+  demote: (courseId: string, noteId: string) =>
+    request<NoteResponse>(`/courses/${courseId}/notes/${noteId}/demote`, {
+      method: 'POST',
+      auth: true,
+    }),
+  // The note as a LaTeX document, carrying only the blocks that were confident enough to index.
+  // Fetched with the bearer token and turned into an object URL by the caller, the same way the
+  // PDF viewer fetches a document's bytes — a plain <a href> would arrive unauthenticated.
+  async latex(courseId: string, noteId: string): Promise<Blob> {
+    const path = `/courses/${courseId}/notes/${noteId}/latex`
     const get = (token: string | null) =>
       fetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
     let res = await get(tokenStore.getAccess())

@@ -14,8 +14,10 @@ import com.studyloop.backend.chat.ChatConversationNotFoundException;
 import com.studyloop.backend.chat.ChatException;
 import com.studyloop.backend.document.DocumentNotFoundException;
 import com.studyloop.backend.document.DocumentStorageException;
+import com.studyloop.backend.document.DuplicateDocumentException;
 import com.studyloop.backend.document.EmptyDocumentException;
 import com.studyloop.backend.document.NoSummaryMaterialException;
+import com.studyloop.backend.document.NoteNotReadyException;
 import com.studyloop.backend.document.SummaryGenerationException;
 import com.studyloop.backend.document.UnsupportedDocumentTypeException;
 import com.studyloop.backend.flashcard.FlashcardGenerationException;
@@ -156,6 +158,27 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNSUPPORTED_MEDIA_TYPE, ex.getMessage());
         problem.setTitle("Unsupported document type");
+        return problem;
+    }
+
+    // These bytes are already in this course as another member's private note (16.3) → 409. The
+    // one duplicate that cannot be resolved by handing back the existing document, because doing
+    // so would disclose it.
+    @ExceptionHandler(DuplicateDocumentException.class)
+    ProblemDetail handleDuplicateDocument(DuplicateDocumentException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Already uploaded");
+        return problem;
+    }
+
+    // Promoting or exporting a note the pipeline has not finished reading → 409. Not a failure;
+    // the same request works once the note reaches READY.
+    @ExceptionHandler(NoteNotReadyException.class)
+    ProblemDetail handleNoteNotReady(NoteNotReadyException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Note not ready");
         return problem;
     }
 

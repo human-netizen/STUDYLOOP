@@ -31,6 +31,12 @@ public enum AiOperation {
     // the dashboard answers "what did the router actually cost" rather than folding it into the
     // rest of ingestion. The only Google row this system writes outside embeddings.
     VLM_EXTRACTION,
+    // Reading a photograph of handwritten notes (Phase 16.3). The same provider and the same model
+    // as VLM_EXTRACTION, kept apart because they answer different questions about the bill: the
+    // router's cost is a property of the *material* a course uploaded and scales with how badly it
+    // extracts, while this one is a property of how many students photograph their notebooks. One
+    // line cannot go up for both reasons and still be read.
+    HANDWRITING_OCR,
     // A call no scope claimed. A row landing here means an unlabelled call site, not a bug in
     // the caller — it still costs money and still shows up in the total.
     OTHER

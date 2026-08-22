@@ -23,7 +23,8 @@ public class DocumentIngestionService {
     private final DocumentRepository documentRepository;
     private final DocumentStorageService storageService;
     private final DocumentStatusService statusService;
-    private final PdfExtractionRouter extractionRouter;
+    private final DocumentExtractors extractors;
+    private final DocumentNoteBlockService noteBlockService;
     private final TextChunker textChunker;
     private final SyntheticQueryGenerator syntheticQueryGenerator;
     private final DocumentChunkService chunkService;
@@ -44,11 +45,14 @@ public class DocumentIngestionService {
         try {
             statusService.markStatus(documentId, DocumentStatus.EXTRACTING);
             byte[] bytes = storageService.read(storagePath);
-            // Phase 15: extract with PDFBox, score every page, and send only the pages PDFBox got
-            // wrong to a vision model. The result is the same list of Markdown pages either way —
-            // chunking, embedding and citation never learn that vision exists — plus the count of
-            // pages that needed it, which is stored so the corpus can be described from the corpus.
-            PdfExtractionRouter.Extraction extraction = extractionRouter.extract(bytes);
+            // Phase 15 scored a PDF's pages and sent the failures to a vision model; Phase 16 made
+            // that one of four routes, chosen by the document's stored content type. What comes
+            // back is the same either way — Markdown pages numbered from one — which is why a
+            // slide deck, a Word document and a photograph of a notebook all reach the rest of
+            // this method as the thing it already knew how to ingest, and why nothing below here
+            // asks what the file was.
+            Extraction extraction = extractors.extract(
+                    document.getContentType(), document.getFilename(), bytes);
             List<PageText> pages = extraction.pages();
 
             statusService.markStatus(documentId, DocumentStatus.CHUNKING);
@@ -60,6 +64,10 @@ public class DocumentIngestionService {
             // default, and a no-op that returns the same list when it is.
             chunks = syntheticQueryGenerator.augment(chunks);
             chunkService.replaceChunks(documentId, chunks, pages.size(), extraction.visionPages());
+            // 16.3, and only ever non-empty for a photographed note. The blocks the model was not
+            // sure about are not in `chunks` — that is the point of the threshold — so this is the
+            // only record that they were on the page at all, and the review view reads it.
+            noteBlockService.replaceBlocks(documentId, extraction.blocks());
 
             statusService.markStatus(documentId, DocumentStatus.EMBEDDING);
             embeddingService.embedChunks(documentId);

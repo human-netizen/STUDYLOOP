@@ -24,13 +24,14 @@ Eighteen database migrations and 300 tests, the integration ones against real Po
 |---|---|
 | **Accounts** | Register, log in, stay signed in. BCrypt hashing, JWT access + refresh tokens, role-based access on every endpoint. |
 | **Course spaces** | Owners, instructors and members. Invite by share link or by email address; links can be revoked and expire. |
-| **Uploading material** | Drop in a PDF and watch it go through extraction, chunking and embedding without blocking the page. Extraction reads the document's own typography to recover its headings, so a passage is cut where its author ended a section rather than where a word counter ran out. Every page is then scored on four measurements, and only the pages the text extractor demonstrably failed on — a scan, a broken font encoding, a two-column layout, a page whose substance is a diagram — are re-read by a vision model. On the bundled textbook that is 21 pages of 306, so the feature costs almost nothing on material that does not need it. Duplicate files are rejected by content hash, not by filename. |
+| **Uploading material** | Drop in a PDF, a PowerPoint deck or a Word document and watch it go through extraction, chunking and embedding without blocking the page. A deck is read as a deck rather than as a PDF export of one, so its slide titles, its reading order and its speaker notes all survive. Extraction reads the document's own typography to recover its headings, so a passage is cut where its author ended a section rather than where a word counter ran out. Every page is then scored on four measurements, and only the pages the text extractor demonstrably failed on — a scan, a broken font encoding, a two-column layout, a page whose substance is a diagram — are re-read by a vision model. On the bundled textbook that is 21 pages of 306, so the feature costs almost nothing on material that does not need it. Duplicate files are rejected by content hash, not by filename. |
 | **Grounded answers** | Vector search and full-text search run in parallel and are fused into one ranked set, then a cross-encoder reads the question against each candidate and keeps the six that answer it. Each of those six is expanded to the whole section it came from before the model reads it — matching is done on small passages, answering on whole ones. Answers stream in token by token, carry `[n]` citations, and remember the conversation. |
 | **Refusal** | When nothing in the course matches well enough, StudyLoop says **"not in your materials"** instead of inventing an answer. The decision reads the reranker's calibrated relevance, which is what lets one threshold mean the same thing for every question. |
 | **Citation viewer** | Clicking a citation opens that document at that page. |
 | **Formatted answers** | Answers render with tables, headings, syntax-highlighted code and typeset mathematics. Citations stay clickable inside all of it — including inside a table cell — and raw HTML from the model is never rendered. |
 | **Quizzes** | Multiple-choice and short-answer quizzes generated from chosen lectures, graded automatically with explanations for every answer. |
 | **Flashcards** | Generated from a document, or saved from any answer you want to keep. |
+| **Handwritten notes** | Photograph a page of your handwriting and it becomes a document like any other — chunked, embedded, answerable and citable. It stays private to you until a course manager promotes it. A vision model reads the page in blocks and reports how sure it is of each; anything it was not sure enough about is shown to you and kept out of the index, because a guessed equation that reads plausibly is worse than a gap you can see. |
 | **Revision queue** | An SM-2 spaced-repetition schedule. Questions you got wrong enrol themselves; the app tells you what is due today. |
 | **Document summaries** | A summary and a key-term glossary per document, generated once and cached. |
 | **Search** | A search box over the course that returns passages grouped by document with the matched words highlighted, and no confidence gate — weak matches are still shown, because you can judge them yourself. |
@@ -64,9 +65,9 @@ Eighteen database migrations and 300 tests, the integration ones against real Po
 | Layer | Choice |
 |---|---|
 | Backend | Java 21, Spring Boot 4.1 (Web MVC, Security + JWT, Data JPA, Validation, Actuator) |
-| Database | PostgreSQL on Supabase with **pgvector** · Flyway migrations `V1`–`V18` |
+| Database | PostgreSQL on Supabase with **pgvector** · Flyway migrations `V1`–`V20` |
 | AI | Cohere, called directly over Spring's `RestClient` — `embed-v4.0` embeddings truncated to 768-d, `rerank-v3.5` over the fused candidates, Command R for chat |
-| Extraction | Apache PDFBox, per page |
+| Extraction | Apache PDFBox per page; Apache POI for `.pptx` and `.docx`; Gemini Flash for the pages PDFBox got wrong and for photographed notes. Every format converts into the same Markdown pages, so nothing downstream knows which one it came from |
 | Frontend | React 19 + Vite + TypeScript + Tailwind 4 · `react-pdf` for the citation viewer |
 | Testing | JUnit 5 + MockMvc against a **second Supabase project** used only by the suite |
 | CI/CD | GitHub Actions — build + test on every push, both Docker images built in CI |

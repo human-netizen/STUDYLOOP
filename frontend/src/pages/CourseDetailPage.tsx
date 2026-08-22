@@ -107,8 +107,8 @@ export function CourseDetailPage() {
           <section className="mb-14">
             <SectionHead
               index="01 · Materials"
-              title="Add a PDF"
-              description="Uploads are extracted, chunked and embedded before they can be asked about."
+              title="Add material"
+              description="PDFs, PowerPoint decks and Word documents are extracted, chunked and embedded before they can be asked about."
             />
             <UploadDropzone courseId={id} onUploaded={mergeDocument} />
           </section>
@@ -124,7 +124,7 @@ export function CourseDetailPage() {
               }
             />
             {documents.length === 0 ? (
-              <Empty>Nothing here yet — drop a PDF above to get started.</Empty>
+              <Empty>Nothing here yet — drop a file above to get started.</Empty>
             ) : (
               <Rows>
                 {documents.map((doc) => (
@@ -202,14 +202,16 @@ function UploadDropzone({
         )}
       >
         <p className="m-0 font-display text-[17px] font-bold tracking-[-0.015em] text-ink">
-          {uploading ? 'Uploading…' : 'Drop a PDF here'}
+          {uploading ? 'Uploading…' : 'Drop a file here'}
         </p>
-        <Meta>or click to browse · PDF up to 25 MB</Meta>
+        {/* Phase 16 widened this from PDF alone. A deck is read as a deck rather than as a PDF
+            export of one, which is where its speaker notes and slide titles come from. */}
+        <Meta>or click to browse · PDF, PowerPoint or Word, up to 25 MB</Meta>
       </div>
       <input
         ref={inputRef}
         type="file"
-        accept="application/pdf,.pdf"
+        accept="application/pdf,.pdf,.pptx,.docx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         className="hidden"
         onChange={(event) => {
           void handleFiles(event.target.files)

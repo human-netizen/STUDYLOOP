@@ -47,6 +47,7 @@ public class DocumentSummaryService {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final CourseAccess courseAccess;
+    private final DocumentRepository documentRepository;
     private final DocumentSummaryStore store;
     private final ChatClient chatClient;
 
@@ -55,6 +56,7 @@ public class DocumentSummaryService {
     // rather than an error.
     public DocumentSummaryResponse get(UUID actorId, UUID courseId, UUID documentId) {
         courseAccess.requireMember(actorId, courseId);
+        requireVisible(actorId, courseId, documentId);
         return store.read(courseId, documentId);
     }
 
@@ -63,8 +65,17 @@ public class DocumentSummaryService {
     // flashcard generation — the material belongs to the course, not to the uploader.
     public DocumentSummaryResponse generateFor(UUID actorId, UUID courseId, UUID documentId, boolean refresh) {
         courseAccess.requireMember(actorId, courseId);
+        requireVisible(actorId, courseId, documentId);
         generate(courseId, documentId, refresh);
         return store.read(courseId, documentId);
+    }
+
+    // Membership carries the course's material and not a classmate's private note (16.3). Checked
+    // here rather than in the store, because the store is also driven by the ingestion path, where
+    // there is no actor to check against and the document is the one being ingested.
+    private void requireVisible(UUID actorId, UUID courseId, UUID documentId) {
+        documentRepository.findVisibleById(documentId, courseId, actorId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
     }
 
     // The ingestion path — nobody is waiting on a request. Returns whether a summary was actually
