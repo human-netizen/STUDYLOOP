@@ -62,6 +62,18 @@ public class PdfTextExtractor {
 
     public List<PageText> extract(byte[] pdfBytes) {
         try (PDDocument document = Loader.loadPDF(pdfBytes)) {
+            return extract(document);
+        } catch (IOException e) {
+            throw new DocumentExtractionException(
+                    "Could not read the PDF. It may be corrupt or password-protected.", e);
+        }
+    }
+
+    // The same extraction against an already-open document, so Phase 15's router can score pages
+    // and render the failures off the one parse rather than loading the file three times. The
+    // caller owns the document and closes it.
+    public List<PageText> extract(PDDocument document) {
+        try {
             List<PdfLine> lines = keepContent(PdfLineStripper.read(document));
             return toMarkdown(lines, document.getNumberOfPages());
         } catch (IOException e) {

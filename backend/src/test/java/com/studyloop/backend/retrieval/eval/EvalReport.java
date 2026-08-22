@@ -170,6 +170,13 @@ public final class EvalReport {
         // forgot to re-ingest shows as well.
         out.append(line("synthetic queries", "%d/%d chunks carry a generated block".formatted(
                 corpus.synthetic(), corpus.chunks())));
+        // Phase 15.4, and printed on every run for the same reason as the line above it: zero is
+        // the reading that matters. A corpus ingested with no vision key scored every page and sent
+        // none, which is not the same pipeline as one where the model read twenty of them, and a
+        // report that only mentioned the router when it fired could not tell them apart. Read out
+        // of documents.vision_pages rather than off a flag, so it describes the corpus that exists.
+        out.append(line("vision extraction", "%d/%d pages read by a vision model".formatted(
+                corpus.visionPages(), corpus.pages())));
         if (reranked()) {
             out.append(line("reranked", "%d/%d questions%s".formatted(
                     rows.size() - rerankFallbacks(), rows.size(),

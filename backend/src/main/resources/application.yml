@@ -218,6 +218,89 @@ studyloop:
       # scores `content` and never sees the generated block. Kept switchable so both sides of that
       # measurement can be re-run.
       whole-sections-only: ${SYNTHETIC_QUERIES_WHOLE_SECTIONS_ONLY:false}
+  vision:
+    # Phase 15 — the VLM extraction router. Every page is scored after PDFBox reads it, and only
+    # the pages PDFBox got wrong are sent to a vision model.
+    #
+    # On by default, and the reason is that it costs nothing on material that does not need it. A
+    # clean digital textbook routes no pages, so the whole feature is four cheap measurements per
+    # page and no provider call at all; a scanned book routes every page, which is what the
+    # per-document cap below is for. Off reproduces the pre-Phase-15 pipeline exactly: whatever
+    # PDFBox produced is what gets indexed, defects and all.
+    #
+    # Not under retrieval.stages, unlike Phase 14's synthetic queries. Those had to be there because
+    # the eval report's header is built from that block and nothing else recorded what the corpus
+    # was built with. This phase records it per document, in documents.vision_pages, so the report
+    # reads the corpus instead of the configuration and cannot be made to lie by forgetting to
+    # re-ingest.
+    enabled: ${VISION_ENABLED:true}
+    # Google AI Studio key — the same one the google embedding provider uses. Blank leaves the
+    # router scoring pages and routing none of them, logging at WARN what it would have sent: an
+    # installation with no vision key keeps ingesting rather than failing every upload with a
+    # figure in it. Cohere has no vision model, which is why this is a second provider at all.
+    api-key: ${GOOGLE_API_KEY:}
+    # Gemini 2.5 Flash. Thinking is disabled in the client: reasoning before answering is worth
+    # paying for on a hard question and not on transcribing a page that is in front of the model.
+    model: ${VISION_MODEL:gemini-2.5-flash}
+    # Render resolution. 150 is the floor at which body text in a scanned book stays legible; 72
+    # (one PDF point per pixel) loses the ascenders, and 300 quadruples the bytes for text that was
+    # already readable at 150.
+    dpi: ${VISION_DPI:150}
+    # Phase 15.3's guardrail, and the reason the phase is a router rather than "send everything".
+    # Phase 10 capped the *query* path — 20 AI requests a minute, 200k tokens a day, per user. This
+    # is the ingest path, whose only limit is 10 uploads an hour, sized for text extraction. One
+    # scanned 300-page textbook is 300 vision calls inside a single allowed upload.
+    #
+    # Exceeding it refuses the document rather than routing the first 40 pages and stopping. A
+    # truncated document reaches READY with the right page count and no answers past page 40, and
+    # every symptom of that is silence.
+    max-pages-per-document: ${VISION_MAX_PAGES:40}
+    # Scripts this corpus is expected to be written in, for the broken-encoding signal. Unicode
+    # script names as Character.UnicodeScript spells them, comma-separated.
+    #
+    # Configurable because "outside the expected script" is a property of the course, not of the
+    # software: a Bangla course under a Latin-only rule would have every page flagged, which is the
+    # exact false positive that would make the signal useless where it is most needed. COMMON is
+    # digits, punctuation and maths operators; GREEK is here because a computer science textbook is
+    # full of Theta and epsilon and neither of those is a defect.
+    expected-scripts: ${VISION_EXPECTED_SCRIPTS:LATIN,COMMON,GREEK,INHERITED}
+    # Where each of the four signals tips from "this page extracted fine" to "PDFBox is guessing".
+    # Configuration rather than constants because the right cut for a scanned handout is not the
+    # right cut for a typeset textbook, and a reader who disagrees with a threshold should be able
+    # to move it and re-run FixtureCorpusTest rather than rebuild.
+    thresholds:
+      # Characters extracted per 1,000 square points of page. A US Letter page is ~485 of those
+      # units and a page of prose yields 4-6 characters per unit, so 0.5 is "this page produced
+      # under a tenth of the text a page of writing produces".
+      min-chars-per-thousand-points: ${VISION_MIN_CHARS:0.5}
+      # Low text *and* a page-filling image is a scan. Low text and no image is a blank page or a
+      # chapter opener, and sending those to a vision model buys a call and an empty answer — which
+      # is why every low-text verdict also requires an image to be there.
+      scanned-image-coverage: ${VISION_SCANNED_COVERAGE:0.5}
+      # A figure page is the same shape with the dial turned down: a real diagram over a quarter of
+      # the page, with enough text around it to show extraction is working. The text is fine and it
+      # is not what the page is about — which is why figure questions have been the weakest column
+      # in the golden set since Phase 12, and why Phase 14's generated text did nothing for them.
+      figure-image-coverage: ${VISION_FIGURE_COVERAGE:0.25}
+      # The same judgement for a figure that was *drawn* rather than pasted, counted in path
+      # segments. This threshold is not in the plan, and measuring the corpus is why it exists: the
+      # fourteen fixture chapters contain zero image XObjects across all 306 of their pages, because
+      # a book typeset in LaTeX emits its diagrams as vector artwork. Left with coverage alone, the
+      # figure rule could never fire on the very corpus whose figure questions are the weakest
+      # column in the golden set. A rule under a heading is one or two segments, a page of prose
+      # sits around thirty, and a tree diagram is several hundred.
+      figure-vector-segments: ${VISION_FIGURE_SEGMENTS:150}
+      figure-chars-per-thousand-points: ${VISION_FIGURE_CHARS:2.0}
+      # Share of non-space characters belonging to no expected script. A broken /ToUnicode CMap does
+      # not fail — it succeeds and returns the wrong codepoints, usually from the private use area,
+      # so the page renders perfectly and pastes as gibberish.
+      max-foreign-ratio: ${VISION_MAX_FOREIGN:0.30}
+      # How far PDFBox's position-sorted reading of the page diverges from its content-stream
+      # reading. They agree almost exactly on single-column prose; a two-column page read in stream
+      # order interleaves the columns and the two orders share almost no positions. This is also
+      # the signal that rules out plain OCR as the fallback — Tesseract guesses reading order the
+      # same way, so it would fix the scans and reproduce this.
+      max-order-disagreement: ${VISION_MAX_DISAGREEMENT:0.35}
   summary:
     # Phase 8.2: after a document reaches READY, generate its summary + glossary once and cache
     # them. Costs one chat call per document, never repeated. Set false (SUMMARY_AUTO_GENERATE)
@@ -301,6 +384,14 @@ studyloop:
       # every question, which is why the dashboard needs to show it rather than infer it.
       "[rerank-v3.5]":
         per-thousand-searches: 2.00
+      # Phase 15's vision extractor, and the only Google entry here. Images bill as input tokens —
+      # a 150-DPI page is roughly 250-400 of them under Gemini's tiling — so a routed page costs a
+      # fraction of a cent in and rather more out, because the output is the page rewritten as
+      # Markdown. Output is eight times the input rate, which is the arithmetic behind switching
+      # thinking off in the client: reasoning tokens bill at that same output rate.
+      "[gemini-2.5-flash]":
+        input-per-million: 0.30
+        output-per-million: 2.50
 
 management:
   endpoints:

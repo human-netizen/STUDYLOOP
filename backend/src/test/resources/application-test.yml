@@ -23,3 +23,10 @@ studyloop:
   retrieval:
     rerank:
       api-key: ""
+  # Phase 15 adds a second key with the same hazard, and a worse one: the router ships on and every
+  # PDF the suite builds goes through it, so a developer with GOOGLE_API_KEY in .env.properties
+  # would have the whole test suite billing Google for pages of Lorem Ipsum. Blanked here the
+  # router still scores every page — which is the part the tests are about — and sends none of
+  # them; VisionRoutingTest hands the router a deterministic stub reader instead.
+  vision:
+    api-key: ""

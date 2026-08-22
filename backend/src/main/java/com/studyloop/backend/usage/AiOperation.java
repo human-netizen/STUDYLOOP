@@ -26,6 +26,11 @@ public enum AiOperation {
     // Generating the questions a section answers, at ingest (Phase 14.1). One call per batch of
     // sections, never on the request path — a student's question does not pay for this.
     SYNTHETIC_QUERIES,
+    // Reading a page image with a vision model, at ingest (Phase 15.2). One call per *routed* page,
+    // which is the number the whole phase is built to keep small — a separate entry precisely so
+    // the dashboard answers "what did the router actually cost" rather than folding it into the
+    // rest of ingestion. The only Google row this system writes outside embeddings.
+    VLM_EXTRACTION,
     // A call no scope claimed. A row landing here means an unlabelled call site, not a bug in
     // the caller — it still costs money and still shows up in the total.
     OTHER

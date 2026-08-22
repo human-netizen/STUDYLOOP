@@ -23,7 +23,7 @@ public class DocumentIngestionService {
     private final DocumentRepository documentRepository;
     private final DocumentStorageService storageService;
     private final DocumentStatusService statusService;
-    private final PdfTextExtractor textExtractor;
+    private final PdfExtractionRouter extractionRouter;
     private final TextChunker textChunker;
     private final SyntheticQueryGenerator syntheticQueryGenerator;
     private final DocumentChunkService chunkService;
@@ -44,7 +44,12 @@ public class DocumentIngestionService {
         try {
             statusService.markStatus(documentId, DocumentStatus.EXTRACTING);
             byte[] bytes = storageService.read(storagePath);
-            List<PageText> pages = textExtractor.extract(bytes);
+            // Phase 15: extract with PDFBox, score every page, and send only the pages PDFBox got
+            // wrong to a vision model. The result is the same list of Markdown pages either way —
+            // chunking, embedding and citation never learn that vision exists — plus the count of
+            // pages that needed it, which is stored so the corpus can be described from the corpus.
+            PdfExtractionRouter.Extraction extraction = extractionRouter.extract(bytes);
+            List<PageText> pages = extraction.pages();
 
             statusService.markStatus(documentId, DocumentStatus.CHUNKING);
             List<TextChunk> chunks = textChunker.chunk(pages, titleOf(document));
@@ -54,7 +59,7 @@ public class DocumentIngestionService {
             // in the document to index text that could have been there the first time. Off by
             // default, and a no-op that returns the same list when it is.
             chunks = syntheticQueryGenerator.augment(chunks);
-            chunkService.replaceChunks(documentId, chunks, pages.size());
+            chunkService.replaceChunks(documentId, chunks, pages.size(), extraction.visionPages());
 
             statusService.markStatus(documentId, DocumentStatus.EMBEDDING);
             embeddingService.embedChunks(documentId);

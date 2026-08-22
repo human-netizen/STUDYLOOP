@@ -16,8 +16,14 @@ public class DocumentChunkService {
     private final DocumentRepository documentRepository;
     private final DocumentChunkRepository chunkRepository;
 
+    // For text that never had pages to route — an accepted forum answer (9.2).
     @Transactional
     public void replaceChunks(UUID documentId, List<TextChunk> chunks, int pageCount) {
+        replaceChunks(documentId, chunks, pageCount, 0);
+    }
+
+    @Transactional
+    public void replaceChunks(UUID documentId, List<TextChunk> chunks, int pageCount, int visionPages) {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
 
@@ -39,5 +45,6 @@ public class DocumentChunkService {
             chunkRepository.save(chunk);
         }
         document.setPageCount(pageCount);
+        document.setVisionPages(visionPages);
     }
 }

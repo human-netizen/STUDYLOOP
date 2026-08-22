@@ -64,7 +64,7 @@ public class EvalCorpus {
     // against. `ingested` vs `reused` is the line that explains a slow run, and a run that ingested
     // nothing is the cheap case this class exists to make possible.
     public record Seeded(UUID courseId, UUID actorId, int documents, int chunks, int ingested,
-                         int reused, int synthetic) {
+                         int reused, int synthetic, int pages, int visionPages) {
 
         public boolean rebuilt() {
             return ingested > 0;
@@ -91,7 +91,23 @@ public class EvalCorpus {
         }
         return new Seeded(course.getId(), owner.getId(),
                 FixtureDocument.values().length, chunks, ingested, reused,
-                syntheticChunks(course.getId()));
+                syntheticChunks(course.getId()),
+                sum(course.getId(), "page_count"), sum(course.getId(), "vision_pages"));
+    }
+
+    // Phase 15.4 — how much of the corpus a vision model read, straight out of the corpus.
+    //
+    // The instrument Phase 14 had to improvise, made ordinary. There the fact lived only inside a
+    // string, so the report had to go looking for a marker in embed_text to avoid describing a
+    // pipeline the corpus was not built with; here the ingest writes it down. Zero is a real
+    // reading and the one this eval usually prints: with no vision key the router scores every
+    // page and sends none, which is a different corpus from one where twenty-one pages were read
+    // and the report has to be able to tell them apart.
+    private int sum(UUID courseId, String column) {
+        Integer total = jdbcTemplate.queryForObject(
+                "select coalesce(sum(coalesce(" + column + ", 0)), 0) from documents "
+                        + "where course_space_id = ?", Integer.class, courseId);
+        return total == null ? 0 : total;
     }
 
     // How many of the corpus's chunks carry a Phase 14 synthetic-query block, read out of the text

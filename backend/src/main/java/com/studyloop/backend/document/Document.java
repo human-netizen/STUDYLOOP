@@ -72,6 +72,12 @@ public class Document {
     @Column(name = "page_count")
     private Integer pageCount;
 
+    // How many of those pages PDFBox could not read, and a vision model did instead (Phase 15).
+    // Null means nobody scored them — a document ingested before the router existed — which is a
+    // different statement from zero, and the eval report distinguishes the two.
+    @Column(name = "vision_pages")
+    private Integer visionPages;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DocumentStatus status;
