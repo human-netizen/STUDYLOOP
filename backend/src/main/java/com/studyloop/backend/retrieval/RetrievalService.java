@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -30,6 +31,12 @@ import java.util.UUID;
 // reach the prompt on evidence no word of it carries, and the cross-encoder above still scores it
 // on its words: a figure page promoted by its picture and demoted by its caption is the interaction
 // this phase has to be measured with reranking on, not just with it off.
+//
+// Phase 18.1 added a fourth the same way, and it is the first one that is *lexical* twice over: a
+// trigram list beside the lexeme list. That is the thing to keep an eye on rather than the code.
+// RRF counts lists, so two sparse retrievers that mostly agree give the sparse side two votes to
+// the dense side's one on every correctly spelled question — the stage's whole justification is
+// the questions where the lexeme list returns nothing at all, and its cost is on all the others.
 @Service
 @RequiredArgsConstructor
 public class RetrievalService {
@@ -47,6 +54,9 @@ public class RetrievalService {
     private final ChunkSearchRepository searchRepository;
     private final RerankStage rerankStage;
     private final VisualStage visualStage;
+    private final TrigramStage trigramStage;
+    private final HydeStage hydeStage;
+    private final IntentClassifier intentClassifier;
 
     // Any course member may search the course's materials. Returns the fused top-`limit`
     // chunks, best-first; an empty/blank query or a course with no matching chunks yields [].
@@ -74,7 +84,8 @@ public class RetrievalService {
         if (trimmed.isEmpty()) {
             // Nothing was embedded, so there is no vector to hand back — not even the caller's,
             // which was computed for a query we are refusing to run.
-            return new RetrievalResult(List.of(), OptionalDouble.empty(), 0, OptionalDouble.empty(), null);
+            return new RetrievalResult(List.of(), OptionalDouble.empty(), 0, OptionalDouble.empty(),
+                    null, null, false);
         }
         int topN = clampLimit(limit);
 
@@ -114,11 +125,52 @@ public class RetrievalService {
         // nothing more.
         List<ChunkHit> visualHits = visualStage.search(courseId, actorId, vector);
 
+        // Fourth list (18.1): chunks holding a near-spelling of one of the question's distinctive
+        // words. It exists for the case the lexical half above returns *nothing* — a typo does not
+        // weaken `plainto_tsquery`, it empties it — so the two are fused rather than swapped.
+        List<ChunkHit> trigramHits = trigramStage.search(courseId, actorId, trimmed);
+
+        // The second pass (18.2), and it runs only if the first one came back weak. Everything it
+        // produces is *more lists*: the invented passage searches the dense half, the rewrites
+        // search the two lexical halves, and all of it is fused with what is already here — so a
+        // useless hypothetical moves the fused order barely at all instead of replacing it.
+        //
+        // It is given `topSimilarity`, the pre-rerank cosine, because that is the only confidence
+        // signal that exists before anything is billed. Deciding on the cross-encoder's relevance
+        // instead would mean reranking twice to save one call.
+        List<List<ChunkHit>> rankings = new ArrayList<>(
+                List.of(vectorHits, textHits, visualHits, trigramHits));
+        HydeStage.Result expansion =
+                hydeStage.apply(courseId, actorId, trimmed, vector, topSimilarity);
+        rankings.addAll(expansion.rankings());
+
+        // **The gate signal is allowed to rise, and only in one specific way.** What HyDE found is
+        // scored against the *question's* vector, never the hypothetical's — the repository takes
+        // both — so a chunk the second pass discovered that is genuinely close to what the student
+        // typed raises this number, while the systematic lift a pseudo-document-to-document cosine
+        // would give every question equally never enters it. Getting this backwards is the failure
+        // this sub-phase was written to avoid: the refusal rate would drift toward zero, nothing
+        // would throw, and no test would fail.
+        if (expansion.gateSimilarity().isPresent()
+                && (topSimilarity.isEmpty()
+                    || expansion.gateSimilarity().getAsDouble() > topSimilarity.getAsDouble())) {
+            topSimilarity = expansion.gateSimilarity();
+        }
+
         // Fusion depth is the rerank stage's call: topN when it is off, ~30 when it is on, so the
         // cross-encoder has candidates to promote rather than six it can only shuffle.
-        List<RetrievedChunk> fused =
-                fuse(List.of(vectorHits, textHits, visualHits), rerankStage.candidatePool(topN));
+        List<RetrievedChunk> fused = fuse(rankings, rerankStage.candidatePool(topN));
+        // Reranked against the question as the student typed it, not against a rewrite and not
+        // against the hypothetical. The cross-encoder is the one component that reads the query and
+        // the passage together, and what it has to judge is whether this passage answers *that*
+        // question — expansion is a way of finding candidates, not a way of restating the ask.
         List<RetrievedChunk> ranked = rerankStage.apply(trimmed, fused, topN);
+
+        // Free and on every question, so the gate has a bucket whether or not the expansion call
+        // ran; when it did run and returned a label, the model's reading wins over the phrase match.
+        QueryIntent intent = expansion.intent() != null
+                ? expansion.intent()
+                : intentClassifier.classify(trimmed);
 
         // The head's relevance, empty when nothing reranked. Read from the returned list rather
         // than tracked separately, so the number the gate sees is the one that actually led the
@@ -126,7 +178,7 @@ public class RetrievalService {
         Double topRelevance = ranked.isEmpty() ? null : ranked.get(0).rerankScore();
         return new RetrievalResult(ranked, topSimilarity, textHits.size(),
                 topRelevance == null ? OptionalDouble.empty() : OptionalDouble.of(topRelevance),
-                vector);
+                vector, intent, expansion.triggered());
     }
 
     // Reciprocal Rank Fusion: a chunk at 0-based rank r in a list contributes 1/(K + r + 1);

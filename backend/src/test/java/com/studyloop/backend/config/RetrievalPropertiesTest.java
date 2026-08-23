@@ -26,12 +26,12 @@ class RetrievalPropertiesTest {
     @Test
     void missingConfigurationMeansTheBaselinePipeline() {
         // Rather than a null dereference the first time a report asks what ran.
-        assertThat(new RetrievalProperties(null, null).stages()).isEqualTo(Stages.allOff());
+        assertThat(new RetrievalProperties(null, null, null, null).stages()).isEqualTo(Stages.allOff());
     }
 
     @Test
     void anUnconfiguredRerankStageStillHasAModelAndAPool() {
-        Rerank rerank = new RetrievalProperties(null, null).rerank();
+        Rerank rerank = new RetrievalProperties(null, null, null, null).rerank();
 
         assertThat(rerank.apiKey()).isNull();
         assertThat(rerank.model()).isEqualTo("rerank-v3.5");
@@ -48,13 +48,14 @@ class RetrievalPropertiesTest {
 
     @Test
     void describesEveryStageSoAReportCanSayWhatProducedIt() {
-        String described = new Stages(true, false, false, false, false).describe();
+        String described = new Stages(true, false, false, false, false, false).describe();
         assertThat(described).contains("rerank=ON").contains("hyde=off")
-                .contains("trigram=off").contains("visual=off").contains("synthetic-queries=off");
+                .contains("trigram=off").contains("visual=off").contains("intent=off")
+                .contains("synthetic-queries=off");
     }
 
     @Test
     void anyEnabledIsTrueAsSoonAsOneStageIsOn() {
-        assertThat(new Stages(false, false, false, false, true).anyEnabled()).isTrue();
+        assertThat(new Stages(false, false, false, false, false, true).anyEnabled()).isTrue();
     }
 }

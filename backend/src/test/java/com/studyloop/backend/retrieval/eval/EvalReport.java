@@ -1,5 +1,7 @@
 package com.studyloop.backend.retrieval.eval;
 
+import com.studyloop.backend.chat.ConfidenceGate;
+import com.studyloop.backend.retrieval.QueryIntent;
 import com.studyloop.backend.retrieval.eval.GoldenSet.GoldenQuestion;
 import com.studyloop.backend.retrieval.eval.GoldenSet.Kind;
 
@@ -8,6 +10,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.function.Function;
 
 // Accumulates one run's per-question results and renders the report.
@@ -24,19 +27,23 @@ public final class EvalReport {
 
     private final int k;
     private final int pageTolerance;
-    private final double gateThreshold;
-    private final double relevanceThreshold;
+    // The production gate itself, not copies of its numbers. Phase 18.3 gives it three thresholds
+    // instead of one, and a report holding its own copy of them would be describing a policy that
+    // config had moved on from — the exact failure the harness this replaced had, with 0.30
+    // hardcoded against a config that had said 0.25 for weeks.
+    private final ConfidenceGate gate;
     private final String stages;
+    private final boolean misspelled;
     private final EvalCorpus.Seeded corpus;
     private final List<Row> rows = new ArrayList<>();
 
-    public EvalReport(int k, int pageTolerance, double gateThreshold, double relevanceThreshold,
-                      String stages, EvalCorpus.Seeded corpus) {
+    public EvalReport(int k, int pageTolerance, ConfidenceGate gate, String stages,
+                      boolean misspelled, EvalCorpus.Seeded corpus) {
         this.k = k;
         this.pageTolerance = pageTolerance;
-        this.gateThreshold = gateThreshold;
-        this.relevanceThreshold = relevanceThreshold;
+        this.gate = gate;
         this.stages = stages;
+        this.misspelled = misspelled;
         this.corpus = corpus;
     }
 
@@ -67,6 +74,16 @@ public final class EvalReport {
             // candidates, so "did it contribute" and "did it help" are different questions and the
             // report has to be able to answer the first before the second means anything.
             int visualHits,
+            // What the pipeline decided this question was asking for (Phase 18.3), and whether it
+            // earned a second retrieval pass (18.2).
+            //
+            // Both are instrument readings before they are anything else. The intent is what
+            // *selected* the threshold this row was judged against, so a report that printed the
+            // refusal count without it could not be checked; and the trigger rate is the number
+            // that says what the expansion stage costs, which no flag can state because the whole
+            // design is that it fires on some questions and not others.
+            QueryIntent intent,
+            boolean expanded,
             boolean refused
     ) {
     }
@@ -144,6 +161,13 @@ public final class EvalReport {
         return (int) rows.stream().filter(row -> row.visualHits() > 0).count();
     }
 
+    // Questions that earned a second retrieval pass (Phase 18.2). The stage's cost, as a count
+    // rather than as the threshold that produced it: a trigger rate is a property of the corpus and
+    // the questions, and it is the only honest answer to "what does this add to a chat turn".
+    public int expanded() {
+        return (int) rows.stream().filter(Row::expanded).count();
+    }
+
     public List<Row> misses() {
         return answerable().stream().filter(row -> row.recall() == 0.0).toList();
     }
@@ -201,9 +225,15 @@ public final class EvalReport {
         // without it: the same 0/8 means "the number is too low" under one rule and "the signal
         // cannot separate them" under the other.
         out.append(line("gate", reranked()
-                ? "rerank relevance < %s  (cosine rule not used)".formatted(format(relevanceThreshold))
-                : "cosine < %s and no lexical hit".formatted(format(gateThreshold))));
+                ? "rerank relevance < %s  (cosine rule not used)".formatted(format(gate.relevanceThreshold()))
+                : "cosine < %s and no lexical hit".formatted(format(gate.threshold()))));
         out.append(line("stages", stages));
+        if (misspelled) {
+            // Loud, and on its own line, because every number below it is measured against a
+            // question no student typed. A typo run mistaken for an ordinary one would read as a
+            // catastrophic regression.
+            out.append(line("questions", "MISSPELLED — one transposed letter pair per question"));
+        }
         // Printed on every run rather than only when the stage is on, because zero is the reading
         // that matters: it is what a baseline must show, and what a synthetic-queries=ON run that
         // forgot to re-ingest shows as well.
@@ -300,6 +330,54 @@ public final class EvalReport {
             out.append(separability("what a relevance threshold can separate", Row::topRelevance));
         }
 
+        // Phase 18.2 - the trigger rate, split the way the risk is split. The answerable column is
+        // what the stage was built to help; the unanswerable column is the population it is most
+        // dangerous in, because a model asked to write the passage it could not find will write
+        // one, and the corpus genuinely does not contain it.
+        if (expanded() > 0) {
+            out.append("\n--- query expansion (18.2) ---\n");
+            out.append(line("second pass triggered", "%d/%d questions  (%d/%d answerable, %d/%d unanswerable)"
+                    .formatted(expanded(), rows.size(),
+                            answerable().stream().filter(Row::expanded).count(), answerable().size(),
+                            unanswerable().stream().filter(Row::expanded).count(), unanswerable().size())));
+        }
+
+        // Phase 18.3 - the calibration table, recomputed from this run rather than quoted from the
+        // one the thresholds were chosen on.
+        //
+        // **The gap column is the whole argument.** One threshold over every question is an average
+        // of populations that do not behave alike, and this is what the average was hiding: a
+        // bucket where the weakest real question and the strongest unanswerable one are a quarter
+        // of the scale apart, and a bucket where they are two hundredths apart. The floor column is
+        // read out of the live gate, so the table says what this run was actually judged by.
+        if (reranked() && rows.stream().anyMatch(row -> row.intent() != null)) {
+            out.append("\n--- by intent (18.3) ---\n");
+            out.append(String.format(Locale.ROOT, "%-10s %4s %10s %10s %8s %8s %8s%n",
+                    "intent", "n", "weakest", "strongest", "gap", "floor", "refused"));
+            for (QueryIntent intent : QueryIntent.values()) {
+                List<Row> group = rows.stream().filter(row -> row.intent() == intent).toList();
+                if (group.isEmpty()) {
+                    continue;
+                }
+                List<Row> real = group.stream().filter(row -> row.question().answerable()).toList();
+                List<Row> unreal = group.stream().filter(row -> !row.question().answerable()).toList();
+                OptionalDouble weakest = values(real, Row::topRelevance).stream()
+                        .mapToDouble(Double::doubleValue).min();
+                OptionalDouble strongest = values(unreal, Row::topRelevance).stream()
+                        .mapToDouble(Double::doubleValue).max();
+                out.append(String.format(Locale.ROOT, "%-10s %4d %10s %10s %8s %8s %8s%n",
+                        intent.name().toLowerCase(Locale.ROOT), group.size(),
+                        weakest.isPresent() ? format(weakest.getAsDouble()) : "  -  ",
+                        strongest.isPresent() ? format(strongest.getAsDouble()) : "  -  ",
+                        weakest.isPresent() && strongest.isPresent()
+                                ? format(weakest.getAsDouble() - strongest.getAsDouble()) : "  -  ",
+                        format(gate.relevanceThreshold(intent)),
+                        "%d/%d".formatted(group.stream().filter(Row::refused).count(), group.size())));
+            }
+            out.append(line("", "weakest = lowest relevance among answerable; "
+                    + "strongest = highest among unanswerable"));
+        }
+
         out.append("\n--- every question ---\n");
         for (Row row : rows) {
             out.append(renderRow(row));
@@ -325,17 +403,22 @@ public final class EvalReport {
         // The relevance column appears only on a run that reranked, so a baseline report keeps the
         // width it had and two reports of the same shape are diffable line for line.
         String relevance = reranked() ? "rel=%-6s ".formatted(format(row.topRelevance())) : "";
+        // Which bucket judged this row, and whether it paid for a second pass. Blank when neither
+        // stage is on, so a Phase 17 report and a Phase 18 baseline stay diffable line for line.
+        String intent = row.intent() == null ? ""
+                : "%-8s%s ".formatted(row.intent().name().toLowerCase(Locale.ROOT),
+                        row.expanded() ? "+hyde" : "     ");
         if (!row.question().answerable()) {
-            return String.format(Locale.ROOT, "%-4s %-13s %-9s sim=%-6s %s %s%n",
+            return String.format(Locale.ROOT, "%-4s %-13s %-9s sim=%-6s %s%s %s%n",
                     row.question().id(), row.question().kind().name().toLowerCase(Locale.ROOT),
                     row.refused() ? "REFUSED" : "ANSWERED", format(row.topSimilarity()), relevance,
-                    truncate(row.question().question()));
+                    intent, truncate(row.question().question()));
         }
         return String.format(Locale.ROOT,
-                "%-4s %-13s r=%-5s rr=%-5s n=%-5s sim=%-6s %s%s  %s%n",
+                "%-4s %-13s r=%-5s rr=%-5s n=%-5s sim=%-6s %s%s%s  %s%n",
                 row.question().id(), row.question().kind().name().toLowerCase(Locale.ROOT),
                 format(row.recall()), format(row.reciprocalRank()), format(row.ndcg()),
-                format(row.topSimilarity()), relevance,
+                format(row.topSimilarity()), relevance, intent,
                 row.refused() ? " GATED" : "      ",
                 truncate(row.question().question()));
     }

@@ -88,6 +88,20 @@ public record GoldenSet(int pageTolerance, List<GoldenQuestion> questions) {
         return List.copyOf(refs);
     }
 
+    // The same set with every question misspelled (Phase 18.4). Ids, kinds and expected pages are
+    // untouched, so a typo run grades against exactly the same answers and its numbers sit beside a
+    // clean run's — the only difference is what was typed.
+    //
+    // The question text is replaced rather than carried alongside, so the report prints what was
+    // actually asked. A report showing the correct spelling of a question the pipeline never saw
+    // would be the one artefact of this run capable of misleading somebody reading it later.
+    public GoldenSet withTypos() {
+        return new GoldenSet(pageTolerance, questions.stream()
+                .map(q -> new GoldenQuestion(q.id(), q.kind(), Typos.inject(q.question()),
+                        q.expected(), q.note(), q.addedIn()))
+                .toList());
+    }
+
     public List<GoldenQuestion> answerable() {
         return questions.stream().filter(GoldenQuestion::answerable).toList();
     }

@@ -1,8 +1,11 @@
 package com.studyloop.backend.chat;
 
 import com.studyloop.backend.config.ChatProperties;
+import com.studyloop.backend.config.RetrievalProperties;
+import com.studyloop.backend.config.RetrievalProperties.Stages;
 import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.DocumentSource;
+import com.studyloop.backend.retrieval.QueryIntent;
 import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievedChunk;
 import org.junit.jupiter.api.Test;
@@ -67,7 +70,9 @@ class ConfidenceGateTest {
     @Test
     void aRelevanceThresholdOfZeroDisablesTheRerankRule() {
         ConfidenceGate disabled = new ConfidenceGate(
-                new ChatProperties("cohere", new ChatProperties.Cohere("key", "command-r"), THRESHOLD, 0));
+                new ChatProperties("cohere", new ChatProperties.Cohere("key", "command-r"),
+                        THRESHOLD, 0, null),
+                retrieval(false));
 
         assertThat(disabled.shouldRefuse(reranked(oneChunk(), 0.001, 0))).isFalse();
         assertThat(disabled.shouldRefuse(result(List.of(), null, 0))).isTrue();
@@ -125,14 +130,91 @@ class ConfidenceGateTest {
     }
 
     private static ConfidenceGate gateWithThreshold(double threshold) {
-        return new ConfidenceGate(new ChatProperties(
-                "cohere", new ChatProperties.Cohere("key", "command-r"), threshold, RELEVANCE));
+        return new ConfidenceGate(chatProperties(threshold, null), retrieval(false));
+    }
+
+    private static ChatProperties chatProperties(double threshold, ChatProperties.Intent buckets) {
+        return new ChatProperties("cohere", new ChatProperties.Cohere("key", "command-r"),
+                threshold, RELEVANCE, buckets);
+    }
+
+    private static RetrievalProperties retrieval(boolean intentStage) {
+        return new RetrievalProperties(
+                new Stages(false, false, false, false, intentStage, false), null, null, null);
     }
 
     private static RetrievalResult result(List<RetrievedChunk> chunks, Double topSimilarity, int lexicalHits) {
         return new RetrievalResult(chunks,
                 topSimilarity == null ? OptionalDouble.empty() : OptionalDouble.of(topSimilarity),
                 lexicalHits, OptionalDouble.empty(), null);
+    }
+
+    // ── the intent buckets (Phase 18.3) ─────────────────────────────────────────────────────
+
+    // The bucket only applies when the stage is on. Off, every question is held to the one
+    // corpus-wide number, which is what makes the A/B a property change rather than a rebuild.
+    @Test
+    void withoutTheStageEveryIntentIsHeldToTheCorpusWideThreshold() {
+        ConfidenceGate flat = new ConfidenceGate(chatProperties(THRESHOLD, buckets()), retrieval(false));
+
+        assertThat(flat.relevanceThreshold(QueryIntent.LOOKUP)).isEqualTo(RELEVANCE);
+        assertThat(flat.relevanceThreshold(QueryIntent.COMPARE)).isEqualTo(RELEVANCE);
+        assertThat(flat.shouldRefuse(reranked(oneChunk(), 0.35, 0, QueryIntent.LOOKUP))).isFalse();
+    }
+
+    // The case the whole sub-phase is for: 0.35 is the score an unanswerable "what is the running
+    // time of X" question reaches by retrieving a passage about some other running time. Under one
+    // threshold it is answered; asked as a lookup, it is not.
+    @Test
+    void aLookupIsHeldToAHigherBarThanAnExplanation() {
+        ConfidenceGate bucketed = new ConfidenceGate(chatProperties(THRESHOLD, buckets()), retrieval(true));
+
+        assertThat(bucketed.shouldRefuse(reranked(oneChunk(), 0.35, 0, QueryIntent.LOOKUP))).isTrue();
+        assertThat(bucketed.shouldRefuse(reranked(oneChunk(), 0.35, 0, QueryIntent.EXPLAIN))).isFalse();
+    }
+
+    // An unclassified question is not a question with no policy. It falls to the corpus-wide
+    // threshold, which is the same answer the pipeline gave before this stage existed.
+    @Test
+    void anUnclassifiedQuestionFallsBackToTheCorpusWideThreshold() {
+        ConfidenceGate bucketed = new ConfidenceGate(chatProperties(THRESHOLD, buckets()), retrieval(true));
+
+        assertThat(bucketed.relevanceThreshold(null)).isEqualTo(RELEVANCE);
+        assertThat(bucketed.shouldRefuse(reranked(oneChunk(), 0.35, 0, null))).isFalse();
+    }
+
+    // A bucket left at 0 is unset, not "no floor". Reading it as "disabled" would make a partly
+    // filled config block an open gate for whichever intent had been forgotten.
+    @Test
+    void anUnsetBucketFallsBackRatherThanOpeningTheGate() {
+        ChatProperties.Intent partial = new ChatProperties.Intent(0.47, 0, 0);
+        ConfidenceGate bucketed = new ConfidenceGate(chatProperties(THRESHOLD, partial), retrieval(true));
+
+        // ChatProperties fills the blanks with its own defaults rather than with zero, so the
+        // fallback is a real threshold either way.
+        assertThat(bucketed.relevanceThreshold(QueryIntent.EXPLAIN)).isGreaterThan(0);
+        assertThat(bucketed.shouldRefuse(reranked(oneChunk(), 0.05, 0, QueryIntent.EXPLAIN))).isTrue();
+    }
+
+    // The cosine rule is deliberately not split. A raw cosine means something different for every
+    // question — the reason 12.2 stopped reading it — so three of them would be three numbers that
+    // each mean something different rather than one that does.
+    @Test
+    void theCosineRuleIsNotSplitByIntent() {
+        ConfidenceGate bucketed = new ConfidenceGate(chatProperties(THRESHOLD, buckets()), retrieval(true));
+
+        assertThat(bucketed.shouldRefuse(result(oneChunk(), 0.11, 0))).isTrue();
+        assertThat(bucketed.threshold()).isEqualTo(THRESHOLD);
+    }
+
+    private static ChatProperties.Intent buckets() {
+        return new ChatProperties.Intent(0.47, 0.30, 0.30);
+    }
+
+    private static RetrievalResult reranked(List<RetrievedChunk> chunks, double relevance,
+                                            int lexicalHits, QueryIntent intent) {
+        return new RetrievalResult(chunks, OptionalDouble.of(0.55), lexicalHits,
+                OptionalDouble.of(relevance), null, intent, false);
     }
 
     // A retrieval the rerank stage ran on. The cosine defaults to a value well above the old

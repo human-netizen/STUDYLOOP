@@ -22,6 +22,23 @@ public record RetrievalResult(
         // vector search ran at all. Handed back so a caller that needs the question's embedding
         // for something else (Phase 9.1 logs it for clustering) reuses this one instead of paying
         // the provider to embed the same string twice.
-        float[] queryVector
+        float[] queryVector,
+        // What kind of question this was (Phase 18.3), and whether a second retrieval pass ran for
+        // it (18.2).
+        //
+        // The intent rides on the *result* rather than being re-derived by the gate, because two
+        // things can produce it: a phrase match that costs nothing and runs on every question, and
+        // the expansion call, which is better and runs on about one in four. Retrieval is where
+        // both are known, so it is where the answer is settled — the gate reads one field instead
+        // of reimplementing a decision.
+        QueryIntent intent,
+        boolean expanded
 ) {
+
+    // Kept so the twenty-odd call sites written before Phase 18 still say what they meant: a
+    // retrieval with no intent classification and no second pass.
+    public RetrievalResult(List<RetrievedChunk> chunks, OptionalDouble topVectorSimilarity,
+                           int lexicalHitCount, OptionalDouble topRerankScore, float[] queryVector) {
+        this(chunks, topVectorSimilarity, lexicalHitCount, topRerankScore, queryVector, null, false);
+    }
 }

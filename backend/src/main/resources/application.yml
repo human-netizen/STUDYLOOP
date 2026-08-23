@@ -31,7 +31,27 @@ spring:
       # Set once per pooled connection rather than per query: it is a property of how this schema
       # is searched, not of one call site, and a `set local` before every search would put a round
       # trip to Supabase in front of every question.
-      connection-init-sql: "set hnsw.iterative_scan = relaxed_order"
+      #
+      # The second statement is Phase 18.1's, and it is here for the same reason. `<%` — the
+      # operator the trigram list matches with — reads its cut-off from
+      # `pg_trgm.word_similarity_threshold` and from nowhere else, because that is the only form
+      # the GIN index can answer: written as `word_similarity(term, text) >= 0.45` the same
+      # condition becomes a sequential scan computing trigram sets for every chunk in the course.
+      #
+      # 0.45 was measured against the eval corpus rather than picked by eye. Eighteen misspellings
+      # of words that are in it score 0.429 to 1.000, with only 'binery' below the line; twelve
+      # words that are in it in no spelling score 0.158 to 0.400, with two exceptions worth naming
+      # — 'typography' at 0.545 and 'protein' at 0.625, each admitting one to three chunks.
+      #
+      # **The two distributions overlap, so this number is a lean and not a boundary.** It leans
+      # permissive, because the two errors are not symmetric: a term that fails to match leaves
+      # this list empty and the typo unfixed, which is the entire failure the stage exists for,
+      # while a term that matches something irrelevant adds a candidate to a twenty-deep list that
+      # is fused by *rank* and then read by a cross-encoder. 'binery' is the documented miss, and
+      # the reason generalises — one substitution costs a six-letter word a third of its trigrams,
+      # so trigram matching weakens as words shorten, which is also why terms below four letters
+      # are not searched on at all.
+      connection-init-sql: "set hnsw.iterative_scan = relaxed_order; set pg_trgm.word_similarity_threshold = ${TRIGRAM_WORD_SIMILARITY:0.45}"
 
   jpa:
     hibernate:
@@ -132,6 +152,37 @@ studyloop:
     # ~0.010 of margin either side; the number rejected in Phase 12 had one thousandth.
     # 0 disables. Override with CHAT_MIN_RELEVANCE.
     min-relevance: ${CHAT_MIN_RELEVANCE:0.32}
+    # Phase 18.3 — the same gate, split by what the question was asking for. Read only when
+    # `studyloop.retrieval.stages.intent` is on; any bucket left at 0 falls back to min-relevance
+    # above, so a half-filled block is a half-applied policy rather than an open gate.
+    #
+    # Splitting the golden set three ways showed the flat number was an average of two populations
+    # that do not behave alike, and that it was being set by the harder of them:
+    #
+    #   bucket    weakest real question   strongest unanswerable   usable gap
+    #   lookup                    0.594                    0.347        0.247
+    #   explain                   0.331                    0.310        0.021
+    #   compare                   0.520          (none in the set)          —
+    #
+    # A lookup asks for one definite thing — a bound, a count, a name — and the corpus either states
+    # it or does not. The four unanswerable golden questions that scored highest were all of that
+    # shape (Kruskal, Timsort, union-find, the master theorem): each retrieves a passage about some
+    # *other* running time, which reads plausibly and scores 0.26-0.35, and two of them cleared the
+    # flat 0.32 and were answered from it.
+    intent:
+      # The midpoint of a 0.247-wide gap, so ~0.12 of margin either side. Phase 13's flat threshold
+      # had 0.010, and the difference is not a better model — it is that the two populations
+      # stopped being averaged together.
+      lookup: ${CHAT_MIN_RELEVANCE_LOOKUP:0.47}
+      # Unchanged, because this bucket is what the corpus-wide gate was calibrated on.
+      explain: ${CHAT_MIN_RELEVANCE_EXPLAIN:0.32}
+      # **Not lowered, which is this sub-phase's plan being corrected by its own measurement.** It
+      # was designed on the premise that comparison questions draw weaker scores and are
+      # over-refused; on this corpus the weakest one scores 0.520 and the golden set holds no
+      # unanswerable comparison at all, so there is nothing to calibrate against and nothing being
+      # wrongly refused. Comparison questions do fail here — on the *second* page they need, which
+      # is recall, and which no threshold on the top chunk's score can see.
+      compare: ${CHAT_MIN_RELEVANCE_COMPARE:0.32}
   retrieval:
     # Phase 11.3: one switch per retrieval stage, so an A/B against the golden set is a property
     # change rather than a code change. Two runs that differ by a rebuild are not comparable —
@@ -144,7 +195,12 @@ studyloop:
       # reproduce that baseline. A blank COHERE_API_KEY leaves it off whatever this says.
       rerank: ${RETRIEVAL_RERANK:true}
       hyde: ${RETRIEVAL_HYDE:false}
+      # Phase 18.1 — a fuzzy lexical list beside the lexeme one, so a misspelled word still finds
+      # its page. Off or on is decided by the eval run in the report, not by this comment.
       trigram: ${RETRIEVAL_TRIGRAM:false}
+      # Phase 18.3 — three confidence thresholds chosen by what the question asks for, instead of
+      # one for every question. The thresholds themselves are under `studyloop.chat.intent`.
+      intent: ${RETRIEVAL_INTENT:false}
       # On since Phase 17.3, and the run that earned it is an A/B over the same corpus with this
       # one property changed. On the same questions: Recall@6 0.939 to 0.942, MRR 0.813 to 0.838,
       # nDCG@6 0.828 to 0.843, refusals unchanged at 6/8 with no false refusal added. The category
@@ -190,6 +246,28 @@ studyloop:
       # chunks can only reorder six chunks — the passage RRF put eleventh is the one this stage
       # exists to promote. 30 is inside the 100 documents Cohere bills as one search unit.
       candidates: ${RETRIEVAL_RERANK_CANDIDATES:30}
+    # How the trigram stage runs when stages.trigram is on. The similarity cut-off is not here —
+    # it is `pg_trgm.word_similarity_threshold` on the datasource above, because that is the only
+    # place the index can read it from.
+    trigram:
+      # Distinctive words from the question that get their own index scan, longest first. A work
+      # ceiling rather than a quality setting: every golden question has fewer than this.
+      max-terms: ${TRIGRAM_MAX_TERMS:8}
+    # When the HyDE stage fires, not what it does. Nothing here changes the second pass; it decides
+    # which questions get one, which is the whole reason the stage is affordable at all — an
+    # unconditional rewrite would put a chat call and an embedding call in front of every stream.
+    hyde:
+      # The first pass's top cosine, below which the question earns a second pass. Read off the
+      # Phase 17 run rather than chosen: answerable questions scored 0.321-0.707 (avg 0.568) and
+      # unanswerable ones 0.306-0.457, so 0.45 fires on about a question in four — eight of the
+      # fifty-six answerable and seven of the eight unanswerable. That second number is the risk
+      # this stage carries and the reason 18.4's refusal count is the measurement that matters:
+      # these are the questions for which the model is being asked to write the passage it could
+      # not find, and the corpus genuinely does not contain it.
+      trigger-similarity: ${HYDE_TRIGGER_SIMILARITY:0.45}
+      # A question with no more content words than this gets a second pass whatever it scored.
+      # "Treaps?" is one term: one chance at whichever vocabulary the book happens to use.
+      short-query-terms: ${HYDE_SHORT_QUERY_TERMS:2}
   chunking:
     # Phase 13 — how a document is cut up at ingest. Not under retrieval.stages, and the difference
     # matters: a stage flag makes two pipelines comparable by restarting, and chunking cannot work

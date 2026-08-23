@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 //
 // Real Cohere and a real database, so it stays behind a system property and out of CI:
 //     ./mvnw -Deval.golden=true -Dtest=RetrievalEvalTest test
+// Add -Deval.typos=true to ask the same questions with one word in each misspelled (Phase 18.4).
 // Add -Deval.reset=true to rebuild the corpus from scratch. That is the right thing to do when the
 // ingestion pipeline itself changed — new chunker, new embedding model, new extraction — because
 // the chunks already in the database were produced by the old one, and a comparison against them
@@ -104,7 +105,13 @@ class RetrievalEvalTest {
             evalCorpus.reset();
         }
         EvalCorpus.Seeded corpus = evalCorpus.ensureSeeded();
-        GoldenSet golden = GoldenSet.load();
+        // -Deval.typos=true misspells one word in every question (Phase 18.4). It is the only way
+        // this harness can measure the trigram stage: every golden question is spelled correctly,
+        // so an A/B on `stages.trigram` over the set as written compares a pipeline against itself
+        // plus a list that mostly re-finds what the lexeme list already had. The benefit lives on
+        // input the set does not contain.
+        boolean misspelled = Boolean.getBoolean("eval.typos");
+        GoldenSet golden = misspelled ? GoldenSet.load().withTypos() : GoldenSet.load();
 
         // A document the golden set never accounted for changes what retrieval is choosing between,
         // which silently changes every number below. Cheap to check, impossible to spot afterwards.
@@ -112,10 +119,17 @@ class RetrievalEvalTest {
                 .as("the eval course holds documents that are not fixtures — run with -Deval.reset=true")
                 .isEmpty();
 
-        EvalReport report = new EvalReport(K, golden.pageTolerance(), confidenceGate.threshold(),
-                confidenceGate.relevanceThreshold(), retrievalProperties.stages().describe(), corpus);
+        // The gate itself rather than copies of its thresholds: Phase 18.3 gives it three, chosen
+        // per question, so a report holding its own copies would describe a policy nothing ran.
+        EvalReport report = new EvalReport(K, golden.pageTolerance(), confidenceGate,
+                retrievalProperties.stages().describe(), misspelled, corpus);
 
-        boolean paced = retrievalProperties.stages().rerank() && PACE_NANOS > 0;
+        // Paced when the rerank stage is on, and also when HyDE is: a trial key limits chat calls
+        // as tightly as rerank calls, and an unpaced expansion run fails open on most questions —
+        // which is the same MIXED RUN hazard the rerank fallback check below exists for, except
+        // that this one leaves no trace in the report beyond a trigger count nobody would question.
+        boolean paced = (retrievalProperties.stages().rerank() || retrievalProperties.stages().hyde())
+                && PACE_NANOS > 0;
         long nextSlot = System.nanoTime();
         for (GoldenQuestion question : golden.questions()) {
             if (paced) {
@@ -207,7 +221,8 @@ class RetrievalEvalTest {
 
         if (!question.answerable()) {
             return new EvalReport.Row(question, retrieved, 0.0, 0.0, 0.0,
-                    topSimilarity, topRelevance, result.lexicalHitCount(), visualHits, refused);
+                    topSimilarity, topRelevance, result.lexicalHitCount(), visualHits,
+                    result.intent(), result.expanded(), refused);
         }
 
         List<Double> gains = PageGrading.gradeSpans(retrieved, question.expected(), tolerance);
@@ -215,7 +230,8 @@ class RetrievalEvalTest {
                 RetrievalMetrics.recallAt(gains, question.totalRelevant()),
                 RetrievalMetrics.reciprocalRank(gains),
                 RetrievalMetrics.ndcgAt(gains, question.totalRelevant()),
-                topSimilarity, topRelevance, result.lexicalHitCount(), visualHits, refused);
+                topSimilarity, topRelevance, result.lexicalHitCount(), visualHits,
+                result.intent(), result.expanded(), refused);
     }
 
     // Waits until this question's slot in the rate limit comes round, and returns the next one.

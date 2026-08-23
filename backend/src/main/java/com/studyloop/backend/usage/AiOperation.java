@@ -28,6 +28,17 @@ public enum AiOperation {
     // Cross-encoder reranking of a retrieved candidate set (Phase 12.1). The only operation billed
     // per search rather than per token, so its rows carry a cost against zero tokens.
     RERANK,
+    // Rewriting a question the first retrieval pass answered weakly, and inventing the passage that
+    // would have answered it (Phase 18.2). The only chat call on the *retrieval* path rather than
+    // the generation path, which is precisely why it gets its own row: it is conditional, so what
+    // the dashboard has to be able to answer is "how often did that condition fire" — a cost that
+    // scales with how badly the corpus matches how students ask, not with how much they ask.
+    QUERY_EXPANSION,
+    // Embedding that invented passage (Phase 18.2). Kept apart from EMBED_QUERY because it is
+    // embedded as a *document* rather than as a query, and apart from EMBED_DOCUMENTS because it
+    // is paid on the request path while a student waits — the same distinction that decides
+    // whether a rate-limited embedding call is worth retrying.
+    EMBED_HYDE,
     // Generating the questions a section answers, at ingest (Phase 14.1). One call per batch of
     // sections, never on the request path — a student's question does not pay for this.
     SYNTHETIC_QUERIES,

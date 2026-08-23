@@ -1,6 +1,8 @@
 package com.studyloop.backend.chat;
 
 import com.studyloop.backend.config.ChatProperties;
+import com.studyloop.backend.config.RetrievalProperties;
+import com.studyloop.backend.retrieval.QueryIntent;
 import com.studyloop.backend.retrieval.RetrievalResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -28,11 +30,19 @@ import org.springframework.stereotype.Component;
 // score does have a fixed meaning, so one comparison is the whole rule and the escape hatch is not
 // merely unnecessary but wrong: its purpose was to rescue questions a weak embedding misjudged,
 // and a cross-encoder that has read the question has not misjudged it.
+//
+// Phase 18.3 splits the reranked rule three ways without changing its shape: still one comparison,
+// against a floor chosen by what the question was asking for. The reason is that one threshold over
+// every question was an average of populations that do not behave alike — a question with a
+// definite answer either has it in the corpus or does not, while an open question shades off — and
+// the average was being set by the harder population. The numbers, and which of the three buckets
+// actually moved, are in ChatProperties.Intent.
 @Component
 @RequiredArgsConstructor
 public class ConfidenceGate {
 
     private final ChatProperties chatProperties;
+    private final RetrievalProperties retrievalProperties;
 
     // Refuse when there is nothing to answer from at all, and otherwise on whichever confidence
     // signal retrieval produced. Either threshold set to 0 disables its own rule, leaving the
@@ -42,7 +52,7 @@ public class ConfidenceGate {
             return true;
         }
         if (retrieval.topRerankScore().isPresent()) {
-            double floor = relevanceThreshold();
+            double floor = relevanceThreshold(retrieval.intent());
             return floor > 0 && retrieval.topRerankScore().getAsDouble() < floor;
         }
 
@@ -68,5 +78,25 @@ public class ConfidenceGate {
 
     public double relevanceThreshold() {
         return chatProperties.minRelevance();
+    }
+
+    // The floor this question is actually held to (Phase 18.3). The corpus-wide number when the
+    // intent stage is off, when nothing classified the question, or when the bucket is unset.
+    //
+    // **Only the reranked rule is split.** The cosine rule below keeps one number, and not for lack
+    // of effort: a raw cosine has no fixed meaning across questions, which is the whole reason
+    // Phase 12.2 replaced it, so cutting it into three would be calibrating three numbers that each
+    // mean something different per question rather than one that does.
+    public double relevanceThreshold(QueryIntent intent) {
+        if (intent == null || !retrievalProperties.stages().intent()) {
+            return chatProperties.minRelevance();
+        }
+        ChatProperties.Intent buckets = chatProperties.intent();
+        double floor = switch (intent) {
+            case LOOKUP -> buckets.lookup();
+            case COMPARE -> buckets.compare();
+            case EXPLAIN -> buckets.explain();
+        };
+        return floor > 0 ? floor : chatProperties.minRelevance();
     }
 }

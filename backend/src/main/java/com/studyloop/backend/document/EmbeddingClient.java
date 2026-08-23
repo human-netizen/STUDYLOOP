@@ -23,6 +23,25 @@ public interface EmbeddingClient {
         return vectors.get(0);
     }
 
+    // Embeds a hypothetical answer — a passage the model invented, not a question (Phase 18.2).
+    //
+    // It exists because `embedQuery` is the wrong call and `embed` is the wrong call, for two
+    // different reasons. A HyDE pseudo-document is compared against real documents, so it has to be
+    // embedded the way documents are (`search_document` on Cohere): embedded as a query it would
+    // sit in the part of the space questions occupy, which is the one thing this technique is
+    // trying to get out of. And `embed` is the ingestion path, which sleeps and retries through a
+    // rate limit because nobody is waiting on it — here somebody is, in front of a stream.
+    //
+    // Defaulted to the plain document embedding, so a provider that draws no distinction between
+    // the two input types needs no override and simply gets the ordinary behaviour.
+    default float[] embedPseudoDocument(String text) {
+        List<float[]> vectors = embed(List.of(text));
+        if (vectors.isEmpty()) {
+            throw new EmbeddingException("Hypothetical answer produced no embedding.");
+        }
+        return vectors.get(0);
+    }
+
     // Whether this provider puts images in the same vector space as text (Phase 17.1).
     //
     // Defaulted to false so the two providers that cannot — Google's text-embedding-004 and a

@@ -149,6 +149,16 @@ it is handed; adding the third one was a caller change.
 Cohere `rerank-v3.5` then reads the question against each of 30 candidates. Reranking six chunks can
 only reorder six; the passage RRF put eleventh is the one this stage exists to promote.
 
+The sparse half is weaker than that description makes it sound, and the measurement is recent.
+`plainto_tsquery` joins a question's words with AND, so a chunk has to contain all of them; on the
+fourteen-chapter evaluation corpus that means it returns nothing at all for 46 of 56 questions, and
+the dense half has been carrying those on its own. A trigram retriever that ORs the same terms
+scores 0.851 against its 0.116 on the same pages. Both that retriever and two other query-side
+stages — a conditional HyDE second pass, and refusal thresholds chosen by question type — are built
+and tested behind flags in `RetrievalProperties.Stages`, and all three are switched **off**: the
+evaluation run that would justify enabling any of them has not been made, and a stage without its
+run does not ship on.
+
 Every vector search here is a filtered one, scoped to a course, to ready documents, to what the
 asking member may see, and to a modality. An HNSW index knows none of that: it returns its nearest
 neighbours and the filters run on what it already chose, so a course whose pages are not in the
@@ -307,16 +317,16 @@ graph TB
         SEC["<b>1 · Security filter chain</b><br/>CORS → JWT verify → authorize → @PreAuthorize"]
         WEB["<b>2 · Web layer</b> @RestController<br/>HTTP shape only, zero business rules"]
         SVC["<b>3 · Service layer</b> @Service<br/>business rules, the @Transactional boundary"]
-        REPO["<b>4 · Persistence</b><br/>Spring Data JPA + native SQL where JPQL cannot reach"]
-        PORT["<b>5 · Provider ports</b><br/>interfaces, so no service names a vendor<br/>EmbeddingClient · ChatClient · RerankClient · VisionClient · DocumentExtractor"]
-        CROSS["<b>cross-cutting</b> · GlobalExceptionHandler · AsyncConfig<br/>@ConfigurationProperties · AiUsageLedger"]
+        REPO["<b>4 · Persistence</b><br/>Spring Data JPA + native SQL<br/>where JPQL cannot reach"]
+        PORT["<b>5 · Provider ports</b><br/>interfaces, so no service names a vendor<br/>EmbeddingClient · ChatClient · RerankClient<br/>VisionClient · DocumentExtractor"]
+        CROSS["<b>cross-cutting</b><br/>GlobalExceptionHandler · AsyncConfig<br/>@ConfigurationProperties · AiUsageLedger"]
         SEC --> WEB --> SVC
         SVC --> REPO
         SVC --> PORT
     end
 
     subgraph INFRA["INFRASTRUCTURE"]
-        PG[("PostgreSQL + pgvector on Supabase<br/>21 Flyway migrations · HNSW cosine · GIN tsvector")]
+        PG[("PostgreSQL + pgvector on Supabase<br/>21 Flyway migrations<br/>HNSW cosine · GIN tsvector")]
         FS[("Filesystem<br/>bytes at courseId/sha256")]
         AI["Cohere: embed-v4.0 · rerank-v3.5 · Command R<br/>Google: Gemini 2.5 Flash vision<br/>Ollama: offline"]
     end
@@ -330,7 +340,7 @@ graph TB
 ### Ingestion pipeline
 
 ```mermaid
-flowchart LR
+flowchart TD
     U["Upload<br/>pdf · pptx · docx · png/jpg"] --> R{"DocumentExtractors<br/>routes on content type"}
     R -->|pdf| P["PDFBox per page<br/>+ 4-signal quality gate"]
     P -.->|"only the pages<br/>it got wrong"| V["Gemini 2.5 Flash"]
@@ -350,7 +360,7 @@ flowchart LR
 ### Query pipeline
 
 ```mermaid
-flowchart LR
+flowchart TD
     Q["Question"] --> CACHE{"semantic<br/>cache hit?"}
     CACHE -->|yes| OUT["Streamed answer, every claim<br/>cited back to its page"]
     CACHE -->|no| VS["Dense: pgvector cosine<br/>top 20"]
@@ -492,6 +502,12 @@ Nothing in a picture is read. A page with a figure on it is now findable as a pi
 answer written from it still comes from the words on that page: the model is told which page to
 look at and is not shown what is drawn there.
 
+Half of hybrid search is mostly idle. As above, `plainto_tsquery`'s AND semantics leave the keyword
+list empty for most natural-language questions, so the published Recall@6 figures are in practice
+dense-only on four questions in five. The fix is a one-line change to the query form; it is not made
+yet because changing a retriever moves every baseline number, and the run that would measure it is
+waiting on API quota.
+
 Bangla is unreliable. Bangla PDFs frequently extract as garbage, so answers over them are not
 trustworthy yet.
 
@@ -506,7 +522,8 @@ one.
 
 | Area | Work |
 |---|---|
-| **Query understanding** | Trigram matching for typos, conditional multi-query and HyDE, intent-conditional thresholds, with a refusal alarm so recall gains cannot quietly buy hallucinations |
+| **Query understanding** | Built and behind flags, awaiting the run that decides whether to enable it: trigram matching for typos, a conditional HyDE second pass, and refusal thresholds per question type. Replayed against the last published run, the thresholds refuse 8 of 8 unanswerable questions instead of 6, with no real question refused |
+| **The keyword half** | Replace the AND-joined `plainto_tsquery` with a form that ranks by how many terms matched, and re-measure every baseline against it |
 | **Bangla end to end** | Detected on upload, searched with the right language rules, answered in Bangla with citations |
 | **Knowledge loop, round two** | Uploading a document goes back and answers the questions the corpus previously could not |
 | **Study guides** | A cited, exportable revision guide generated for any topic, with diagrams |

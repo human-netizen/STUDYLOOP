@@ -35,7 +35,7 @@ class SyntheticQueryTest {
 
     private SyntheticQueryGenerator generator(boolean stageOn, SyntheticQueries settings) {
         RetrievalProperties retrieval = new RetrievalProperties(
-                new Stages(false, false, false, false, stageOn), null);
+                new Stages(false, false, false, false, false, stageOn), null, null, null);
         ChunkingProperties chunking =
                 new ChunkingProperties(500, 120, true, 400, true, true, 1_200, settings);
         return new SyntheticQueryGenerator(retrieval, chunking, chat, tokens);

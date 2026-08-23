@@ -113,6 +113,22 @@ public class CohereEmbeddingClient implements EmbeddingClient {
         return embedBatch(List.of(text), "search_query", AiOperation.EMBED_QUERY).get(0);
     }
 
+    // Phase 18.2 — `search_document`, deliberately, for a string no document contains. The point of
+    // a hypothetical answer is that it is shaped like the passage being looked for, so it has to be
+    // embedded the way that passage was; embedding it as a query would put it back among the
+    // questions and undo the technique.
+    //
+    // No retry, for the same reason `embedQuery` has none: this is on the request path, and a
+    // minute asleep waiting out a rate limit is worse than the weaker result of skipping the stage.
+    // The retry gate keys on the operation, so passing EMBED_HYDE is what switches it off.
+    @Override
+    public float[] embedPseudoDocument(String text) {
+        if (!isConfigured()) {
+            throw new EmbeddingException("Cohere embedding API key is not configured.");
+        }
+        return embedBatch(List.of(text), "search_document", AiOperation.EMBED_HYDE).get(0);
+    }
+
     // Phase 17.1 — embed-v4.0 takes pictures, and it takes them into the space it already puts text
     // in. That sentence is the whole feature: no second provider, no second key, no second column,
     // no dimension change, no new index, and no separate query embedding — the question a student
