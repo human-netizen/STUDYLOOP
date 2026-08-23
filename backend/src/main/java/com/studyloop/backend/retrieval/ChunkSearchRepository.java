@@ -214,10 +214,53 @@ class ChunkSearchRepository {
                 """.formatted(score, filter), TEXT_MAPPER, args.toArray());
     }
 
+    // Every content word the question has, OR-ed instead of AND-ed (Phase 19.2).
+    //
+    // `plainto_tsquery` joins a question's words with `&`, so a chunk has to contain *all* of them.
+    // On the fourteen-chapter evaluation corpus that is 1 chunk out of 282 for a typical question
+    // and nothing at all for 46 of the 56 answerable ones — the lexical half of "hybrid" retrieval
+    // has been silently empty for most questions since Phase 5, and the dense half has carried
+    // them. This form takes `plainto_tsquery`'s own output — already parsed, stemmed and
+    // stopword-stripped — and swaps its operators, which is a safe rewrite precisely because
+    // `plainto_tsquery` emits nothing but `&`: no phrases, no negation, no weights.
+    //
+    // **Nothing is lost by relaxing the filter, because the filter was never what ranked.**
+    // `ts_rank` already scores by how many of the query's lexemes a chunk carries and how often —
+    // 0.041 for a passage matching five of six terms against 0.010 for one matching a single term,
+    // measured on this database. AND-ing made that ranking almost unreachable: it threw away every
+    // partial match before the ranking function saw it. The OR form matches 224 of 282 chunks and
+    // then puts the right ones at the top, which is what a `limit 20` sparse retriever is for — and
+    // it works: graded against the golden pages, sparse recall@6 goes from **0.116 to 0.884**, with
+    // candidates returned for 56 questions out of 56 instead of 10.
+    //
+    // **It matters more for Bangla than for English, which is why it lands in this phase.** The
+    // English stopword list is what saves the AND form on an English question: "what", "is", "the"
+    // and "does" are dropped before the `&`s are inserted. That list is ASCII, so no Bangla
+    // function word is in it — "কি", "কেন", "কীভাবে" all survive into the query and every one of
+    // them has to appear in the chunk. A Bangla question therefore ANDs *more* terms than an
+    // English one of the same length, including the ones carrying no meaning.
+    //
+    // Off by default all the same (`studyloop.retrieval.stages.lexical-or`): this changes what the
+    // sparse half returns for every question in every language, so it moves every published
+    // baseline, and 11.3's rule is that the switch and the run that justifies it are two events.
+    private static final String ANY_TERM_TSQUERY =
+            "replace(plainto_tsquery('english', ?)::text, ' & ', ' | ')::tsquery";
+
     // Lexical matches ranked by ts_rank over the generated content_tsv column (GIN-indexed).
-    // plainto_tsquery treats the query as plain words AND-ed together, so only chunks sharing
-    // vocabulary with the query come back.
     List<ChunkHit> fullTextSearch(UUID courseId, UUID actorId, String query, int limit) {
+        return fullTextSearch(courseId, actorId, query, limit, false);
+    }
+
+    // `anyTerm` picks between the two query forms above. A parameter rather than a property read
+    // here because this class is the one layer that must not have an opinion about pipeline
+    // configuration — it is asked for a ranked list and says how one is obtained.
+    List<ChunkHit> fullTextSearch(UUID courseId, UUID actorId, String query, int limit,
+                                  boolean anyTerm) {
+        String tsquery = anyTerm ? ANY_TERM_TSQUERY : "plainto_tsquery('english', ?)";
+        // %1$s twice, one bound parameter each: the filter and the ranking function have to be
+        // given the same query, and writing it once is what makes that structural rather than a
+        // thing to remember. An empty tsquery — a question of nothing but stopwords — matches no
+        // row under either form, which is the correct answer and not an error.
         return jdbc.query("""
                 select c.id, c.document_id, d.filename, d.source, c.page_number, c.page_end,
                        c.section_path, c.content, c.token_count, c.modality
@@ -227,9 +270,9 @@ class ChunkSearchRepository {
                   and d.status = 'READY'
                   and (d.visibility = 'COURSE' or d.uploaded_by = ?)
                   and c.modality = 'TEXT'
-                  and c.content_tsv @@ plainto_tsquery('english', ?)
-                order by ts_rank(c.content_tsv, plainto_tsquery('english', ?)) desc
+                  and c.content_tsv @@ %1$s
+                order by ts_rank(c.content_tsv, %1$s) desc
                 limit ?
-                """, TEXT_MAPPER, courseId, actorId, query, query, limit);
+                """.formatted(tsquery), TEXT_MAPPER, courseId, actorId, query, query, limit);
     }
 }

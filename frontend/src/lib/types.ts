@@ -74,6 +74,11 @@ export type DocumentStatus =
   | 'READY'
   | 'FAILED'
 
+// What language a document's text is written in (Phase 19.1). Two values because the backend
+// detects two scripts — it is a fact about the encoding rather than a guess, and a wider union
+// would be claiming a precision nothing produces.
+export type DocumentLanguage = 'ENGLISH' | 'BANGLA'
+
 export interface DocumentResponse {
   id: string
   courseId: string
@@ -85,6 +90,9 @@ export interface DocumentResponse {
   // Present only when status is FAILED.
   errorMessage: string | null
   pageCount: number | null
+  // ENGLISH until extraction has run, and ENGLISH afterwards for everything the detector found no
+  // Bengali script in — never null and never unknown.
+  language: DocumentLanguage
   uploadedById: string
   createdAt: string
   updatedAt: string

@@ -71,10 +71,16 @@ class LexicalTypoEvalTest {
 
         Result lexemeClean = run(corpus, clean, Retriever.LEXEME);
         Result lexemeTypo = run(corpus, misspelled, Retriever.LEXEME);
+        // Phase 19.2's form of the same query, on the same pages. The third row is what makes the
+        // first one a *defect* rather than a property of term matching: the difference between them
+        // is one operator, and nothing else about the retriever changes.
+        Result orClean = run(corpus, clean, Retriever.LEXEME_OR);
+        Result orTypo = run(corpus, misspelled, Retriever.LEXEME_OR);
         Result trigramClean = run(corpus, clean, Retriever.TRIGRAM);
         Result trigramTypo = run(corpus, misspelled, Retriever.TRIGRAM);
 
-        String rendered = render(corpus, lexemeClean, lexemeTypo, trigramClean, trigramTypo);
+        String rendered = render(corpus, lexemeClean, lexemeTypo, orClean, orTypo,
+                trigramClean, trigramTypo);
         System.out.println(rendered);
         System.out.println("report written to " + save(rendered).toAbsolutePath() + "\n");
 
@@ -105,12 +111,16 @@ class LexicalTypoEvalTest {
         // even before anything is misspelled.
         assertThat(trigramTypo.questionsWithNoHits()).isZero();
         assertThat(trigramClean.recall()).isGreaterThan(lexemeClean.recall());
+        // 19.2's repair, measured on the English set rather than argued from the Bangla one. Both
+        // are relationships rather than numbers: the operator is what is under test.
+        assertThat(orClean.questionsWithNoHits()).isLessThan(lexemeClean.questionsWithNoHits());
+        assertThat(orClean.recall()).isGreaterThan(lexemeClean.recall());
         assertThat(trigramTypo.recall())
                 .as("the trigram list should lose little to a single transposition")
                 .isGreaterThan(trigramClean.recall() * 0.8);
     }
 
-    private enum Retriever { LEXEME, TRIGRAM }
+    private enum Retriever { LEXEME, LEXEME_OR, TRIGRAM }
 
     private record Result(String label, int questions, int questionsWithNoHits,
                           double recall, double mrr) { }
@@ -123,6 +133,8 @@ class LexicalTypoEvalTest {
             List<ChunkHit> hits = switch (retriever) {
                 case LEXEME -> searchRepository.fullTextSearch(
                         corpus.courseId(), corpus.actorId(), question.question(), K);
+                case LEXEME_OR -> searchRepository.fullTextSearch(
+                        corpus.courseId(), corpus.actorId(), question.question(), K, true);
                 case TRIGRAM -> {
                     List<String> terms = QueryTerms.of(question.question(), 8);
                     yield terms.isEmpty() ? List.of() : searchRepository.trigramSearch(
@@ -137,8 +149,8 @@ class LexicalTypoEvalTest {
             recalls.add(RetrievalMetrics.recallAt(gains, question.totalRelevant()));
             reciprocals.add(RetrievalMetrics.reciprocalRank(gains));
         }
-        return new Result(retriever.name().toLowerCase(Locale.ROOT), recalls.size(), empty,
-                mean(recalls), mean(reciprocals));
+        return new Result(retriever.name().toLowerCase(Locale.ROOT).replace('_', ' '),
+                recalls.size(), empty, mean(recalls), mean(reciprocals));
     }
 
     // The same mapping the golden harness uses: a chunk from a document this corpus did not seed, or
@@ -164,7 +176,8 @@ class LexicalTypoEvalTest {
                 .formatted());
         out.append(String.format(Locale.ROOT, "%-12s %-12s %8s %8s %10s%n",
                 "retriever", "spelling", "recall", "MRR", "no hits"));
-        String[] spelling = {"correct", "misspelled", "correct", "misspelled"};
+        String[] spelling = {"correct", "misspelled", "correct", "misspelled",
+                "correct", "misspelled"};
         for (int i = 0; i < results.length; i++) {
             Result result = results[i];
             out.append(String.format(Locale.ROOT, "%-12s %-12s %8.3f %8.3f %6d/%-3d%n",

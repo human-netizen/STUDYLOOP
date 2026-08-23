@@ -48,14 +48,14 @@ class RetrievalPropertiesTest {
 
     @Test
     void describesEveryStageSoAReportCanSayWhatProducedIt() {
-        String described = new Stages(true, false, false, false, false, false).describe();
+        String described = new Stages(true, false, false, false, false, false, false).describe();
         assertThat(described).contains("rerank=ON").contains("hyde=off")
-                .contains("trigram=off").contains("visual=off").contains("intent=off")
-                .contains("synthetic-queries=off");
+                .contains("trigram=off").contains("lexical-or=off").contains("visual=off")
+                .contains("intent=off").contains("synthetic-queries=off");
     }
 
     @Test
     void anyEnabledIsTrueAsSoonAsOneStageIsOn() {
-        assertThat(new Stages(false, false, false, false, false, true).anyEnabled()).isTrue();
+        assertThat(new Stages(false, false, false, false, false, false, true).anyEnabled()).isTrue();
     }
 }

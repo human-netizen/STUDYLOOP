@@ -123,6 +123,16 @@ public record RetrievalProperties(Stages stages, Rerank rerank, Trigram trigram,
             // Phase 18.1: trigram similarity as a second lexical retriever, for the typos that
             // empty the lexeme one.
             boolean trigram,
+            // Phase 19.2: OR the question's content words instead of AND-ing them, so a chunk
+            // carrying most of them is a candidate ranked below one carrying all of them, rather
+            // than not a candidate at all.
+            //
+            // The only switch here that repairs an existing retriever rather than adding one, and
+            // the only one whose "off" state is a measured defect rather than a baseline: the AND
+            // form returns nothing for 46 of the 56 answerable golden questions. It is off anyway,
+            // because turning it on moves every number this project has published and that is a
+            // change to make with a run in hand.
+            boolean lexicalOr,
             // Phase 17.3: page images embedded into the text vector space, fused as a third ranked
             // list, for the figures text extraction cannot see.
             //
@@ -150,19 +160,20 @@ public record RetrievalProperties(Stages stages, Rerank rerank, Trigram trigram,
     ) {
 
         public static Stages allOff() {
-            return new Stages(false, false, false, false, false, false);
+            return new Stages(false, false, false, false, false, false, false);
         }
 
         // Printed in the header of every eval report. A report that does not say which pipeline
         // produced it cannot be compared with another one, and the flags are that statement.
         public String describe() {
-            return "rerank=%s  hyde=%s  trigram=%s  visual=%s  intent=%s  synthetic-queries=%s"
-                    .formatted(state(rerank), state(hyde), state(trigram), state(visual),
-                            state(intent), state(syntheticQueries));
+            return ("rerank=%s  hyde=%s  trigram=%s  lexical-or=%s  visual=%s  intent=%s  "
+                    + "synthetic-queries=%s")
+                    .formatted(state(rerank), state(hyde), state(trigram), state(lexicalOr),
+                            state(visual), state(intent), state(syntheticQueries));
         }
 
         public boolean anyEnabled() {
-            return rerank || hyde || trigram || visual || intent || syntheticQueries;
+            return rerank || hyde || trigram || lexicalOr || visual || intent || syntheticQueries;
         }
 
         private static String state(boolean enabled) {

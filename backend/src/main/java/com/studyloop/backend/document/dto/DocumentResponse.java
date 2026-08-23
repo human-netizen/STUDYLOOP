@@ -2,6 +2,7 @@ package com.studyloop.backend.document.dto;
 
 import com.studyloop.backend.document.Document;
 import com.studyloop.backend.document.DocumentStatus;
+import com.studyloop.backend.document.Language;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -19,6 +20,9 @@ public record DocumentResponse(
         // Non-null only when status is FAILED — the reason ingestion stopped.
         String errorMessage,
         Integer pageCount,
+        // Phase 19.1. ENGLISH until extraction has run, and ENGLISH afterwards for everything the
+        // detector did not find Bengali script in — so this is never null and never unknown.
+        Language language,
         UUID uploadedById,
         Instant createdAt,
         Instant updatedAt
@@ -37,6 +41,7 @@ public record DocumentResponse(
                 document.getStatus(),
                 document.getErrorMessage(),
                 document.getPageCount(),
+                document.getLanguage(),
                 document.getUploadedBy().getId(),
                 document.getCreatedAt(),
                 document.getUpdatedAt()

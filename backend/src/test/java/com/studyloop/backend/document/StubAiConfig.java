@@ -304,6 +304,11 @@ public class StubAiConfig {
                 "Dynamic programming combines subproblem solutions [1].";
 
         public final AtomicInteger calls = new AtomicInteger();
+        // What the last call was actually given. The class was already called Recording and only
+        // counted — which is enough for "did the provider get called" and nothing for "what was it
+        // told". Phase 19.3's system prompt is a per-question string, so the only way to assert on
+        // it is to keep the messages.
+        public volatile List<LlmMessage> lastMessages = List.of();
         public volatile String nextJson = DEFAULT_JSON;
         public volatile String nextAnswer = DEFAULT_ANSWER;
         // One-shot: the next call throws, and the one after that succeeds again. Lets a test say
@@ -312,9 +317,20 @@ public class StubAiConfig {
 
         public void reset() {
             calls.set(0);
+            lastMessages = List.of();
             nextJson = DEFAULT_JSON;
             nextAnswer = DEFAULT_ANSWER;
             failNext = false;
+        }
+
+        // The system message of the last call, or null if there was none. Every prompt this
+        // application builds puts its instructions there, so this is the string under test.
+        public String lastSystemPrompt() {
+            return lastMessages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(LlmMessage::content)
+                    .findFirst()
+                    .orElse(null);
         }
 
         @Override
@@ -324,26 +340,27 @@ public class StubAiConfig {
 
         @Override
         public String complete(List<LlmMessage> messages) {
-            countCall();
+            countCall(messages);
             return nextAnswer;
         }
 
         @Override
         public String completeJson(List<LlmMessage> messages) {
-            countCall();
+            countCall(messages);
             return nextJson;
         }
 
         @Override
         public String streamComplete(List<LlmMessage> messages, Consumer<String> onDelta) {
-            countCall();
+            countCall(messages);
             onDelta.accept(nextAnswer);
             return nextAnswer;
         }
 
         // Every provider entry point runs through here, so `calls` counts calls that reached the
         // provider regardless of which shape was asked for.
-        private void countCall() {
+        private void countCall(List<LlmMessage> messages) {
+            lastMessages = messages == null ? List.of() : List.copyOf(messages);
             calls.incrementAndGet();
             if (failNext) {
                 failNext = false;

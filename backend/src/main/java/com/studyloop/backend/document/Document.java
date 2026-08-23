@@ -77,6 +77,14 @@ public class Document {
     @Column(nullable = false, length = 20)
     private DocumentVisibility visibility = DocumentVisibility.COURSE;
 
+    // What language the extracted text is written in (Phase 19.1), decided by counting scripts
+    // once the extractor has produced pages. Defaulted here as well as in the DDL, because a
+    // Document built in code and never ingested — an accepted forum answer, a test fixture — has
+    // no extracted text to detect from and English is what it was before this column existed.
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Language language = Language.ENGLISH;
+
     // Filled by the extraction step (Phase 4.3); null until then.
     @Column(name = "page_count")
     private Integer pageCount;

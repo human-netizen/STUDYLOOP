@@ -25,6 +25,7 @@ public class DocumentIngestionService {
     private final DocumentStatusService statusService;
     private final DocumentExtractors extractors;
     private final DocumentNoteBlockService noteBlockService;
+    private final LanguageDetector languageDetector;
     private final TextChunker textChunker;
     private final VisualChunker visualChunker;
     private final SyntheticQueryGenerator syntheticQueryGenerator;
@@ -55,6 +56,12 @@ public class DocumentIngestionService {
             Extraction extraction = extractors.extract(
                     document.getContentType(), document.getFilename(), bytes);
             List<PageText> pages = extraction.pages();
+
+            // 19.1, and here rather than at upload because a PDF's bytes say nothing about what
+            // language is inside it — the extractor is the first step that has text at all. It is
+            // also before chunking rather than after, so a Bangla document is already labelled by
+            // the time anything downstream asks.
+            statusService.markLanguage(documentId, languageDetector.detect(joinedText(pages)));
 
             statusService.markStatus(documentId, DocumentStatus.CHUNKING);
             String title = titleOf(document);
@@ -94,6 +101,21 @@ public class DocumentIngestionService {
         // most of all the refusals, which this document may well have just made answerable.
         semanticCache.invalidate(courseId);
         summarizeQuietly(courseId, documentId);
+    }
+
+    // Every page's text as one string, for the one question asked of it: which script is this
+    // written in. Joined rather than sampled from the first page because a scanned book's first
+    // page is a cover, and joined with newlines rather than concatenated because the detector
+    // counts letters and would otherwise weld the last word of each page to the first of the next
+    // — harmless for the count, and wrong for anything that later wants to reuse this.
+    private static String joinedText(List<PageText> pages) {
+        StringBuilder text = new StringBuilder();
+        for (PageText page : pages) {
+            if (page.text() != null) {
+                text.append(page.text()).append('\n');
+            }
+        }
+        return text.toString();
     }
 
     // Half of a chunk's context header (13.4), and the only half a document with no headings has.

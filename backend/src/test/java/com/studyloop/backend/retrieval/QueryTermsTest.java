@@ -56,6 +56,29 @@ class QueryTermsTest {
     }
 
     @Test
+    void aBengaliWordSurvivesItsOwnVowelSigns() {
+        // **Phase 19.2's repair, and the failure it repairs was total.** A Bengali vowel sign is a
+        // combining mark, not a letter, so the old boundary — "anything that is not a letter or a
+        // digit" — treated every vowel in a Bangla word as punctuation. "কুইকসর্টের" came apart into
+        // five fragments, four of them under the length floor, and a whole Bangla question produced
+        // one meaningless syllable. Measured on the Bangla fixture, the trigram list returned
+        // nothing for nine questions in ten because of this one character class.
+        assertThat(QueryTerms.of("কুইকসর্টের সবচেয়ে খারাপ ক্ষেত্রে সময় জটিলতা কত?", 8))
+                .contains("কুইকসর্টের", "সবচেয়ে", "ক্ষেত্রে", "জটিলতা")
+                // The length floor still does its job: Bangla's question words are short.
+                .doesNotContain("কত");
+    }
+
+    @Test
+    void englishSplittingIsUnchangedByTheMarkRule() {
+        // The regression guard for that character class. English text is written with precomposed
+        // accents, so it contains essentially no combining marks for the new rule to reclassify —
+        // and a hyphen, a bracket and a full stop are all still boundaries.
+        assertThat(QueryTerms.of("naïve résumé parsing of the café menu", 8))
+                .containsExactlyInAnyOrder("parsing", "naïve", "résumé", "café", "menu");
+    }
+
+    @Test
     void splitsOnPunctuationAndNotationSoAFormulaContributesNothing() {
         // "O(log n)" contributes nothing, and "red-black" contributes only "black" — the hyphen
         // splits it and "red" is under the length floor. A real cost of splitting on punctuation,

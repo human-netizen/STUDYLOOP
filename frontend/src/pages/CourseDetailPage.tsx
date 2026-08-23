@@ -290,6 +290,9 @@ function DocumentRow({ courseId, document }: { courseId: string; document: Docum
           <Meta>
             {formatBytes(document.sizeBytes)}
             {document.pageCount != null && ` · ${document.pageCount} pages`}
+            {/* Shown only when it is not the default: a row that says "English" on every English
+                document is a column of noise, and the useful signal is that this one is not. */}
+            {document.language === 'BANGLA' && ' · বাংলা'}
           </Meta>
           {document.status === 'FAILED' && document.errorMessage && (
             <p className="m-0 mt-1 text-[12px] text-bad">{document.errorMessage}</p>

@@ -125,7 +125,7 @@ class RerankStageTest {
     @Test
     void aStageWithNoApiKeyIsOffHoweverTheSwitchIsSet() {
         RerankStage stage = new RerankStage(
-                new RetrievalProperties(new Stages(true, false, false, false, false, false),
+                new RetrievalProperties(new Stages(true, false, false, false, false, false, false),
                         new Rerank(" ", null, 0), null, null),
                 new StubRerankClient(false, alwaysReverses()));
 
@@ -149,7 +149,7 @@ class RerankStageTest {
 
     private static RerankStage stage(boolean on, RerankFunction rerank) {
         return new RerankStage(
-                new RetrievalProperties(new Stages(on, false, false, false, false, false),
+                new RetrievalProperties(new Stages(on, false, false, false, false, false, false),
                         new Rerank("key", null, 0), null, null),
                 new StubRerankClient(true, rerank));
     }

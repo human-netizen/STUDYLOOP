@@ -1,5 +1,6 @@
 package com.studyloop.backend.retrieval;
 
+import com.studyloop.backend.config.RetrievalProperties;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.document.EmbeddingClient;
 import com.studyloop.backend.document.VectorSupport;
@@ -49,6 +50,7 @@ public class RetrievalService {
     private static final int DEFAULT_LIMIT = 6;
     private static final int MAX_LIMIT = 20;
 
+    private final RetrievalProperties properties;
     private final CourseAccess courseAccess;
     private final EmbeddingClient embeddingClient;
     private final ChunkSearchRepository searchRepository;
@@ -103,8 +105,11 @@ public class RetrievalService {
         // this course may be searched at all, and Phase 16.3's visibility decides which of its
         // documents this member may be answered from. A private note is retrievable for the person
         // who photographed it and invisible to everyone else, in one clause inside the SQL.
-        List<ChunkHit> textHits =
-                searchRepository.fullTextSearch(courseId, actorId, trimmed, CANDIDATES_PER_SOURCE);
+        // 19.2's switch is here rather than inside the repository: which form the sparse half
+        // takes is a pipeline decision, and the eval report's header prints it beside the stages
+        // so that two runs can be told apart by what produced them.
+        List<ChunkHit> textHits = searchRepository.fullTextSearch(
+                courseId, actorId, trimmed, CANDIDATES_PER_SOURCE, properties.stages().lexicalOr());
 
         // Vector hits come back best-first, so the head is the strongest semantic match. Empty
         // when no embedding provider ran, which the gate reads as "no semantic signal".

@@ -140,7 +140,7 @@ class ConfidenceGateTest {
 
     private static RetrievalProperties retrieval(boolean intentStage) {
         return new RetrievalProperties(
-                new Stages(false, false, false, false, intentStage, false), null, null, null);
+                new Stages(false, false, false, false, false, intentStage, false), null, null, null);
     }
 
     private static RetrievalResult result(List<RetrievedChunk> chunks, Double topSimilarity, int lexicalHits) {

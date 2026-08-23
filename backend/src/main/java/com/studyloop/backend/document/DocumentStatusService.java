@@ -27,6 +27,18 @@ public class DocumentStatusService {
         document.setErrorMessage(null);
     }
 
+    // Phase 19.1, and a separate write from markStatus rather than a parameter on it because the
+    // two answer to different things: status is where the pipeline is, language is what it found.
+    // It lands in its own transaction for the same reason every other write here does — a client
+    // polling the document sees the language as soon as extraction has finished, not after the
+    // embedding pass it has nothing to do with.
+    @Transactional
+    public void markLanguage(UUID documentId, Language language) {
+        Document document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        document.setLanguage(language);
+    }
+
     // Terminal failure: records the reason (truncated to fit the column) for the client.
     @Transactional
     public void markFailed(UUID documentId, String reason) {

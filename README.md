@@ -54,7 +54,7 @@ are embedded back into the corpus.
 
 ## 2. Feature set
 
-Twenty-one Flyway migrations and 426 backend tests, the integration ones running against a real
+Twenty-three Flyway migrations and 500 backend tests, the integration ones running against a real
 Postgres with pgvector rather than an in-memory stand-in.
 
 | Capability | What it does |
@@ -65,7 +65,8 @@ Postgres with pgvector rather than an in-memory stand-in.
 | **Handwritten notes** | Photograph a page and it becomes a document like any other. Private to you until a manager promotes it to the course. |
 | **Grounded answers** | Hybrid retrieval, then rerank, then section expansion, then a streamed answer with `[n]` citations and conversation memory. |
 | **Figures are searchable** | Pages carrying a diagram or a table are embedded as pictures into the same vector space as the text, so a question about a drawing finds the page it is on. |
-| **Refusal** | Below the relevance gate, StudyLoop says *"not in your materials"* instead of guessing. |
+| **Refusal** | Below the relevance gate, StudyLoop says *"not in your materials"* instead of guessing — in the language the question was asked in. |
+| **Bangla** | A Bangla document is detected on the way in by the script it is written in, cut at its own sentence boundaries, matched by a retriever that can see through its case suffixes, and answered in Bangla. |
 | **Citation viewer** | Clicking a citation opens that document at that page. |
 | **Formatted answers** | Tables, headings, syntax-highlighted code and typeset mathematics. Citations stay clickable inside all of it; model HTML is never rendered. |
 | **Quizzes** | MCQ and short-answer generated from chosen lectures, auto-graded with per-answer explanations. |
@@ -152,12 +153,12 @@ only reorder six; the passage RRF put eleventh is the one this stage exists to p
 The sparse half is weaker than that description makes it sound, and the measurement is recent.
 `plainto_tsquery` joins a question's words with AND, so a chunk has to contain all of them; on the
 fourteen-chapter evaluation corpus that means it returns nothing at all for 46 of 56 questions, and
-the dense half has been carrying those on its own. A trigram retriever that ORs the same terms
-scores 0.851 against its 0.116 on the same pages. Both that retriever and two other query-side
-stages — a conditional HyDE second pass, and refusal thresholds chosen by question type — are built
-and tested behind flags in `RetrievalProperties.Stages`, and all three are switched **off**: the
-evaluation run that would justify enabling any of them has not been made, and a stage without its
-run does not ship on.
+the dense half has been carrying those on its own. Graded against the same pages, that retriever
+scores recall@6 0.116; the same query with its terms OR-ed scores **0.884**, and a trigram retriever
+matching inside words scores 0.851. All three of those repairs, together with a conditional HyDE
+second pass and refusal thresholds chosen by question type, are built and tested behind flags in
+`RetrievalProperties.Stages`, and every one of them is switched **off**: the evaluation run that
+would justify enabling any of them has not been made, and a stage without its run does not ship on.
 
 Every vector search here is a filtered one, scoped to a course, to ready documents, to what the
 asking member may see, and to a modality. An HNSW index knows none of that: it returns its nearest
@@ -504,12 +505,17 @@ look at and is not shown what is drawn there.
 
 Half of hybrid search is mostly idle. As above, `plainto_tsquery`'s AND semantics leave the keyword
 list empty for most natural-language questions, so the published Recall@6 figures are in practice
-dense-only on four questions in five. The fix is a one-line change to the query form; it is not made
-yet because changing a retriever moves every baseline number, and the run that would measure it is
-waiting on API quota.
+dense-only on four questions in five. A switch now exists that ORs the same terms and lets the
+ranking function decide — measured at recall@6 0.884 against 0.116 on the English pages, and 1.000
+against 0.000 on the Bangla ones — and it is off, because turning it on moves every baseline number
+and the fused run that would re-measure them is waiting on API quota.
 
-Bangla is unreliable. Bangla PDFs frequently extract as garbage, so answers over them are not
-trustworthy yet.
+Bangla works and is thinly measured. A Bangla document is detected on the way in, chunked at its own
+sentence boundaries, matched by a retriever that can see through its case suffixes, and answered —
+including its refusals — in Bangla. What backs that up is ten questions against a corpus written for
+the test, because there is no Bangla textbook in this project; the figures describe the mechanism
+rather than a real course. Bangla PDFs also still extract poorly, which is an extraction problem
+rather than a language one and is what the vision router exists for.
 
 Legacy `.ppt` and `.doc` are refused by design, and Markdown files are not accepted at all, since
 they have no page concept at any level.
@@ -523,8 +529,7 @@ one.
 | Area | Work |
 |---|---|
 | **Query understanding** | Built and behind flags, awaiting the run that decides whether to enable it: trigram matching for typos, a conditional HyDE second pass, and refusal thresholds per question type. Replayed against the last published run, the thresholds refuse 8 of 8 unanswerable questions instead of 6, with no real question refused |
-| **The keyword half** | Replace the AND-joined `plainto_tsquery` with a form that ranks by how many terms matched, and re-measure every baseline against it |
-| **Bangla end to end** | Detected on upload, searched with the right language rules, answered in Bangla with citations |
+| **The keyword half** | Built and behind a flag for the same reason: the sparse query ORs its terms and ranks by how many matched, instead of demanding all of them. Every published baseline has to be re-measured against it before it goes on |
 | **Knowledge loop, round two** | Uploading a document goes back and answers the questions the corpus previously could not |
 | **Study guides** | A cited, exportable revision guide generated for any topic, with diagrams |
 | **Hardening** | Coverage, material taxonomy and metadata filters, seed data, deployment |

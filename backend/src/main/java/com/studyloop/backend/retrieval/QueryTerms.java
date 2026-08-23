@@ -24,6 +24,16 @@ import java.util.Set;
 //              appears in most chunks and would put every chunk in the candidate set at a score
 //              nothing else could outrank.
 //
+// **Phase 19.2 fixed a splitting rule that silently destroyed Bangla.** The token boundary used to
+// be "anything that is not a letter or a digit", and a Bengali vowel sign is neither — it is a
+// combining mark. So every word in a Bangla question was shredded at each of its vowels:
+// "কুইকসর্টের" became five fragments, four of them under the length floor, and this method returned
+// one meaningless syllable for a whole question. The trigram list that 18.1 added, and that Phase
+// 19's plan expected to carry most of the weight for a language Postgres cannot stem, was therefore
+// returning nothing for nine Bangla questions in ten. Marks now count as part of a word, which
+// cannot change any English question: accented Latin is stored precomposed, so English text has
+// essentially no combining marks in it to reclassify.
+//
 // Longest first, capped: a question with a dozen content words gets its most distinctive ones,
 // because each surviving term costs one index scan and one similarity evaluation per candidate.
 final class QueryTerms {
@@ -48,6 +58,11 @@ final class QueryTerms {
 
     // Four, and the reasoning is in the class comment: below it a term's trigram set is too small
     // to distinguish anything.
+    //
+    // It counts codepoints, which means it is a slightly weaker filter in Bangla than in English —
+    // "কীভাবে" is six codepoints and three base letters. That is the right direction to be wrong
+    // in: the floor exists to stop a two-trigram term matching half the corpus, and a Bengali
+    // string of six codepoints has six trigrams whatever its letters are doing.
     private static final int MIN_LENGTH = 4;
 
     // The distinctive words of `query`, longest first, at most `max` of them. Empty for a query
@@ -57,11 +72,13 @@ final class QueryTerms {
         if (query == null || query.isBlank() || max <= 0) {
             return List.of();
         }
-        // Split on anything that is not a letter or a digit, so "O(1)" contributes nothing and
-        // "LinearHashTable" survives whole. Lowercased because word_similarity is case sensitive
-        // and the corpus is not written in the case a student types.
+        // Split on anything that is not a letter, a digit or a combining mark, so "O(1)"
+        // contributes nothing, "LinearHashTable" survives whole, and a Bengali word survives with
+        // its vowel signs attached instead of being cut at each of them. Lowercased because
+        // word_similarity is case sensitive and the corpus is not written in the case a student
+        // types — a no-op for Bangla, which has no case.
         Set<String> distinct = new LinkedHashSet<>();
-        for (String token : query.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
+        for (String token : query.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}\\p{M}]+")) {
             if (token.length() >= MIN_LENGTH && !STOPWORDS.contains(token)) {
                 distinct.add(token);
             }

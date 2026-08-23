@@ -128,7 +128,11 @@ public class HydeStage {
         // point in embedding space, which is why paying to embed it would buy a near-duplicate of a
         // list the first pass already has.
         for (String rewrite : expansion.rewrites()) {
-            List<ChunkHit> lexical = searchRepository.fullTextSearch(courseId, actorId, rewrite, CANDIDATES);
+            // The same form the first pass used (19.2). A rewrite searched with different
+            // semantics from the question would make the two lists incomparable, and RRF is
+            // fusing them.
+            List<ChunkHit> lexical = searchRepository.fullTextSearch(
+                    courseId, actorId, rewrite, CANDIDATES, properties.stages().lexicalOr());
             if (!lexical.isEmpty()) {
                 rankings.add(lexical);
             }

@@ -9,6 +9,8 @@ import com.studyloop.backend.chat.dto.ChatResponse;
 import com.studyloop.backend.chat.dto.Citation;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
+import com.studyloop.backend.document.Language;
+import com.studyloop.backend.document.LanguageDetector;
 import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievalService;
 import com.studyloop.backend.retrieval.RetrievedChunk;
@@ -45,6 +47,21 @@ public class ChatService {
             "I don't have that in this course's materials. Try rephrasing, or upload a document "
             + "that covers it.";
 
+    // The same refusal in Bangla (Phase 19.3). It is a constant rather than a translation call for
+    // the same reason the English one is: the gate refuses *without* reaching a provider, and the
+    // whole value of that is that a refusal cannot fail, cannot cost anything and cannot be
+    // hallucinated. A student who asked in Bangla and is told in English that their question is
+    // not in the materials has been answered by a system that did not read their question.
+    private static final String NOT_IN_MATERIALS_BN =
+            "\u098f\u0987 \u0995\u09cb\u09b0\u09cd\u09b8\u09c7\u09b0 "
+            + "\u0989\u09aa\u0995\u09b0\u09a3\u09c7 \u0986\u09ae\u09bf \u098f\u099f\u09bf "
+            + "\u0996\u09c1\u0981\u099c\u09c7 \u09aa\u09be\u0987\u09a8\u09bf\u0964 "
+            + "\u09aa\u09cd\u09b0\u09b6\u09cd\u09a8\u099f\u09bf \u0985\u09a8\u09cd\u09af"
+            + "\u09ad\u09be\u09ac\u09c7 \u0995\u09b0\u09c1\u09a8, \u0985\u09a5\u09ac\u09be "
+            + "\u098f\u0987 \u09ac\u09bf\u09b7\u09df\u09c7\u09b0 \u098f\u0995\u099f\u09bf "
+            + "\u09a1\u0995\u09c1\u09ae\u09c7\u09a8\u09cd\u099f \u0986\u09aa\u09b2\u09cb\u09a1 "
+            + "\u0995\u09b0\u09c1\u09a8\u0964";
+
     private final CourseAccess courseAccess;
     private final RetrievalService retrievalService;
     private final ChatClient chatClient;
@@ -54,6 +71,7 @@ public class ChatService {
     private final SemanticCacheService semanticCache;
     private final QuestionLogService questionLog;
     private final SectionExpander sectionExpander;
+    private final LanguageDetector languageDetector;
 
     // The non-streaming turn, kept as the simple fallback to /chat/stream. It shares prepare()
     // and completeTurn() with the streaming path rather than restating them.
@@ -87,6 +105,11 @@ public class ChatService {
         }
 
         String question = request.question().trim();
+        // 19.3. Read off the *question*, not off the course's documents, and that is the whole
+        // decision: a Bangla course can hold English papers and an English course can be asked
+        // about in Bangla, so the only text that says what language this student wants an answer
+        // in is the one they just typed. It costs a scan of one sentence and no provider call.
+        Language language = languageDetector.detect(question);
         // Only an opening question is cacheable. A follow-up ("what about the second one?") is
         // meaningless without the turns before it, so two threads whose latest questions look
         // alike can still need completely different answers. No conversation id means no thread
@@ -129,13 +152,14 @@ public class ChatService {
         // Confidence gate: if nothing relevant came back, refuse deterministically instead of
         // letting the model answer from weak or absent context (and skip the provider call).
         if (confidenceGate.shouldRefuse(retrieval)) {
-            saveMessage(conversation, ChatRole.ASSISTANT, NOT_IN_MATERIALS);
+            String refusal = language == Language.BANGLA ? NOT_IN_MATERIALS_BN : NOT_IN_MATERIALS;
+            saveMessage(conversation, ChatRole.ASSISTANT, refusal);
             // The most valuable row this table gets: a question the corpus could not answer. Its
             // id goes back to the client so the refusal can be escalated to the forum as *this*
             // question rather than as a copy of its text.
             UUID questionEventId =
                     questionLog.recordRefused(courseId, actorId, question, questionVector, topSimilarity);
-            return PreparedTurn.refused(conversation.getId(), NOT_IN_MATERIALS, questionEventId);
+            return PreparedTurn.refused(conversation.getId(), refusal, questionEventId);
         }
 
         // Logged here rather than after generation on purpose: the question was asked and the
@@ -150,7 +174,8 @@ public class ChatService {
         // The sources are the retrieved chunks expanded to their sections (13.5): retrieval picked
         // them on precision, and the model reads them with the surrounding paragraph it needs.
         List<LlmMessage> messages = new ArrayList<>();
-        messages.add(LlmMessage.system(buildSystemPrompt(chunks, sectionExpander.expand(chunks))));
+        messages.add(LlmMessage.system(
+                buildSystemPrompt(chunks, sectionExpander.expand(chunks), language)));
         messages.addAll(replayHistory(conversation.getId()));
 
         // Cache only what the cache could ever serve: an opening question, answered from the
@@ -225,7 +250,17 @@ public class ChatService {
     // `sources` is one passage per chunk, in the same order — the chunk's own text, or the section
     // it belongs to. The citation label still comes from the chunk, so [3] means the page retrieval
     // actually matched even when the model was shown the pages around it.
-    private static String buildSystemPrompt(List<RetrievedChunk> chunks, List<String> sources) {
+    //
+    // `language` (19.3) adds one line and only when it has something to say. A model answers in the
+    // language it is instructed in, and this prompt is English, so a Bangla question was coming
+    // back in English however the sources were written — the model was following its instructions.
+    //
+    // **The English prompt is left byte-identical rather than gaining an "answer in English" line**,
+    // which is not tidiness: every answer this application has produced was generated from that
+    // exact string, and a prompt that changes for every question changes what every one of them
+    // says. A Bangla question adds a line; an English question is the pipeline as it was.
+    private static String buildSystemPrompt(List<RetrievedChunk> chunks, List<String> sources,
+                                            Language language) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("""
                 You are StudyLoop's study assistant. Answer the student's question using ONLY the \
@@ -234,6 +269,17 @@ public class ChatService {
                 - If the sources do not contain the answer, say you don't have that in the course \
                 materials. Do not use outside knowledge or guess.
                 - Be concise and precise.
+                """);
+        if (language != Language.ENGLISH) {
+            // Named in English, and placed last so it is the instruction nearest the sources. The
+            // sources themselves may be in either language: a Bangla course quoting an English
+            // paper should still be answered in Bangla, and saying so explicitly is what stops the
+            // model from mirroring whichever language the retrieved passages happen to be in.
+            prompt.append("- Write your answer in ").append(language.promptName())
+                    .append(", whatever language the sources are written in. Keep technical terms, ")
+                    .append("identifiers and the [n] citation markers exactly as they appear.\n");
+        }
+        prompt.append("""
 
                 Sources:
                 """);

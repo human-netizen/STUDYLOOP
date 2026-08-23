@@ -198,6 +198,32 @@ studyloop:
       # Phase 18.1 — a fuzzy lexical list beside the lexeme one, so a misspelled word still finds
       # its page. Off or on is decided by the eval run in the report, not by this comment.
       trigram: ${RETRIEVAL_TRIGRAM:false}
+      # Phase 19.2 — the sparse half ORs the question's content words instead of AND-ing them.
+      #
+      # **Off does not mean "the baseline", it means the defect.** `plainto_tsquery` AND-joins every
+      # word it does not recognise as a stopword, so a chunk has to carry all of them: measured on
+      # the fourteen-chapter corpus, that is 1 chunk out of 282 for a typical question, and nothing
+      # at all for 46 of the 56 answerable golden questions. The lexical half of hybrid retrieval
+      # has been empty for most questions since Phase 5 and the dense half has carried them, which
+      # is why the fused numbers never showed it. Measured on the same pages with the same grading:
+      # the OR form scores sparse recall@6 **0.884** against the AND form's 0.116, and returns
+      # candidates for 56 questions out of 56 against 10.
+      #
+      # It also lands most of what Phase 18.1 was built for, which is worth knowing before that
+      # stage is switched on: under one transposed letter pair the AND form collapses to 0.000 and
+      # the OR form only falls to 0.827, because the question's other terms still match. What the
+      # trigram list still uniquely does is match *inside* a word — a one-term query, and a Bangla
+      # case suffix, neither of which any lexeme form can reach.
+      #
+      # It is off regardless, because flipping it moves every Recall@6, MRR and nDCG this project
+      # has published, and 11.3's rule is that the flag and the run that justifies it are separate
+      # events. That run needs an embedding key with quota.
+      #
+      # Bangla is why it lands in Phase 19 rather than waiting: the English stopword list is what
+      # keeps the AND form usable on an English question, and being ASCII it strips no Bangla
+      # function word, so a Bangla question AND-joins more terms than an English one and every
+      # extra term is one carrying no meaning.
+      lexical-or: ${RETRIEVAL_LEXICAL_OR:false}
       # Phase 18.3 — three confidence thresholds chosen by what the question asks for, instead of
       # one for every question. The thresholds themselves are under `studyloop.chat.intent`.
       intent: ${RETRIEVAL_INTENT:false}
