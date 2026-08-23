@@ -16,9 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 // The escalation loop (Phase 9.2). A question the assistant refused becomes a thread, the class
@@ -56,10 +58,13 @@ public class ForumService {
                 ? threadRepository.findByCourseWithAuthors(courseId)
                 : threadRepository.findByCourseAndStatusWithAuthors(courseId, status);
         Map<UUID, Integer> answerCounts = answerCounts(threads);
+        Set<UUID> assistantAnswered = assistantAnswered(threads);
 
         List<ForumThreadSummary> summaries = new ArrayList<>(threads.size());
         for (ForumThread thread : threads) {
-            summaries.add(ForumThreadSummary.from(thread, answerCounts.getOrDefault(thread.getId(), 0)));
+            summaries.add(ForumThreadSummary.from(thread,
+                    answerCounts.getOrDefault(thread.getId(), 0),
+                    assistantAnswered.contains(thread.getId())));
         }
         return summaries;
     }
@@ -127,6 +132,18 @@ public class ForumService {
         ForumAnswer answer = answerRepository.findByIdAndThreadId(answerId, threadId)
                 .orElseThrow(() -> new ForumAnswerNotFoundException(answerId));
 
+        // **A machine answer can never be accepted** (Phase 20.1). Accepting writes the text into
+        // the corpus, and the corpus is what every future answer is grounded on and cites — so
+        // accepting the assistant's own reply would make the model's output into course material
+        // that the next answer quotes back with a citation, with no human anywhere in the chain.
+        // A course would then be teaching itself whatever it first guessed.
+        //
+        // The refusal is deliberately not a 403. Nothing about the actor is wrong — a manager may
+        // accept answers, and this is not one; the state of the thing is wrong, which is a 409.
+        if (answer.getAuthorKind() != ForumAnswerAuthor.MEMBER) {
+            throw new AssistantAnswerNotAcceptableException(answerId);
+        }
+
         thread.setAcceptedAnswerId(answer.getId());
         thread.setStatus(ForumThreadStatus.ANSWERED);
         // Best effort, and re-runnable: accepting again (the same reply or a better one) replaces
@@ -161,6 +178,16 @@ public class ForumService {
             counts.put(row.getThreadId(), (int) row.getTotal());
         }
         return counts;
+    }
+
+    // One query for the page, like the counts above. Empty in the ordinary case, which is a
+    // course whose open threads the corpus still cannot answer.
+    private Set<UUID> assistantAnswered(List<ForumThread> threads) {
+        if (threads.isEmpty()) {
+            return Set.of();
+        }
+        List<UUID> ids = threads.stream().map(ForumThread::getId).toList();
+        return new HashSet<>(answerRepository.threadsAnsweredByAssistant(ids));
     }
 
     private static String trimTitle(String title) {

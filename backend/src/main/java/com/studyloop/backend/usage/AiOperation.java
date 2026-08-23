@@ -53,6 +53,16 @@ public enum AiOperation {
     // extracts, while this one is a property of how many students photograph their notebooks. One
     // line cannot go up for both reasons and still be read.
     HANDWRITING_OCR,
+    // An answer given from general knowledge after the corpus refused (Phase 20.2). Its own row
+    // because it is the one chat call in the product that is *not* grounded, and because the count
+    // is a product measurement as much as a cost one: how often the materials sent a student
+    // outside them. One call, only ever after an explicit second click.
+    GENERAL_KNOWLEDGE,
+    // Answering an open forum thread after an upload made it answerable (Phase 20.1). Nobody is
+    // waiting on this one at the moment it is billed, which is exactly why it is kept apart: it is
+    // the only model call in the system with no user on the other end, so its cost scales with how
+    // many threads a course leaves open rather than with what anybody did today.
+    FORUM_ANSWER,
     // A call no scope claimed. A row landing here means an unlabelled call site, not a bug in
     // the caller — it still costs money and still shows up in the total.
     OTHER

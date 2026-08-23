@@ -179,6 +179,24 @@ export interface ChatResponse {
   answer: string
   citations: Citation[]
   questionEventId: string | null
+  askedBefore: AskedBefore | null
+}
+
+// "You've asked about this before" (Phase 20.3). Set only when this student has asked this course
+// the same thing at least twice already. There is no previous *answer* here on purpose: the server
+// sends a count and their own earlier wording, never what it told them last time.
+export interface AskedBefore {
+  times: number
+  lastAskedAt: string
+  lastQuestion: string
+}
+
+// An answer given from general knowledge after the course could not answer (Phase 20.2). No
+// citations field at all, rather than an empty one — this shape cannot be rendered as a grounded
+// answer by accident.
+export interface GeneralAnswerResponse {
+  conversationId: string
+  answer: string
 }
 
 // Payloads of the SSE events the /chat/stream endpoint emits, keyed by event name.
@@ -189,6 +207,7 @@ export interface ChatMetaEvent {
   conversationId: string
   citations: Citation[]
   questionEventId: string | null
+  askedBefore: AskedBefore | null
 }
 
 export interface ChatDoneEvent {
@@ -412,6 +431,10 @@ export interface ConfusionTotals {
   questionsAsked: number
   ungrounded: number
   ungroundedRate: number
+  // How many refusals a student then asked from general knowledge (Phase 20.2) — a sharper signal
+  // about missing material than the refusal count, which includes every off-topic question anyone
+  // ever typed.
+  escalatedToGeneral: number
   distinctAskers: number
 }
 
@@ -451,6 +474,7 @@ export interface UngroundedQuestion {
   askedAt: string
   questionEventId: string
   threadId: string | null
+  escalatedToGeneral: boolean
 }
 
 export interface ConfusionReport {
@@ -468,11 +492,19 @@ export type ForumThreadStatus = 'OPEN' | 'ANSWERED'
 
 // One reply. Names are on the wire here, unlike the confusion report — that page is a
 // measurement of the class, this is a conversation.
+export type ForumAnswerAuthor = 'MEMBER' | 'ASSISTANT'
+
 export interface ForumAnswer {
   id: string
   body: string
-  authorName: string
+  // ASSISTANT replies are posted by the corpus watch when an upload makes the thread answerable
+  // (Phase 20.1). They carry no author name, cannot be accepted into the materials, and say which
+  // document made them possible.
+  authorKind: ForumAnswerAuthor
+  authorName: string | null
   accepted: boolean
+  sourceDocumentId: string | null
+  topSimilarity: number | null
   createdAt: string
 }
 
@@ -486,6 +518,9 @@ export interface ForumThreadSummary {
   answerCount: number
   inCorpus: boolean
   fromRefusal: boolean
+  // The assistant has replied here since the thread was opened (Phase 20.1) — a reply waiting for
+  // somebody to confirm or correct it, not a resolution.
+  assistantAnswered: boolean
   createdAt: string
   updatedAt: string
 }

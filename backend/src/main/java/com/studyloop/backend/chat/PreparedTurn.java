@@ -1,5 +1,6 @@
 package com.studyloop.backend.chat;
 
+import com.studyloop.backend.chat.dto.AskedBefore;
 import com.studyloop.backend.chat.dto.Citation;
 
 import java.util.List;
@@ -25,24 +26,33 @@ public record PreparedTurn(
         // Non-null when a fresh answer is worth remembering — see CacheWrite.
         CacheWrite cacheWrite,
         // Non-null only on a refusal, and only while question logging is switched on.
-        UUID questionEventId
+        UUID questionEventId,
+        // Non-null when this student has asked this course the same thing before (20.3). It rides
+        // along on all three outcomes, because a repeat is a repeat whether the answer came from
+        // the model, the cache or the gate — and the refused one is the most worth saying out loud.
+        AskedBefore askedBefore
 ) {
 
     public boolean isAnswered() {
         return finalAnswer != null;
     }
 
-    static PreparedTurn answered(UUID conversationId, List<Citation> citations, String answer) {
-        return new PreparedTurn(conversationId, citations, List.of(), answer, null, null);
+    static PreparedTurn answered(UUID conversationId, List<Citation> citations, String answer,
+                                 AskedBefore askedBefore) {
+        return new PreparedTurn(conversationId, citations, List.of(), answer, null, null, askedBefore);
     }
 
-    static PreparedTurn refused(UUID conversationId, String answer, UUID questionEventId) {
-        return new PreparedTurn(conversationId, List.of(), List.of(), answer, null, questionEventId);
+    static PreparedTurn refused(UUID conversationId, String answer, UUID questionEventId,
+                                AskedBefore askedBefore) {
+        return new PreparedTurn(conversationId, List.of(), List.of(), answer, null, questionEventId,
+                askedBefore);
     }
 
     static PreparedTurn answerable(UUID conversationId, List<Citation> citations,
-                                   List<LlmMessage> messages, CacheWrite cacheWrite) {
-        return new PreparedTurn(conversationId, citations, messages, null, cacheWrite, null);
+                                   List<LlmMessage> messages, CacheWrite cacheWrite,
+                                   AskedBefore askedBefore) {
+        return new PreparedTurn(conversationId, citations, messages, null, cacheWrite, null,
+                askedBefore);
     }
 
     // Carries the question's embedding forward from prepare() to completeTurn(), which is the

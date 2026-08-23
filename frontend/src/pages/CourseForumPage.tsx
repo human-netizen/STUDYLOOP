@@ -161,6 +161,11 @@ function ThreadRow({ courseId, thread }: { courseId: string; thread: ForumThread
           </Pill>
           {/* The loop, stated where it can be seen: this answer is corpus now. */}
           {thread.inCorpus && <Pill tone="accent">In materials</Pill>}
+          {/* The other half of the loop, running the other way: an upload answered this while
+              nobody was looking. Still open, because a person has not confirmed it. */}
+          {thread.assistantAnswered && !thread.inCorpus && (
+            <Pill tone="neutral">Assistant replied</Pill>
+          )}
         </div>
       </Link>
     </Row>

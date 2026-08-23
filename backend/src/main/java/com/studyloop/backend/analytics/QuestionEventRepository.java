@@ -84,6 +84,52 @@ class QuestionEventRepository {
                 """, HEAT_MAPPER, Timestamp.from(since), courseId);
     }
 
+    // Phase 20.3 — how many times *this* student has already asked *this* course something that
+    // means the same thing, and what they typed the last time. Runs on the chat request path, on
+    // the vector the cache probe already paid for.
+    //
+    // It is a filtered scan and not a nearest-neighbour search, which is what keeps V15's decision
+    // to build no HNSW index on this column correct rather than merely unrevisited. The rows
+    // scanned are one student's questions in one course — tens, not the table — and an ANN index
+    // could not answer this anyway: the question is "all of them above 0.82", not "the closest
+    // five", and the index would be rebuilt on every insert on the same request path.
+    //
+    // No time floor, for the same reason clustering has none: a student who asked this in week two
+    // and is asking again in week nine is the clearest case the feature exists for, and a 30-day
+    // window would hide exactly that one.
+    Optional<RecurrenceRow> recurrence(UUID courseId, UUID askerId, String vectorLiteral,
+                                       double threshold) {
+        List<RecurrenceRow> rows = jdbc.query("""
+                select count(*)                                        as times,
+                       max(created_at)                                 as last_asked_at,
+                       (array_agg(question order by created_at desc))[1] as last_question
+                from question_events
+                where course_space_id = ?
+                  and asked_by = ?
+                  and question_embedding is not null
+                  and 1 - (question_embedding <=> cast(? as vector)) >= ?
+                """,
+                (rs, row) -> new RecurrenceRow(
+                        rs.getInt("times"),
+                        rs.getTimestamp("last_asked_at") == null
+                                ? null : rs.getTimestamp("last_asked_at").toInstant(),
+                        rs.getString("last_question")),
+                courseId, askerId, vectorLiteral, threshold);
+        // An aggregate always returns one row, and it reads as zero matches when there were none.
+        return rows.stream().filter(row -> row.times() > 0).findFirst();
+    }
+
+    // Phase 20.2 — stamp the refusal the student chose to escalate. Scoped to the course as well
+    // as the id, because the id came from a client: an escalation must not be able to mark a row
+    // in a course the caller is not in.
+    void markEscalated(UUID courseId, UUID eventId, Instant at) {
+        jdbc.update("""
+                update question_events
+                set escalated_at = ?
+                where id = ? and course_space_id = ? and escalated_at is null
+                """, Timestamp.from(at), eventId, courseId);
+    }
+
     boolean existsInCourse(UUID courseId, UUID eventId) {
         Integer found = jdbc.queryForObject(
                 "select count(*) from question_events where id = ? and course_space_id = ?",
@@ -95,11 +141,13 @@ class QuestionEventRepository {
         return jdbc.queryForObject("""
                 select count(*)                                              as asked,
                        count(*) filter (where not grounded)                  as ungrounded,
+                       count(*) filter (where escalated_at is not null)      as escalated,
                        count(distinct asked_by)                              as askers
                 from question_events
                 where course_space_id = ? and created_at >= ?
                 """,
-                (rs, row) -> new Totals(rs.getInt("asked"), rs.getInt("ungrounded"), rs.getInt("askers")),
+                (rs, row) -> new Totals(rs.getInt("asked"), rs.getInt("ungrounded"),
+                        rs.getInt("escalated"), rs.getInt("askers")),
                 courseId, Timestamp.from(since));
     }
 
@@ -109,7 +157,8 @@ class QuestionEventRepository {
     // client, and a thread from another course must never surface on this page.
     List<UngroundedRow> ungrounded(UUID courseId, Instant since, int limit) {
         return jdbc.query("""
-                select e.id, e.question, e.top_similarity, e.created_at, t.id as thread_id
+                select e.id, e.question, e.top_similarity, e.created_at, e.escalated_at,
+                       t.id as thread_id
                 from question_events e
                 left join forum_threads t
                        on t.question_event_id = e.id
@@ -123,7 +172,8 @@ class QuestionEventRepository {
                         rs.getString("question"),
                         (Double) rs.getObject("top_similarity"),
                         rs.getTimestamp("created_at").toInstant(),
-                        uuidOrNull(rs.getString("thread_id"))),
+                        uuidOrNull(rs.getString("thread_id")),
+                        rs.getTimestamp("escalated_at") != null),
                 courseId, Timestamp.from(since), limit);
     }
 
@@ -259,10 +309,18 @@ class QuestionEventRepository {
     record LectureHeatRow(UUID documentId, String filename, int questionCount, int distinctAskers,
                           Instant lastAskedAt) { }
 
-    record Totals(int asked, int ungrounded, int askers) { }
+    // `escalated` counts refusals a student then asked from general knowledge (20.2). It is a
+    // subset of `ungrounded` and never of `asked` alone, because only a refusal offers the
+    // button — the ratio between the two is the measurement: how often a gap in the materials
+    // was worth a second click.
+    record Totals(int asked, int ungrounded, int escalated, int askers) { }
 
     record UngroundedRow(UUID eventId, String question, Double topSimilarity, Instant askedAt,
-                         UUID threadId) { }
+                         UUID threadId, boolean escalated) { }
+
+    // `times` counts prior questions only — the current one has not been logged yet when this
+    // runs, which is what makes "you have asked this twice before" literally true.
+    record RecurrenceRow(int times, Instant lastAskedAt, String lastQuestion) { }
 
     record QuestionVector(UUID id, String question, UUID askedBy, boolean grounded, Instant askedAt,
                           float[] vector) { }

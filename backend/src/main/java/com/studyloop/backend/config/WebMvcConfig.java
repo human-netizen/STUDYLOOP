@@ -31,6 +31,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns(
                         "/api/v1/courses/*/chat",
                         "/api/v1/courses/*/chat/stream",
+                        "/api/v1/courses/*/chat/general",
                         "/api/v1/courses/*/quizzes",
                         "/api/v1/courses/*/quizzes/*/attempts",
                         "/api/v1/courses/*/flashcards/generate",

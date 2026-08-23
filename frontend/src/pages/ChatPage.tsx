@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, chatApi, coursesApi, errorMessage, flashcardsApi, forumApi } from '../lib/api'
-import type { Citation, CourseResponse } from '../lib/types'
+import type { AskedBefore, Citation, CourseResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import { Markdown } from '../components/Markdown'
 import { PdfViewer } from '../components/PdfViewer'
@@ -11,13 +11,22 @@ import { Button, ErrorText, Eyebrow } from '../components/ui'
 // carry the citations the answer's [n] markers refer to.
 //
 // `questionEventId` is set only when the assistant refused: it is the handle for escalating that
-// exact question to the forum, so a refusal is an offer rather than a dead end.
+// exact question — to the forum, or to general knowledge — so a refusal is an offer rather than a
+// dead end.
+//
+// `general` marks the one kind of turn on this screen that did not come from the course's
+// materials (Phase 20.2). It is a separate flag rather than an absence of citations because the
+// difference has to survive somebody later rendering an answer that simply happens to cite
+// nothing: this one is labelled, and the label is the whole reason the feature is allowed to
+// exist.
 interface Turn {
   role: 'user' | 'assistant'
   text: string
   citations: Citation[]
   streaming: boolean
   questionEventId: string | null
+  askedBefore: AskedBefore | null
+  general: boolean
 }
 
 export function ChatPage() {
@@ -63,8 +72,8 @@ export function ChatPage() {
     setSending(true)
     setTurns((current) => [
       ...current,
-      { role: 'user', text: question, citations: [], streaming: false, questionEventId: null },
-      { role: 'assistant', text: '', citations: [], streaming: true, questionEventId: null },
+      { ...blank, role: 'user', text: question },
+      { ...blank, role: 'assistant', streaming: true },
     ])
 
     try {
@@ -78,6 +87,7 @@ export function ChatPage() {
               ...turn,
               citations: meta.citations,
               questionEventId: meta.questionEventId,
+              askedBefore: meta.askedBefore,
             }))
           },
           onDelta: (text) => updateLast((turn) => ({ ...turn, text: turn.text + text })),
@@ -139,8 +149,15 @@ export function ChatPage() {
               turn={turn}
               question={turns[i - 1]?.text ?? ''}
               courseId={id}
+              conversationId={conversationId}
               onCite={setActiveCitation}
               onEscalated={(threadId) => navigate(`/courses/${id}/forum/${threadId}`)}
+              onGeneralAnswer={(answer) =>
+                setTurns((current) => [
+                  ...current,
+                  { ...blank, role: 'assistant', text: answer, general: true },
+                ])
+              }
             />
           ),
         )}
@@ -198,24 +215,59 @@ function UserBubble({ text }: { text: string }) {
   )
 }
 
+// The default shape of a turn, so adding a field to Turn does not mean editing four object
+// literals that each set a different subset of it.
+const blank: Turn = {
+  role: 'assistant',
+  text: '',
+  citations: [],
+  streaming: false,
+  questionEventId: null,
+  askedBefore: null,
+  general: false,
+}
+
 function AssistantBubble({
   turn,
   question,
   courseId,
+  conversationId,
   onCite,
   onEscalated,
+  onGeneralAnswer,
 }: {
   turn: Turn
   question: string
   courseId: string
+  conversationId: string | null
   onCite: (c: Citation) => void
   onEscalated: (threadId: string) => void
+  onGeneralAnswer: (answer: string) => void
 }) {
   const answered = !turn.streaming && turn.text.trim().length > 0
   const refused = !turn.streaming && turn.questionEventId != null
+
+  // An answer from outside the materials is a different kind of thing and says so — a dashed
+  // border, a warning tint and a label, none of which the grounded bubble has.
+  if (turn.general) {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[85%] rounded-card rounded-bl-[2px] border border-dashed border-warn/40 bg-warn-bg px-4 py-3 text-sm text-ink-2">
+          <Eyebrow className="mb-1.5 text-warn">Not from this course</Eyebrow>
+          <Markdown text={turn.text} citations={[]} onCite={onCite} streaming={false} />
+          <p className="mt-3 mb-0 border-t border-line-soft pt-2 text-[12px] text-ink-muted">
+            Answered from general knowledge. Nothing in this course's materials backs it, so there
+            are no sources to check — confirm it with your instructor before relying on it.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-card rounded-bl-[2px] border border-line bg-surface px-4 py-3 text-sm text-ink-2">
+        {turn.askedBefore && <AskedBeforeNote askedBefore={turn.askedBefore} />}
         <Markdown
           text={turn.text}
           citations={turn.citations}
@@ -234,13 +286,17 @@ function AssistantBubble({
             </ul>
           </div>
         )}
-        {/* A refusal is the one answer with something better to offer than itself. */}
+        {/* A refusal is the one answer with something better to offer than itself — two things,
+            in fact, and they are different offers: one asks people, the other asks the model to
+            step outside the course and says so. */}
         {refused && (
-          <AskTheClassButton
+          <RefusalActions
             courseId={courseId}
             question={question}
             questionEventId={turn.questionEventId!}
+            conversationId={conversationId}
             onEscalated={onEscalated}
+            onGeneralAnswer={onGeneralAnswer}
           />
         )}
         {answered && question && !refused && (
@@ -280,20 +336,32 @@ function SourceLink({ citation, onCite }: { citation: Citation; onCite: (c: Cita
   )
 }
 
-// Turns a refusal into a forum thread about that exact question. Idempotent on the backend: the
-// same refusal always resolves to the same thread, so this can't split one question into two.
-function AskTheClassButton({
+// The two ways out of a refusal.
+//
+// "Ask the class" is the one that improves the course: an accepted answer becomes material, so the
+// next student gets it from chat. Opening the same refusal twice returns the thread that already
+// exists, so a double click cannot split one question into two.
+//
+// "Answer from general knowledge" is the escape hatch, and it is second, quieter and explicit for
+// a reason — it helps this student and teaches the course nothing. It is also counted: the
+// instructor's page reports how many refusals were worth a second click, which is a better signal
+// about missing material than the refusal count on its own.
+function RefusalActions({
   courseId,
   question,
   questionEventId,
+  conversationId,
   onEscalated,
+  onGeneralAnswer,
 }: {
   courseId: string
   question: string
   questionEventId: string
+  conversationId: string | null
   onEscalated: (threadId: string) => void
+  onGeneralAnswer: (answer: string) => void
 }) {
-  const [state, setState] = useState<'idle' | 'posting' | 'error'>('idle')
+  const [state, setState] = useState<'idle' | 'posting' | 'asking' | 'answered' | 'error'>('idle')
 
   async function escalate() {
     setState('posting')
@@ -305,16 +373,56 @@ function AskTheClassButton({
     }
   }
 
+  async function askGenerally() {
+    if (!conversationId) return
+    setState('asking')
+    try {
+      const answer = await chatApi.general(courseId, { question, conversationId, questionEventId })
+      onGeneralAnswer(answer.answer)
+      setState('answered')
+    } catch {
+      setState('error')
+    }
+  }
+
+  const busy = state === 'posting' || state === 'asking'
   return (
     <div className="mt-3 border-t border-line-soft pt-2.5">
-      <Button variant="primary" size="sm" onClick={() => void escalate()} disabled={state === 'posting'}>
-        {state === 'posting' ? 'Opening…' : 'Ask the class'}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="primary" size="sm" onClick={() => void escalate()} disabled={busy}>
+          {state === 'posting' ? 'Opening…' : 'Ask the class'}
+        </Button>
+        <Button
+          variant="quiet"
+          onClick={() => void askGenerally()}
+          disabled={busy || state === 'answered' || !conversationId}
+        >
+          {state === 'asking'
+            ? 'Answering…'
+            : state === 'answered'
+              ? 'Answered below ↓'
+              : 'Answer from general knowledge'}
+        </Button>
+      </div>
       <p className="mt-2 mb-0 text-[12px] text-ink-muted">
         {state === 'error'
-          ? 'Could not open a discussion — try again.'
-          : 'Posts it to the course forum. An accepted answer becomes course material, so the assistant can answer it next time.'}
+          ? 'That did not work — try again.'
+          : 'Asking the class puts it in the course forum, where an accepted answer becomes course material. General knowledge answers you now, cites nothing, and changes nothing for anyone else.'}
       </p>
+    </div>
+  )
+}
+
+// The recurring-question header (Phase 20.3). One line, above the answer, and it says only what
+// the record supports: how many times this student asked something that meant the same thing, and
+// when. It does not repeat what they were told, because that is the part most likely to be the
+// reason they are asking again.
+function AskedBeforeNote({ askedBefore }: { askedBefore: AskedBefore }) {
+  return (
+    <div className="mb-2.5 border-b border-line-soft pb-2 text-[12px] text-ink-muted">
+      You've asked about this {askedBefore.times === 1 ? 'once' : `${askedBefore.times} times`}{' '}
+      before — last on {new Date(askedBefore.lastAskedAt).toLocaleDateString()} (“
+      {askedBefore.lastQuestion}”). Here it is explained another way.
     </div>
   )
 }

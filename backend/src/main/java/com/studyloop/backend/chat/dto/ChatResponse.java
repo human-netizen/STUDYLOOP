@@ -11,7 +11,11 @@ public record ChatResponse(
         String answer,
         List<Citation> citations,
         // Set only when the confidence gate refused: the id of the recorded question, which the
-        // client passes back to open a forum thread against this exact refusal (Phase 9.2).
-        UUID questionEventId
+        // client passes back to open a forum thread against this exact refusal (Phase 9.2), or to
+        // ask for the same question from general knowledge instead (Phase 20.2).
+        UUID questionEventId,
+        // Set when this student has asked this course the same thing before (Phase 20.3). Null on
+        // almost every turn.
+        AskedBefore askedBefore
 ) {
 }

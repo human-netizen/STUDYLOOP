@@ -2,6 +2,8 @@ package com.studyloop.backend.chat;
 
 import com.studyloop.backend.chat.dto.ChatRequest;
 import com.studyloop.backend.chat.dto.ChatResponse;
+import com.studyloop.backend.chat.dto.GeneralAnswerRequest;
+import com.studyloop.backend.chat.dto.GeneralAnswerResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -41,5 +43,16 @@ public class ChatController {
                                  @PathVariable UUID courseId,
                                  @Valid @RequestBody ChatRequest request) {
         return chatStreamService.stream(UUID.fromString(authentication.getName()), courseId, request);
+    }
+
+    // Phase 20.2 — the same question, answered from general knowledge and labelled as not
+    // coming from this course. Reachable only from a refusal, and not streamed: it is one short
+    // answer behind an explicit second click, and the reason the streaming path exists is to make a
+    // *long* grounded answer feel immediate.
+    @PostMapping("/general")
+    public GeneralAnswerResponse general(Authentication authentication,
+                                         @PathVariable UUID courseId,
+                                         @Valid @RequestBody GeneralAnswerRequest request) {
+        return chatService.general(UUID.fromString(authentication.getName()), courseId, request);
     }
 }

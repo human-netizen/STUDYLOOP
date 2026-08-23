@@ -49,6 +49,10 @@ public class RetrievalService {
     private static final int CANDIDATES_PER_SOURCE = 20;
     private static final int DEFAULT_LIMIT = 6;
     private static final int MAX_LIMIT = 20;
+    // The visibility actor for a search the course makes of itself — see searchAsCourse. The nil
+    // UUID is never a user id (they are generated v4), so `uploaded_by = NOBODY` is false for
+    // every row and the private half of the visibility clause simply switches off.
+    private static final UUID NOBODY = new UUID(0L, 0L);
 
     private final RetrievalProperties properties;
     private final CourseAccess courseAccess;
@@ -81,7 +85,26 @@ public class RetrievalService {
     @Transactional(readOnly = true)
     public RetrievalResult search(UUID actorId, UUID courseId, String query, float[] queryVector, int limit) {
         courseAccess.requireMember(actorId, courseId);
+        return run(actorId, courseId, query, queryVector, limit);
+    }
 
+    // The same search with no member behind it, for work the course itself triggers rather than a
+    // person: Phase 20.1's corpus watch answers an open forum thread when an upload makes it
+    // answerable, and there is no request and no logged-in actor when that runs.
+    //
+    // **NOBODY is not "skip the check", it is the strictest actor there is.** Every query below
+    // carries `visibility = 'COURSE' or uploaded_by = ?`, so an id no user can hold reduces that
+    // clause to course-visible documents alone — which is exactly the right scope for an answer
+    // posted where the whole course will read it, and it needs no second set of queries to drift
+    // out of step with these. Membership is not checked because there is nobody to check; what
+    // replaces it is that this method is reachable only from server-side triggers and takes no
+    // actor to be wrong about.
+    @Transactional(readOnly = true)
+    public RetrievalResult searchAsCourse(UUID courseId, String query, int limit) {
+        return run(NOBODY, courseId, query, null, limit);
+    }
+
+    private RetrievalResult run(UUID actorId, UUID courseId, String query, float[] queryVector, int limit) {
         String trimmed = query == null ? "" : query.trim();
         if (trimmed.isEmpty()) {
             // Nothing was embedded, so there is no vector to hand back — not even the caller's,

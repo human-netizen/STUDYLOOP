@@ -10,6 +10,15 @@ import java.util.UUID;
 // own transaction, so a poller watching GET /documents/{id} sees the document advance
 // through EXTRACTING → CHUNKING → EMBEDDING in real time. Kept a separate bean from the
 // orchestrator so its @Transactional boundaries actually apply (self-invocation wouldn't).
+//
+// **Every write here is an explicit saveAndFlush rather than a dirty-checked field assignment**,
+// which is not belt-and-braces. Most of what reads these rows back is native SQL — retrieval, the
+// chunk queries, the analytics — and JdbcTemplate does not go through the EntityManager, so it
+// never triggers Hibernate's automatic flush. Leaving the status in the persistence context means
+// the row the pipeline's *own* next query sees still says EMBEDDING, and the failure is silent:
+// every query filtering on `status = 'READY'` simply returns nothing, exactly as it would for a
+// document that had no chunks. Phase 20.1's corpus watch is the first step to read a document it
+// has just marked READY, and it found this.
 @Service
 @RequiredArgsConstructor
 public class DocumentStatusService {
@@ -25,6 +34,7 @@ public class DocumentStatusService {
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
         document.setStatus(status);
         document.setErrorMessage(null);
+        documentRepository.saveAndFlush(document);
     }
 
     // Phase 19.1, and a separate write from markStatus rather than a parameter on it because the
@@ -37,6 +47,7 @@ public class DocumentStatusService {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
         document.setLanguage(language);
+        documentRepository.saveAndFlush(document);
     }
 
     // Terminal failure: records the reason (truncated to fit the column) for the client.
@@ -46,6 +57,7 @@ public class DocumentStatusService {
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
         document.setStatus(DocumentStatus.FAILED);
         document.setErrorMessage(truncate(reason));
+        documentRepository.saveAndFlush(document);
     }
 
     private static String truncate(String reason) {

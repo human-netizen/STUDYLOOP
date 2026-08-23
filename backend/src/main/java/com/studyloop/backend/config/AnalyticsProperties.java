@@ -21,5 +21,12 @@ public record AnalyticsProperties(
         // Most clusters returned to the UI, largest first.
         int maxTopics,
         // Most individual ungrounded questions listed under the topics.
-        int maxUngrounded
+        int maxUngrounded,
+        // Phase 20.3: how many times a student must already have asked something before chat says
+        // so. Two, so the line appears on the third ask — the first repeat is usually a rephrase
+        // of a question that was answered badly, and telling someone "you have asked this before"
+        // when they are still in the middle of asking it is an accusation rather than a help.
+        // Zero switches the header off without touching the clustering it borrows its threshold
+        // from.
+        int repeatMinimum
 ) { }

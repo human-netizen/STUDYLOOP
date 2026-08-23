@@ -120,7 +120,7 @@ export function CourseConfusionPage() {
               title="Totals"
               description={`Questions asked in this course over the last ${report.windowDays} days.`}
             />
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <Stat label="Questions" value={count(report.totals.questionsAsked)} />
               <Stat label="Students asking" value={count(report.totals.distinctAskers)} />
               <Stat
@@ -129,11 +129,18 @@ export function CourseConfusionPage() {
                 emphasis={report.totals.ungrounded > 0}
               />
               <Stat label="Miss rate" value={percent(report.totals.ungroundedRate)} />
+              <Stat
+                label="Asked elsewhere"
+                value={count(report.totals.escalatedToGeneral)}
+                emphasis={report.totals.escalatedToGeneral > 0}
+              />
             </div>
             <Meta className="mt-3 block">
               A question counts as unanswerable when the confidence gate refused it — nothing in
               the corpus matched closely enough to answer from. That is a gap in the materials or
-              in retrieval, not a student mistake.
+              in retrieval, not a student mistake. <strong>Asked elsewhere</strong> counts the
+              refusals a student then answered from general knowledge: a narrower and more useful
+              number, because it is the subset somebody cared enough about to ask a second way.
             </Meta>
           </section>
 
@@ -323,7 +330,10 @@ function UngroundedRow({
       <div className="flex items-start gap-4 px-5 py-3.5">
         <div className="min-w-0 flex-1">
           <p className="m-0 text-[15px] leading-snug text-ink">{item.question}</p>
-          <Meta>{shortDate(item.askedAt)}</Meta>
+          <Meta>
+            {shortDate(item.askedAt)}
+            {item.escalatedToGeneral && ' · answered from general knowledge instead'}
+          </Meta>
           {/* Already a discussion, or an offer to make it one. Either way the row stops being
               only a complaint. */}
           <div className="mt-1.5">

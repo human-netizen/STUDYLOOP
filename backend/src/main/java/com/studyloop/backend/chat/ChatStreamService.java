@@ -1,5 +1,6 @@
 package com.studyloop.backend.chat;
 
+import com.studyloop.backend.chat.dto.AskedBefore;
 import com.studyloop.backend.chat.dto.ChatRequest;
 import com.studyloop.backend.chat.dto.Citation;
 import com.studyloop.backend.usage.AiUsageContext;
@@ -53,7 +54,7 @@ public class ChatStreamService {
         try (var ignored = AiUsageContext.actor(actorId)) {
             PreparedTurn prepared = chatService.prepare(actorId, courseId, request);
             send(emitter, "meta", new MetaEvent(prepared.conversationId(), prepared.citations(),
-                    prepared.questionEventId()));
+                    prepared.questionEventId(), prepared.askedBefore()));
 
             if (prepared.isAnswered()) {
                 // The confidence gate refused, or the semantic cache already had this answer.
@@ -98,8 +99,11 @@ public class ChatStreamService {
     }
 
     // questionEventId is non-null only when the gate refused — it is the client's handle for
-    // escalating that refusal to the forum.
-    public record MetaEvent(UUID conversationId, List<Citation> citations, UUID questionEventId) { }
+    // escalating that refusal, to the forum (9.2) or to general knowledge (20.2). askedBefore is
+    // non-null only on a repeat (20.3). Both ride the meta event, which is sent before the first
+    // token, so the header is on screen while the answer is still arriving.
+    public record MetaEvent(UUID conversationId, List<Citation> citations, UUID questionEventId,
+                            AskedBefore askedBefore) { }
 
     public record DeltaEvent(String text) { }
 

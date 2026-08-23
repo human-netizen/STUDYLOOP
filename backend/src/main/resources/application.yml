@@ -525,10 +525,30 @@ studyloop:
     # How many topics and individual unanswered questions the API returns.
     max-topics: ${ANALYTICS_MAX_TOPICS:20}
     max-ungrounded: ${ANALYTICS_MAX_UNGROUNDED:25}
+    # Phase 20.3: how many times a student must already have asked something before chat tells them
+    # so. Two, so the line appears on the third ask — the first repeat is usually a rephrase of a
+    # question that was answered badly, and "you have asked this before" while somebody is still
+    # asking it is an accusation rather than a help. Same 0.82 above decides what counts as the
+    # same question, so the header and the instructor's topic list can never disagree about it.
+    # 0 switches the header off (ANALYTICS_REPEAT_MINIMUM).
+    repeat-minimum: ${ANALYTICS_REPEAT_MINIMUM:2}
     # The warming sweep. The instructor page recomputes stale clusters itself, so these only
     # decide how often that cost is paid in the background instead of in front of someone.
     cluster-interval: ${ANALYTICS_CLUSTER_INTERVAL:PT15M}
     cluster-initial-delay: ${ANALYTICS_CLUSTER_INITIAL_DELAY:PT2M}
+  forum:
+    # Phase 20.1: when a document finishes ingesting, re-ask the course's open forum threads and
+    # post an answer to any the corpus can now answer. The thread stays open, the reply is labelled
+    # as the assistant's, and it can never be accepted into the materials.
+    #
+    # False (FORUM_WATCH_ENABLED) makes an upload behave exactly as it did in Phase 19 — the
+    # comparison to run when demonstrating what the watch is worth.
+    watch-enabled: ${FORUM_WATCH_ENABLED:true}
+    # How many open threads one upload may re-check, newest first. This feature's cost is paid per
+    # *upload* rather than per student, so the bound matters: at 20, importing a semester of
+    # lectures is at most 20 retrievals and 20 model calls per file, and every one of them is
+    # skipped for a thread the assistant has already answered.
+    watch-max-threads: ${FORUM_WATCH_MAX_THREADS:20}
   quota:
     # Phase 10: the two guardrails on the paid surface, both per user. They are separate switches
     # because they fail differently — a rate limit clears in seconds, a spent budget does not.

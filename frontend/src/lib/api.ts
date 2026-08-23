@@ -15,6 +15,7 @@ import type {
   ForumThreadDetail,
   ForumThreadStatus,
   ForumThreadSummary,
+  GeneralAnswerResponse,
   GenerateFlashcardsRequest,
   GenerateQuizRequest,
   InvitePreviewResponse,
@@ -463,4 +464,17 @@ export const chatApi = {
     if (!res.ok || !res.body) throw await toError(res)
     await consumeSse(res, handlers)
   },
+
+  // The escape hatch on a refusal (Phase 20.2): the same question answered from general knowledge,
+  // labelled as not coming from this course. Not streamed — it is one short answer behind an
+  // explicit second click — and it returns no citations, because it has none.
+  general: (
+    courseId: string,
+    body: { question: string; conversationId: string; questionEventId: string | null },
+  ) =>
+    request<GeneralAnswerResponse>(`/courses/${courseId}/chat/general`, {
+      method: 'POST',
+      body,
+      auth: true,
+    }),
 }

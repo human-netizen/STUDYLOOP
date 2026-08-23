@@ -5,8 +5,11 @@ import com.studyloop.backend.document.VectorSupport;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -30,6 +33,7 @@ public class QuestionLogService {
 
     private final AnalyticsProperties properties;
     private final QuestionEventRepository repository;
+    private final Clock clock;
 
     // The question was answered from the materials. documentIds are the distinct documents behind
     // the chunks that grounded it — the per-lecture heat.
@@ -63,6 +67,46 @@ public class QuestionLogService {
     public boolean isCourseQuestion(UUID courseId, UUID questionEventId) {
         return questionEventId != null && repository.existsInCourse(courseId, questionEventId);
     }
+
+    // Phase 20.2 — records that a refused question was answered from general knowledge instead.
+    //
+    // A stamp on the refusal rather than a new row, so the escalation rate has the refusal count
+    // as its denominator and a click cannot inflate "questions asked". Silently a no-op when the
+    // id names nothing in this course, matching the forum's rule for the same id arriving from
+    // the same client: the student still gets their answer, and the only thing lost is a
+    // measurement nobody was owed.
+    public void recordEscalation(UUID courseId, UUID questionEventId) {
+        if (!properties.enabled() || questionEventId == null) {
+            return;
+        }
+        repository.markEscalated(courseId, questionEventId, clock.instant());
+    }
+
+    // Phase 20.3 — how many times this student has already asked this course the same thing.
+    //
+    // Empty is the answer for almost every turn, and cheaply: one filtered scan of the asker's own
+    // rows, on a vector the caller already had. `minimum` is the number of *prior* questions
+    // required before this counts as a pattern rather than as somebody rephrasing.
+    public Optional<Recurrence> recurrence(UUID courseId, UUID askerId, float[] questionVector) {
+        if (!properties.enabled() || questionVector == null) {
+            return Optional.empty();
+        }
+        int minimum = properties.repeatMinimum();
+        if (minimum <= 0) {
+            return Optional.empty();
+        }
+        return repository
+                .recurrence(courseId, askerId, VectorSupport.toLiteral(questionVector),
+                        properties.clusterThreshold())
+                .filter(row -> row.times() >= minimum)
+                .map(row -> new Recurrence(row.times(), row.lastAskedAt(), row.lastQuestion()));
+    }
+
+    // What the student asked before, and when they last asked it. The earlier *answers* are
+    // deliberately not here and are not fetched: the point of this record is to say "you have been
+    // here before", and re-serving a previous answer as if it were established fact is the
+    // failure mode this feature was written as the cheap alternative to.
+    public record Recurrence(int times, Instant lastAskedAt, String lastQuestion) { }
 
     // Returns null when logging is switched off, so callers skip the follow-up write too.
     private UUID insert(UUID courseId, UUID askedBy, String question, float[] questionVector,

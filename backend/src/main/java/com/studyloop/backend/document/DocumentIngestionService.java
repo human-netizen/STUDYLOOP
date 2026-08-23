@@ -2,6 +2,7 @@ package com.studyloop.backend.document;
 
 import com.studyloop.backend.chat.SemanticCacheService;
 import com.studyloop.backend.config.SummaryProperties;
+import com.studyloop.backend.forum.ForumWatchService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,7 @@ public class DocumentIngestionService {
     private final DocumentSummaryService summaryService;
     private final SummaryProperties summaryProperties;
     private final SemanticCacheService semanticCache;
+    private final ForumWatchService forumWatch;
 
     public void ingest(UUID documentId) {
         Document document = documentRepository.findById(documentId).orElse(null);
@@ -100,6 +102,11 @@ public class DocumentIngestionService {
         // The course's corpus just grew, so every answer cached against the old one is suspect —
         // most of all the refusals, which this document may well have just made answerable.
         semanticCache.invalidate(courseId);
+        // Phase 20.1 is that sentence taken one step further. Invalidating the cache means the next
+        // student to ask gets a fresh answer; the sweep goes and tells the students who already
+        // asked and were told no. Same trigger, same reasoning, and the only difference is whether
+        // anybody has to come back and ask again to find out.
+        forumWatch.sweep(courseId, documentId);
         summarizeQuietly(courseId, documentId);
     }
 

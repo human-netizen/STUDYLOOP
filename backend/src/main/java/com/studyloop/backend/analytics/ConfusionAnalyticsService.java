@@ -93,7 +93,8 @@ public class ConfusionAnalyticsService {
 
         return new ConfusionReport(
                 windowDays,
-                ConfusionTotals.of(totals.asked(), totals.ungrounded(), totals.askers()),
+                ConfusionTotals.of(totals.asked(), totals.ungrounded(), totals.escalated(),
+                        totals.askers()),
                 lectures,
                 topics,
                 ungrounded,
@@ -157,7 +158,7 @@ public class ConfusionAnalyticsService {
 
     private static UngroundedQuestion toUngrounded(UngroundedRow row) {
         return new UngroundedQuestion(row.question(), row.topSimilarity(), row.askedAt(),
-                row.eventId(), row.threadId());
+                row.eventId(), row.threadId(), row.escalated());
     }
 
     // A caller asking for 0 days means "the default", not "an empty window"; a caller asking for

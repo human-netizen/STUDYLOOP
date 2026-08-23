@@ -4,9 +4,12 @@ import com.studyloop.backend.analytics.QuestionLogService;
 import com.studyloop.backend.chat.PreparedTurn.CacheWrite;
 import com.studyloop.backend.chat.SemanticCacheService.CacheProbe;
 import com.studyloop.backend.chat.SemanticCacheService.CachedAnswer;
+import com.studyloop.backend.chat.dto.AskedBefore;
 import com.studyloop.backend.chat.dto.ChatRequest;
 import com.studyloop.backend.chat.dto.ChatResponse;
 import com.studyloop.backend.chat.dto.Citation;
+import com.studyloop.backend.chat.dto.GeneralAnswerRequest;
+import com.studyloop.backend.chat.dto.GeneralAnswerResponse;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
 import com.studyloop.backend.document.Language;
@@ -15,6 +18,8 @@ import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievalService;
 import com.studyloop.backend.retrieval.RetrievedChunk;
 import com.studyloop.backend.retrieval.SectionExpander;
+import com.studyloop.backend.usage.AiOperation;
+import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -86,12 +92,13 @@ public class ChatService {
         PreparedTurn prepared = prepare(actorId, courseId, request);
         if (prepared.isAnswered()) {
             return new ChatResponse(prepared.conversationId(), prepared.finalAnswer(),
-                    prepared.citations(), prepared.questionEventId());
+                    prepared.citations(), prepared.questionEventId(), prepared.askedBefore());
         }
 
         String answer = chatClient.complete(prepared.messages());
         completeTurn(prepared, answer);
-        return new ChatResponse(prepared.conversationId(), answer, prepared.citations(), null);
+        return new ChatResponse(prepared.conversationId(), answer, prepared.citations(), null,
+                prepared.askedBefore());
     }
 
     // The fast DB half of a streaming turn: resolve the thread, try the cache, retrieve, gate,
@@ -124,6 +131,11 @@ public class ChatService {
         CacheProbe probe = opensThread ? semanticCache.probe(courseId, question) : CacheProbe.unavailable();
         if (probe.isHit()) {
             CachedAnswer cached = probe.hit();
+            // 20.3, and a cache hit is the case it matters most on: this is the third time the same
+            // student has asked the same thing, so it is also the answer most likely to be served
+            // from storage. Telling them they asked this on the 4th is the difference between a
+            // fast answer and a fast answer they have already read and not understood.
+            AskedBefore repeated = askedBefore(courseId, actorId, probe.questionVector());
             saveMessage(conversation, ChatRole.ASSISTANT, cached.answer());
             // Still a question the class asked, so it still counts toward confusion analytics.
             // Who paid for the answer is a cost concern, not a teaching one. No retrieval ran, so
@@ -131,7 +143,8 @@ public class ChatService {
             // there is no top similarity to report.
             questionLog.recordGrounded(courseId, actorId, question, probe.questionVector(), null,
                     documentIdsOf(cached.citations()));
-            return PreparedTurn.answered(conversation.getId(), cached.citations(), cached.answer());
+            return PreparedTurn.answered(conversation.getId(), cached.citations(), cached.answer(),
+                    repeated);
         }
 
         // Ground on the course's materials (the same hybrid retrieval the search API uses),
@@ -149,6 +162,11 @@ public class ChatService {
                 ? retrieval.topVectorSimilarity().getAsDouble()
                 : null;
 
+        // 20.3, and computed before the gate rather than after it, so a question refused for the
+        // third time still carries the header. That pairing is the one an instructor most needs to
+        // see and the one a student is most owed an explanation for.
+        AskedBefore repeated = askedBefore(courseId, actorId, questionVector);
+
         // Confidence gate: if nothing relevant came back, refuse deterministically instead of
         // letting the model answer from weak or absent context (and skip the provider call).
         if (confidenceGate.shouldRefuse(retrieval)) {
@@ -159,7 +177,7 @@ public class ChatService {
             // question rather than as a copy of its text.
             UUID questionEventId =
                     questionLog.recordRefused(courseId, actorId, question, questionVector, topSimilarity);
-            return PreparedTurn.refused(conversation.getId(), refusal, questionEventId);
+            return PreparedTurn.refused(conversation.getId(), refusal, questionEventId, repeated);
         }
 
         // Logged here rather than after generation on purpose: the question was asked and the
@@ -174,8 +192,9 @@ public class ChatService {
         // The sources are the retrieved chunks expanded to their sections (13.5): retrieval picked
         // them on precision, and the model reads them with the surrounding paragraph it needs.
         List<LlmMessage> messages = new ArrayList<>();
-        messages.add(LlmMessage.system(
-                buildSystemPrompt(chunks, sectionExpander.expand(chunks), language)));
+        messages.add(LlmMessage.system(GroundedPrompt.system(
+                chunks, sectionExpander.expand(chunks), language,
+                repeated == null ? 0 : repeated.times())));
         messages.addAll(replayHistory(conversation.getId()));
 
         // Cache only what the cache could ever serve: an opening question, answered from the
@@ -184,7 +203,50 @@ public class ChatService {
         CacheWrite cacheWrite = opensThread && probe.questionVector() != null
                 ? new CacheWrite(courseId, question, probe.questionVector())
                 : null;
-        return PreparedTurn.answerable(conversation.getId(), toCitations(chunks), messages, cacheWrite);
+        return PreparedTurn.answerable(conversation.getId(), toCitations(chunks), messages,
+                cacheWrite, repeated);
+    }
+
+    // Phase 20.2 — the escape hatch on a refusal: answer the question from the model's own
+    // knowledge, say so, and record that it happened.
+    //
+    // It lives here rather than in a service of its own because it is a turn in a conversation and
+    // needs what a turn needs: the membership check, the thread, the transcript. What it
+    // deliberately does *not* share with prepare() is the grounded pipeline — no retrieval, no
+    // gate, no citations, and **no semantic cache**, on either side. Not written, because an
+    // ungrounded answer must never later be served to somebody who asked the course a question;
+    // not read, because the student has already been told what the corpus had to say.
+    //
+    // The transcript is not replayed either. This answers the one question the course could not,
+    // and the last line of that transcript is the refusal — feeding it back asks the model to
+    // explain why it just declined.
+    @Transactional
+    public GeneralAnswerResponse general(UUID actorId, UUID courseId, GeneralAnswerRequest request) {
+        courseAccess.requireMember(actorId, courseId);
+        if (!chatClient.isConfigured()) {
+            throw new ChatException("Chat provider is not configured.");
+        }
+
+        String question = request.question().trim();
+        ChatConversation conversation = conversationRepository
+                .findByIdAndCourseSpaceIdAndCreatedById(request.conversationId(), courseId, actorId)
+                .orElseThrow(() -> new ChatConversationNotFoundException(request.conversationId()));
+
+        // The question is already in this conversation — the refused turn saved it moments ago -
+        // so saving it again would show the student asking twice. Only the answer is new.
+        List<LlmMessage> messages = List.of(
+                LlmMessage.system(GroundedPrompt.generalKnowledge(languageDetector.detect(question))),
+                LlmMessage.user(question));
+
+        String answer;
+        try (var ignored = AiUsageContext.of(AiOperation.GENERAL_KNOWLEDGE)) {
+            answer = chatClient.complete(messages);
+        }
+
+        saveMessage(conversation, ChatRole.GENERAL, answer);
+        // Stamped on the refusal rather than written as a new question — see QuestionLogService.
+        questionLog.recordEscalation(courseId, request.questionEventId());
+        return new GeneralAnswerResponse(conversation.getId(), answer);
     }
 
     // Saves the finished answer and, when the turn was cacheable, remembers it for next time.
@@ -232,9 +294,17 @@ public class ChatService {
                 : all;
         List<LlmMessage> history = new ArrayList<>(recent.size());
         for (ChatMessage message : recent) {
-            history.add(message.getRole() == ChatRole.USER
-                    ? LlmMessage.user(message.getContent())
-                    : LlmMessage.assistant(message.getContent()));
+            // A GENERAL turn replays as the assistant's, carrying the one thing the model cannot
+            // otherwise know: that this particular past answer did not come from the materials.
+            // Without the marker a later grounded turn may reuse it and attach a [n] to it, which
+            // would put a citation on the one paragraph in the transcript that never had a source.
+            history.add(switch (message.getRole()) {
+                case USER -> LlmMessage.user(message.getContent());
+                case ASSISTANT -> LlmMessage.assistant(message.getContent());
+                case GENERAL -> LlmMessage.assistant(
+                        "(answered from general knowledge, not from the course materials)\n"
+                        + message.getContent());
+            });
         }
         return history;
     }
@@ -247,61 +317,14 @@ public class ChatService {
         messageRepository.save(message);
     }
 
-    // `sources` is one passage per chunk, in the same order — the chunk's own text, or the section
-    // it belongs to. The citation label still comes from the chunk, so [3] means the page retrieval
-    // actually matched even when the model was shown the pages around it.
-    //
-    // `language` (19.3) adds one line and only when it has something to say. A model answers in the
-    // language it is instructed in, and this prompt is English, so a Bangla question was coming
-    // back in English however the sources were written — the model was following its instructions.
-    //
-    // **The English prompt is left byte-identical rather than gaining an "answer in English" line**,
-    // which is not tidiness: every answer this application has produced was generated from that
-    // exact string, and a prompt that changes for every question changes what every one of them
-    // says. A Bangla question adds a line; an English question is the pipeline as it was.
-    private static String buildSystemPrompt(List<RetrievedChunk> chunks, List<String> sources,
-                                            Language language) {
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("""
-                You are StudyLoop's study assistant. Answer the student's question using ONLY the \
-                numbered sources below.
-                - Cite every claim with its source number in square brackets, e.g. [1] or [2][3].
-                - If the sources do not contain the answer, say you don't have that in the course \
-                materials. Do not use outside knowledge or guess.
-                - Be concise and precise.
-                """);
-        if (language != Language.ENGLISH) {
-            // Named in English, and placed last so it is the instruction nearest the sources. The
-            // sources themselves may be in either language: a Bangla course quoting an English
-            // paper should still be answered in Bangla, and saying so explicitly is what stops the
-            // model from mirroring whichever language the retrieved passages happen to be in.
-            prompt.append("- Write your answer in ").append(language.promptName())
-                    .append(", whatever language the sources are written in. Keep technical terms, ")
-                    .append("identifiers and the [n] citation markers exactly as they appear.\n");
-        }
-        prompt.append("""
-
-                Sources:
-                """);
-        if (chunks.isEmpty()) {
-            prompt.append("(no relevant sources were found in the course materials)");
-            return prompt.toString();
-        }
-        for (int i = 0; i < chunks.size(); i++) {
-            RetrievedChunk chunk = chunks.get(i);
-            prompt.append('[').append(i + 1).append("] (").append(chunk.filename());
-            if (chunk.pageNumber() != null) {
-                prompt.append(", p.").append(chunk.pageNumber());
-            }
-            // Where the passage sits in the document. Cheap for the model and worth having: it is
-            // the difference between "expected search time is O(log n)" as a floating claim and as
-            // a claim about skiplists.
-            if (chunk.sectionPath() != null) {
-                prompt.append(" · ").append(chunk.sectionPath());
-            }
-            prompt.append(")\n").append(sources.get(i).strip()).append("\n\n");
-        }
-        return prompt.toString();
+    // The header, or null when this is not a repeat — which it is not on the overwhelming
+    // majority of turns, at the cost of one filtered scan of the asker's own rows.
+    private AskedBefore askedBefore(UUID courseId, UUID actorId, float[] questionVector) {
+        Optional<QuestionLogService.Recurrence> recurrence =
+                questionLog.recurrence(courseId, actorId, questionVector);
+        return recurrence
+                .map(found -> new AskedBefore(found.times(), found.lastAskedAt(), found.lastQuestion()))
+                .orElse(null);
     }
 
     private static List<Citation> toCitations(List<RetrievedChunk> chunks) {

@@ -21,6 +21,7 @@ import com.studyloop.backend.document.NoteNotReadyException;
 import com.studyloop.backend.document.SummaryGenerationException;
 import com.studyloop.backend.document.UnsupportedDocumentTypeException;
 import com.studyloop.backend.flashcard.FlashcardGenerationException;
+import com.studyloop.backend.forum.AssistantAnswerNotAcceptableException;
 import com.studyloop.backend.forum.ForumAnswerNotFoundException;
 import com.studyloop.backend.forum.ForumThreadNotFoundException;
 import com.studyloop.backend.flashcard.FlashcardNotFoundException;
@@ -284,6 +285,16 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, ex.getMessage());
         problem.setTitle("Reply not found");
+        return problem;
+    }
+
+    // 409, not 403: the caller is allowed to accept answers, and this is not an answer that can
+    // be accepted. See ForumAnswerAuthor.
+    @ExceptionHandler(AssistantAnswerNotAcceptableException.class)
+    ProblemDetail handleAssistantAnswerNotAcceptable(AssistantAnswerNotAcceptableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("That reply cannot become course material");
         return problem;
     }
 

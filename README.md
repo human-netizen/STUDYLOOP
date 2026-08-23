@@ -76,6 +76,8 @@ Postgres with pgvector rather than an in-memory stand-in.
 | **Search** | Passages grouped by document with matched words highlighted. No confidence gate here, because you can judge a weak match yourself. |
 | **Confusion heatmap** | Which lectures the class asks about, questions clustered by meaning, and the questions the corpus could not answer at all. |
 | **Course forum** | Any refusal escalates to the class. An instructor accepts an answer; the accepted answer is embedded back into the course. |
+| **Corpus watch** | Uploading a document re-asks the course's open forum threads and answers the ones it just made answerable. The reply is labelled, the thread stays open, and it can never become course material itself. |
+| **General knowledge** | A refusal offers one explicit way out: the same question answered from outside the materials, visibly marked, with no citations — and counted, so the instructor can see which gaps students worked around. |
 | **Cost visibility** | Every paid call recorded and priced from the provider's own billing figures, with an admin dashboard by feature and by day. |
 | **Answer cache** | Near-identical questions reuse a previous answer. Uploading a document clears the course's cache. |
 | **Usage limits** | Per-user request rate limits and a rolling token allowance on everything that costs money. |
@@ -229,6 +231,20 @@ Markdown storage gave up reachable.
 A refusal escalates to the course forum. Anyone may answer, an instructor accepts one, and the
 accepted answer is embedded back into the corpus, so the next student to ask gets it from the
 assistant instead.
+
+It also runs the other way. When a document finishes ingesting, the course's open threads are asked
+again through the same retrieval and the same confidence gate, and any the corpus can now answer get
+an answer — the question that was refused on Tuesday, answered when the lecture that covers it
+arrived. Three rules keep that honest: the thread stays open, because a person has not confirmed
+anything; the assistant may reply to a thread once, however many documents arrive; and **its reply
+can never be accepted into the corpus**, because a corpus that can absorb its own model's output is
+a course teaching itself whatever it first guessed. Only a person's answer can become material.
+
+A refusal also offers a way out for the questions the course was never going to cover. One explicit
+click answers it from general knowledge, styled differently, labelled as not coming from the
+materials and carrying no citations, since it has none. It is never cached and never written back,
+and it is counted: the confusion page reports how many refusals a student cared about enough to ask
+a second way, which is a sharper signal about missing material than the refusal count itself.
 
 ### 3.9 Cost, cache and quotas
 
@@ -393,7 +409,7 @@ openable at [diagrams.net](https://app.diagrams.net).
 | **Retrieval** | `retrieval/` | Dense + sparse search, RRF fusion, cross-encoder reranking, section expansion, highlighted snippet search |
 | **Chat** | `chat/` | Grounded answers, SSE streaming, citations, conversation memory, semantic answer cache, the refusal gate |
 | **Assessment** | `quiz/`, `flashcard/`, `review/` | Quiz generation and auto-grading, flashcards, SM-2 spaced repetition |
-| **Knowledge loop** | `forum/` | Escalated refusals, accepted answers embedded back into the corpus |
+| **Knowledge loop** | `forum/` | Escalated refusals, accepted answers embedded back into the corpus, and the corpus watch that answers open threads when new material arrives |
 | **Analytics** | `analytics/` | Question clustering by meaning, per-lecture confusion heatmap, unanswered questions |
 | **Cost and limits** | `usage/` | Token ledger priced from provider billing, rate limits, rolling quotas, admin cost dashboard |
 | **Configuration** | `config/`, `common/` | `@ConfigurationProperties` for every tunable, one JSON error shape for every failure |

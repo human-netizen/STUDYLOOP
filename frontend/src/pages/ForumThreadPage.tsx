@@ -155,6 +155,7 @@ function AnswerCard({
 }) {
   const [accepting, setAccepting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fromAssistant = answer.authorKind === 'ASSISTANT'
 
   async function accept() {
     setError(null)
@@ -168,16 +169,37 @@ function AnswerCard({
     }
   }
 
+  // The assistant's reply is marked, not hidden. It is grounded in the same materials and gated by
+  // the same confidence rule as a chat answer, so it is worth reading — but nobody signed it, so it
+  // gets no name, no accept button (the backend refuses that too) and a line saying where it came
+  // from. A course whose corpus could absorb its own model's output would end up teaching itself
+  // whatever it first guessed.
   return (
-    <Panel className={cx('flex flex-col gap-3', answer.accepted && 'border-accent-deep')}>
+    <Panel
+      className={cx(
+        'flex flex-col gap-3',
+        answer.accepted && 'border-accent-deep',
+        fromAssistant && 'border-dashed',
+      )}
+    >
       <div className="flex items-start justify-between gap-4">
         <Meta>
-          {answer.authorName} · {new Date(answer.createdAt).toLocaleDateString()}
+          {fromAssistant ? 'StudyLoop assistant' : answer.authorName} ·{' '}
+          {new Date(answer.createdAt).toLocaleDateString()}
+          {fromAssistant && answer.topSimilarity != null &&
+            ` · match ${answer.topSimilarity.toFixed(2)}`}
         </Meta>
         {answer.accepted && <Pill tone="ok">Accepted</Pill>}
+        {fromAssistant && <Pill tone="warn">From the materials, not from a person</Pill>}
       </div>
       <Markdown text={answer.body} className="text-sm leading-relaxed text-ink-2" />
-      {canAccept && !answer.accepted && (
+      {fromAssistant && (
+        <Meta>
+          Posted automatically when new material was uploaded that covers this question. It cannot
+          be accepted into the course materials — a reply from a person can.
+        </Meta>
+      )}
+      {canAccept && !answer.accepted && !fromAssistant && (
         <div>
           <Button size="sm" onClick={() => void accept()} disabled={accepting}>
             {accepting ? 'Adding to materials…' : 'Accept & add to materials'}

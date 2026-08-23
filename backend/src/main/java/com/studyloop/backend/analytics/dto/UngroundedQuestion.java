@@ -18,5 +18,9 @@ public record UngroundedQuestion(
         Double topSimilarity,
         Instant askedAt,
         UUID questionEventId,
-        UUID threadId
+        UUID threadId,
+        // Whether the student answered it from general knowledge instead (Phase 20.2). Two rows
+        // with the same low similarity read very differently once this is on one of them: one is
+        // a question nobody missed, the other is a gap somebody worked around.
+        boolean escalatedToGeneral
 ) { }
