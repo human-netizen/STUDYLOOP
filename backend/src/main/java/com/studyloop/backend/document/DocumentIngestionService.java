@@ -26,6 +26,7 @@ public class DocumentIngestionService {
     private final DocumentExtractors extractors;
     private final DocumentNoteBlockService noteBlockService;
     private final TextChunker textChunker;
+    private final VisualChunker visualChunker;
     private final SyntheticQueryGenerator syntheticQueryGenerator;
     private final DocumentChunkService chunkService;
     private final DocumentEmbeddingService embeddingService;
@@ -56,14 +57,21 @@ public class DocumentIngestionService {
             List<PageText> pages = extraction.pages();
 
             statusService.markStatus(documentId, DocumentStatus.CHUNKING);
-            List<TextChunk> chunks = textChunker.chunk(pages, titleOf(document));
+            String title = titleOf(document);
+            List<TextChunk> chunks = textChunker.chunk(pages, title);
             // Phase 14.1, and deliberately before the chunks are written rather than after. What
             // it produces goes into embed_text, which is the string the next step embeds and which
             // content_tsv is generated from — so a second pass would mean re-embedding every chunk
             // in the document to index text that could have been there the first time. Off by
             // default, and a no-op that returns the same list when it is.
             chunks = syntheticQueryGenerator.augment(chunks);
-            chunkService.replaceChunks(documentId, chunks, pages.size(), extraction.visionPages());
+            // 17.2, and after the text chunks rather than beside them, because a visual chunk
+            // continues the same index sequence. An extractor that rendered no pages produces an
+            // empty list here and the rest of this method reads exactly as it did in Phase 16.
+            List<VisualChunk> visuals =
+                    visualChunker.chunk(extraction.images(), pages, title, chunks.size());
+            chunkService.replaceChunks(documentId, chunks, visuals, pages.size(),
+                    extraction.visionPages());
             // 16.3, and only ever non-empty for a photographed note. The blocks the model was not
             // sure about are not in `chunks` — that is the point of the threshold — so this is the
             // only record that they were on the page at all, and the review view reads it.
@@ -71,6 +79,10 @@ public class DocumentIngestionService {
 
             statusService.markStatus(documentId, DocumentStatus.EMBEDDING);
             embeddingService.embedChunks(documentId);
+            // Two calls rather than one, because the two are embedding different things: the text
+            // of a passage, and a picture of a page. Same model, same space, same column — which
+            // is exactly why they can be two calls and still be compared against one query.
+            embeddingService.embedVisualChunks(documentId, visuals);
 
             statusService.markStatus(documentId, DocumentStatus.READY);
         } catch (Exception e) {

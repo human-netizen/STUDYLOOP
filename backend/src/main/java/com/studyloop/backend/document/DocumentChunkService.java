@@ -24,6 +24,14 @@ public class DocumentChunkService {
 
     @Transactional
     public void replaceChunks(UUID documentId, List<TextChunk> chunks, int pageCount, int visionPages) {
+        replaceChunks(documentId, chunks, List.of(), pageCount, visionPages);
+    }
+
+    // Text chunks and visual chunks in one transaction, because they are one document's index and
+    // a document half-rebuilt is a document that answers questions about two ingests at once.
+    @Transactional
+    public void replaceChunks(UUID documentId, List<TextChunk> chunks, List<VisualChunk> visuals,
+                              int pageCount, int visionPages) {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
 
@@ -41,6 +49,21 @@ public class DocumentChunkService {
             chunk.setSectionPath(source.sectionPath());
             chunk.setContent(source.content());
             chunk.setEmbedText(source.embedText());
+            chunk.setTokenCount(source.tokenCount());
+            chunkRepository.save(chunk);
+        }
+
+        // Appended after the text chunks, sharing the index sequence. No section path, deliberately
+        // — a visual chunk is a page rather than a section, and one would make the small-to-big
+        // expansion splice a whole section's prose around a figure and then cite the figure for it.
+        for (VisualChunk source : visuals) {
+            DocumentChunk chunk = new DocumentChunk();
+            chunk.setDocument(document);
+            chunk.setModality(ChunkModality.VISUAL);
+            chunk.setChunkIndex(source.index());
+            chunk.setPageNumber(source.pageNumber());
+            chunk.setPageEnd(source.pageNumber());
+            chunk.setContent(source.content());
             chunk.setTokenCount(source.tokenCount());
             chunkRepository.save(chunk);
         }

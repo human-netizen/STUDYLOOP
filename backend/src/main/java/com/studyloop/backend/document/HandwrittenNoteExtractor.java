@@ -77,7 +77,7 @@ public class HandwrittenNoteExtractor implements DocumentExtractor {
         // One image is one page, and counted as one vision page for the same reason a routed PDF
         // page is: `documents.vision_pages` is what the eval report reads to say how the corpus was
         // built, and a corpus containing photographed notes was built with a vision model.
-        return new Extraction(List.of(new PageText(1, markdown)), 1, judged);
+        return new Extraction(List.of(new PageText(1, markdown)), 1, judged, List.of());
     }
 
     private List<TranscribedBlock> judge(List<TranscribedBlock> read) {

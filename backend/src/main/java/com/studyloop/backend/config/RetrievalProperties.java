@@ -57,7 +57,13 @@ public record RetrievalProperties(Stages stages, Rerank rerank) {
             boolean hyde,
             // Phase 14: trigram similarity as a third lexical retriever, for typos and morphology.
             boolean trigram,
-            // Phase 15: page images embedded by a vision model, for figures text extraction cannot see.
+            // Phase 17.3: page images embedded into the text vector space, fused as a third ranked
+            // list, for the figures text extraction cannot see.
+            //
+            // The query-time half of a pair. Whether a corpus *has* visual chunks is decided at
+            // ingest by `studyloop.visual.enabled`; this decides whether they are searched. Kept
+            // apart on purpose, because the honest baseline for this stage is the same corpus with
+            // the list switched off, and that is only possible if the two are separate switches.
             boolean visual,
             // Phase 14: questions generated per section at ingestion and indexed alongside it.
             //

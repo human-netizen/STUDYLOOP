@@ -33,7 +33,14 @@ public record GoldenSet(int pageTolerance, List<GoldenQuestion> questions) {
         UNANSWERABLE
     }
 
-    public record GoldenQuestion(String id, Kind kind, String question, List<PageRef> expected, String note) {
+    // `addedIn` is the phase that introduced the question, or 0 for the original set (Phase 17.4).
+    //
+    // It exists because a golden set that grows quietly stops being a baseline: every average here
+    // is over the questions in the file, so four new ones change the denominator of numbers five
+    // earlier phases already published. Marked, the report can print both — the original sixty, to
+    // be compared against those phases, and all of them, to say what the corpus can now be asked.
+    public record GoldenQuestion(String id, Kind kind, String question, List<PageRef> expected,
+                                 String note, int addedIn) {
 
         public boolean answerable() {
             return kind != Kind.UNANSWERABLE;
@@ -59,7 +66,8 @@ public record GoldenSet(int pageTolerance, List<GoldenQuestion> questions) {
                         Kind.valueOf(node.get("kind").asText()),
                         node.get("question").asText(),
                         expectedPages(node.get("expected")),
-                        node.path("note").asText("")));
+                        node.path("note").asText(""),
+                        node.path("addedIn").asInt(0)));
             }
             return new GoldenSet(tolerance, List.copyOf(questions));
         } catch (IOException e) {
@@ -87,4 +95,5 @@ public record GoldenSet(int pageTolerance, List<GoldenQuestion> questions) {
     public List<GoldenQuestion> unanswerable() {
         return questions.stream().filter(q -> !q.answerable()).toList();
     }
+
 }

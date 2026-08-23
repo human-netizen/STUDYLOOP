@@ -172,6 +172,18 @@ class RetrievalEvalTest {
                             + "without them — rerun with -Deval.reset=true", corpus.synthetic())
                     .isZero();
         }
+        // Phase 17.4, and the same shape as the synthetic-queries check above it, because it is the
+        // same hazard read from the other side. Visual chunks are written at *ingest*, so the flag
+        // and the corpus can disagree in both directions: a `visual=ON` header over a corpus that
+        // has no pictures in it describes a list that searched nothing, and a `visual=off` header
+        // over a corpus full of them is the honest baseline this stage has to be measured against
+        // — which is only honest if it is the same corpus.
+        if (retrievalProperties.stages().visual()) {
+            assertThat(corpus.visualChunks())
+                    .as("the visual stage is on but no chunk in the corpus is a page image — this "
+                            + "corpus was ingested without them. Rerun with -Deval.reset=true")
+                    .isGreaterThan(0);
+        }
         assertThat(report.recall())
                 .as("Recall@%d collapsed; the harness is not measuring retrieval (see the report above)", K)
                 .isGreaterThanOrEqualTo(RECALL_FLOOR);
@@ -191,9 +203,11 @@ class RetrievalEvalTest {
         // throw rather than return 0.0, and the only thing it is scored on is whether the gate
         // declined it. Recording zeroes here instead would drag the averages down and make the
         // refusal set read as a retrieval regression.
+        int visualHits = (int) result.chunks().stream().filter(RetrievedChunk::visual).count();
+
         if (!question.answerable()) {
             return new EvalReport.Row(question, retrieved, 0.0, 0.0, 0.0,
-                    topSimilarity, topRelevance, result.lexicalHitCount(), refused);
+                    topSimilarity, topRelevance, result.lexicalHitCount(), visualHits, refused);
         }
 
         List<Double> gains = PageGrading.gradeSpans(retrieved, question.expected(), tolerance);
@@ -201,7 +215,7 @@ class RetrievalEvalTest {
                 RetrievalMetrics.recallAt(gains, question.totalRelevant()),
                 RetrievalMetrics.reciprocalRank(gains),
                 RetrievalMetrics.ndcgAt(gains, question.totalRelevant()),
-                topSimilarity, topRelevance, result.lexicalHitCount(), refused);
+                topSimilarity, topRelevance, result.lexicalHitCount(), visualHits, refused);
     }
 
     // Waits until this question's slot in the rate limit comes round, and returns the next one.

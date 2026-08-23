@@ -3,6 +3,7 @@ package com.studyloop.backend.retrieval;
 import com.studyloop.backend.config.RetrievalProperties;
 import com.studyloop.backend.config.RetrievalProperties.Rerank;
 import com.studyloop.backend.config.RetrievalProperties.Stages;
+import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.DocumentSource;
 import org.junit.jupiter.api.Test;
 
@@ -170,7 +171,7 @@ class RerankStageTest {
         for (int index = 0; index < count; index++) {
             chunks.add(new RetrievedChunk(UUID.randomUUID(), UUID.randomUUID(), "lecture.pdf",
                     DocumentSource.UPLOAD, index + 1, index + 1, null, "c" + index, 8,
-                    scoreOf(index), 0.42, null));
+                    ChunkModality.TEXT, scoreOf(index), 0.42, null));
         }
         return chunks;
     }

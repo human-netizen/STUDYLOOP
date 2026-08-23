@@ -13,19 +13,30 @@ import java.util.List;
 // `visionPages` was Phase 15's record of what an ingest cost; it stays exactly that, and a
 // photographed note is one such page. `blocks` is empty for everything except a handwritten note,
 // where the per-block confidences are the thing 16.3 promises to act on rather than discard.
-public record Extraction(List<PageText> pages, int visionPages, List<TranscribedBlock> blocks) {
+// `images` is Phase 17's addition: the pages this extractor judged to be pictures, rendered, so
+// they can be embedded as pictures. Empty for every format that cannot render itself, which is
+// the same graceful nothing an unconfigured provider produces.
+public record Extraction(List<PageText> pages, int visionPages, List<TranscribedBlock> blocks,
+                         List<PageImage> images) {
 
     public Extraction {
         pages = List.copyOf(pages);
         blocks = List.copyOf(blocks);
+        images = List.copyOf(images);
     }
 
     // A file a text extractor read on its own: no provider call, nothing to show a reviewer.
     public static Extraction of(List<PageText> pages) {
-        return new Extraction(pages, 0, List.of());
+        return new Extraction(pages, 0, List.of(), List.of());
     }
 
     public static Extraction withVision(List<PageText> pages, int visionPages) {
-        return new Extraction(pages, visionPages, List.of());
+        return new Extraction(pages, visionPages, List.of(), List.of());
+    }
+
+    // The same extraction, plus the pages worth embedding as pictures. Separate from the
+    // constructors above so an extractor that has no visual step keeps the call it already had.
+    public Extraction withImages(List<PageImage> images) {
+        return new Extraction(pages, visionPages, blocks, images);
     }
 }

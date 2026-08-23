@@ -2,6 +2,8 @@ package com.studyloop.backend.document;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -41,6 +43,13 @@ public class DocumentChunk {
     // 0-based position of this chunk within its document.
     @Column(name = "chunk_index", nullable = false)
     private int chunkIndex;
+
+    // What this chunk's vector was made from (Phase 17.2). Visual chunks are appended after the
+    // text chunks of the same document, so they continue the same index sequence and the unique
+    // constraint above still means what it meant.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "modality", nullable = false, length = 10)
+    private ChunkModality modality = ChunkModality.TEXT;
 
     // 1-based page the chunk starts on; null if the source had no page information.
     @Column(name = "page_number")

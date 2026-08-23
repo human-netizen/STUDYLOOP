@@ -254,6 +254,11 @@ function AssistantBubble({
 // A citation is a link to a page in a PDF — unless it came from the forum, which has no file
 // behind it. Those render as plain text saying what they are rather than as a click that
 // would open an empty viewer.
+//
+// A `figure` marker is the one other distinction worth making. That citation was found by matching
+// a picture rather than words, so the page will not contain the phrase the student searched for,
+// and a link that looked like every other one would read as a bad citation rather than as a
+// pointer at a diagram.
 function SourceLink({ citation, onCite }: { citation: Citation; onCite: (c: Citation) => void }) {
   if (citation.documentSource === 'FORUM') {
     return (
@@ -270,6 +275,7 @@ function SourceLink({ citation, onCite }: { citation: Citation; onCite: (c: Cita
     >
       [{citation.index}] {citation.filename}
       {citation.pageNumber != null && ` · p.${citation.pageNumber}`}
+      {citation.visual && ' · figure'}
     </button>
   )
 }

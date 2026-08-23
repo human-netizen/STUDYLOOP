@@ -33,7 +33,13 @@ public class DocumentEmbeddingService {
 
         // The query flushes any pending chunk inserts first (Hibernate auto-flush), so the
         // native UPDATE below sees rows written earlier in the same transaction.
-        List<DocumentChunk> chunks = chunkRepository.findByDocumentIdOrderByChunkIndex(documentId);
+        //
+        // Text chunks only, as of Phase 17. A visual chunk's vector is an embedding of its page
+        // image; sending its `content` through the text embedder here would overwrite that with an
+        // embedding of the caption, which is both the wrong vector and an invisible failure — the
+        // row would still be found by *some* query, just never by the one it exists for.
+        List<DocumentChunk> chunks = chunkRepository.findByDocumentIdAndModalityOrderByChunkIndex(
+                documentId, ChunkModality.TEXT);
         if (chunks.isEmpty()) {
             return;
         }
@@ -52,5 +58,60 @@ public class DocumentEmbeddingService {
             jdbcTemplate.update("update document_chunks set embedding = cast(? as vector) where id = ?",
                     VectorSupport.toLiteral(vectors.get(i)), chunks.get(i).getId());
         }
+    }
+
+    // Phase 17.1 — the page images, into the same column, in the same space.
+    //
+    // **Gated on the provider's capability rather than on a flag**, and that is the whole cost of
+    // adding a modality: `embed-v4.0` puts pictures and text in one vector space, so there is no
+    // second column, no second index and no second dimension. A provider that cannot — Google's
+    // text-embedding-004, a local Ollama model — leaves the rows in place with no vector, exactly
+    // as an unconfigured provider has left text chunks since Phase 4. Those rows cost nothing and
+    // are found by nothing, which is the correct behaviour for a picture nobody can index.
+    //
+    // **Not fatal**, unlike a vision-extraction failure, and the difference is what the failure
+    // leaves behind. A page whose scanned text was never read reaches READY unable to answer about
+    // itself at all; a page whose *picture* was not embedded is exactly as answerable as it was in
+    // Phase 16, because its text chunks are untouched. Failing the upload would trade a working
+    // document for a missing improvement.
+    @Transactional
+    public void embedVisualChunks(UUID documentId, List<VisualChunk> visuals) {
+        if (visuals.isEmpty()) {
+            return;
+        }
+        if (!embeddingClient.isConfigured() || !embeddingClient.supportsImages()) {
+            log.warn("Embedding provider cannot embed images; {} visual chunks of document {} "
+                    + "are stored without vectors", visuals.size(), documentId);
+            return;
+        }
+
+        // Matched by index rather than by position in a list this method was handed, because the
+        // rows were written in a different transaction and the only thing tying the two together
+        // is the chunk index the chunker assigned.
+        List<DocumentChunk> rows = chunkRepository.findByDocumentIdAndModalityOrderByChunkIndex(
+                documentId, ChunkModality.VISUAL);
+        if (rows.size() != visuals.size()) {
+            throw new EmbeddingException("Visual chunk count mismatch: expected " + visuals.size()
+                    + " rows, found " + rows.size());
+        }
+
+        List<float[]> vectors;
+        try {
+            vectors = embeddingClient.embedImages(visuals.stream().map(VisualChunk::image).toList());
+        } catch (RuntimeException e) {
+            log.warn("Could not embed {} page images for document {}: {}",
+                    visuals.size(), documentId, e.getMessage());
+            return;
+        }
+        if (vectors.size() != visuals.size()) {
+            throw new EmbeddingException("Image embedding count mismatch: expected "
+                    + visuals.size() + ", got " + vectors.size());
+        }
+
+        for (int i = 0; i < rows.size(); i++) {
+            jdbcTemplate.update("update document_chunks set embedding = cast(? as vector) where id = ?",
+                    VectorSupport.toLiteral(vectors.get(i)), rows.get(i).getId());
+        }
+        log.info("Embedded {} page images for document {}", vectors.size(), documentId);
     }
 }

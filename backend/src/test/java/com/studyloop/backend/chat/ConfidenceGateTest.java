@@ -1,6 +1,7 @@
 package com.studyloop.backend.chat;
 
 import com.studyloop.backend.config.ChatProperties;
+import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.DocumentSource;
 import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievedChunk;
@@ -149,6 +150,6 @@ class ConfidenceGateTest {
     private static List<RetrievedChunk> oneChunk() {
         return List.of(new RetrievedChunk(UUID.randomUUID(), UUID.randomUUID(), "lecture.pdf",
                 DocumentSource.UPLOAD, 4, 4, "Chapter 1 > 1.2 Recurrences", "some course material",
-                12, 0.016, 0.42, null));
+                12, ChunkModality.TEXT, 0.016, 0.42, null));
     }
 }

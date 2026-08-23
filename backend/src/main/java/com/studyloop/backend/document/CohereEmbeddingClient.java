@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClientException;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 // Embeds text with Cohere's hosted embed API (embed-v4.0). A free trial key is limited by
@@ -38,7 +39,24 @@ public class CohereEmbeddingClient implements EmbeddingClient {
     // The only output sizes embed-v4.0 supports; we pick the smallest that covers our target.
     private static final int[] SUPPORTED_DIMENSIONS = {256, 512, 1024, 1536};
 
+    // How many page images go into one embed call (Phase 17.1). Far below the 96 the text side
+    // uses, and the limit that matters is bytes rather than inputs: a 120-DPI page is a few hundred
+    // kilobytes of PNG and base64 adds a third on top, so eight of them is a request measured in
+    // megabytes. Batching at all is worth it because a trial key is limited by *calls* per minute.
+    private static final int MAX_IMAGE_BATCH = 8;
+    // Ceiling on one request's base64 payload, which closes the batch early when the pages are
+    // heavy. A batch is whichever limit is reached first.
+    private static final int MAX_IMAGE_BATCH_BYTES = 6 * 1024 * 1024;
+    private static final String PNG_DATA_URI_PREFIX = "data:image/png;base64,";
+
     private static final String PROVIDER = "cohere";
+
+    // The model name the *dashboard* files image embeddings under. The wire model is the same
+    // embed-v4.0 the text side uses — this string is never sent anywhere — but Cohere bills image
+    // tokens at a different rate from text tokens, and the price table is keyed by model name. One
+    // entry for both would price every page render at the text rate and quietly understate the
+    // only part of ingestion whose cost scales with how many figures a course uploads.
+    private static final String IMAGE_PRICING_MODEL_SUFFIX = "-image";
 
     private final RestClient restClient = RestClient.create();
     private final AiUsageRecorder usageRecorder;
@@ -93,6 +111,112 @@ public class CohereEmbeddingClient implements EmbeddingClient {
         }
         // search_query embeds a question into the same space as the search_document chunks.
         return embedBatch(List.of(text), "search_query", AiOperation.EMBED_QUERY).get(0);
+    }
+
+    // Phase 17.1 — embed-v4.0 takes pictures, and it takes them into the space it already puts text
+    // in. That sentence is the whole feature: no second provider, no second key, no second column,
+    // no dimension change, no new index, and no separate query embedding — the question a student
+    // types is embedded exactly as it was before and compared against a page nobody described.
+    @Override
+    public boolean supportsImages() {
+        return true;
+    }
+
+    // One vector per page image, in order.
+    //
+    // `search_document` rather than an image-specific input type, because these *are* the documents
+    // being indexed and the query side has to stay `search_query` to match them. embed-v4.0 accepts
+    // both alongside images; earlier Cohere models had a separate `image` input type that could
+    // only be compared against itself, which is the thing not to reproduce here.
+    @Override
+    public List<float[]> embedImages(List<byte[]> pngImages) {
+        if (!isConfigured()) {
+            throw new EmbeddingException("Cohere embedding API key is not configured.");
+        }
+        List<float[]> vectors = new ArrayList<>(pngImages.size());
+        List<String> batch = new ArrayList<>();
+        long batchBytes = 0;
+        for (byte[] png : pngImages) {
+            String uri = PNG_DATA_URI_PREFIX + Base64.getEncoder().encodeToString(png);
+            // Closed on whichever limit is reached first, and closed *before* adding, so a single
+            // oversized page goes on its own rather than being dropped for not fitting.
+            if (!batch.isEmpty()
+                    && (batch.size() >= MAX_IMAGE_BATCH || batchBytes + uri.length() > MAX_IMAGE_BATCH_BYTES)) {
+                vectors.addAll(callEmbedImages(batch));
+                batch = new ArrayList<>();
+                batchBytes = 0;
+            }
+            batch.add(uri);
+            batchBytes += uri.length();
+        }
+        if (!batch.isEmpty()) {
+            vectors.addAll(callEmbedImages(batch));
+        }
+        return vectors;
+    }
+
+    // Images go through the same rate-limit wait document text gets, and for the same reason: this
+    // only ever runs at ingest, behind the status machine, with nobody holding a connection open.
+    private List<float[]> callEmbedImages(List<String> dataUris) {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return requestImageEmbeddings(dataUris);
+            } catch (EmbeddingException e) {
+                if (attempt >= MAX_RATE_LIMIT_RETRIES || !isRateLimited(e)) {
+                    throw e;
+                }
+                long wait = RETRY_WAIT.toMillis() * (attempt + 1);
+                log.warn("Cohere rate-limited the image embedding request; waiting {}s and retrying ({}/{})",
+                        wait / 1000, attempt + 1, MAX_RATE_LIMIT_RETRIES);
+                sleep(wait);
+            }
+        }
+    }
+
+    private List<float[]> requestImageEmbeddings(List<String> dataUris) {
+        // The v4 request shape: `inputs`, a list of content-block arrays, rather than the flat
+        // `texts` array the rest of this class sends. Cohere still accepts a top-level `images`
+        // list, and it is the older one-space-per-modality form — this is the shape that also lets
+        // a single input carry text and a picture together, which is where 17.2 would go next.
+        List<EmbedInput> inputs = dataUris.stream()
+                .map(uri -> new EmbedInput(List.of(ImageBlock.of(uri))))
+                .toList();
+        ImageEmbedRequest request = new ImageEmbedRequest(
+                model, "search_document", inputs, List.of("float"), requestDimension);
+
+        EmbedResponse response;
+        try {
+            response = restClient.post()
+                    .uri(EMBED_URL)
+                    .header("Authorization", "Bearer " + apiKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .body(EmbedResponse.class);
+        } catch (RestClientException e) {
+            throw new EmbeddingException("Cohere image embedding request failed: " + e.getMessage(), e);
+        }
+
+        List<float[]> floats = response != null && response.embeddings() != null
+                ? response.embeddings().floats() : null;
+        if (floats == null || floats.size() != dataUris.size()) {
+            throw new EmbeddingException("Unexpected image embedding response from Cohere.");
+        }
+        List<float[]> vectors = new ArrayList<>(dataUris.size());
+        for (float[] values : floats) {
+            if (values == null) {
+                throw new EmbeddingException("Image embedding response was missing vector values.");
+            }
+            vectors.add(fitToDimensions(values));
+        }
+
+        // **billed_units.input_tokens is zero on an image call, and image_tokens carries the
+        // count.** Reading the wrong one is a silent zero: the ledger would record a real call, at
+        // a real price, for nothing — and the one thing the cost dashboard exists to answer is what
+        // the expensive-looking part of the pipeline actually costs.
+        usageRecorder.record(PROVIDER, model + IMAGE_PRICING_MODEL_SUFFIX,
+                AiOperation.EMBED_IMAGES, response.billedImageTokens(), 0);
+        return vectors;
     }
 
     // Waits out the provider's rate limit and tries again — but only when indexing a document.
@@ -207,6 +331,27 @@ public class CohereEmbeddingClient implements EmbeddingClient {
     private record EmbedRequest(String model, String input_type, List<String> texts,
                                 List<String> embedding_types, int output_dimension) { }
 
+    // The same endpoint with `inputs` in place of `texts` (Phase 17.1). Two record types rather
+    // than one with both fields nullable, because Jackson would then have to be told to drop the
+    // null — and a request carrying `"texts": null` beside a populated `inputs` is a shape the
+    // provider is under no obligation to accept.
+    private record ImageEmbedRequest(String model, String input_type, List<EmbedInput> inputs,
+                                     List<String> embedding_types, int output_dimension) { }
+
+    private record EmbedInput(List<ImageBlock> content) { }
+
+    // A content block. `type` names the block and `image_url.url` carries the picture as a
+    // `data:image/png;base64,...` URI — the same shape as a remote image reference, with the bytes
+    // inline instead of a host to fetch them from, so nothing has to be uploaded anywhere first.
+    private record ImageBlock(String type, ImageUrl image_url) {
+
+        static ImageBlock of(String dataUri) {
+            return new ImageBlock("image_url", new ImageUrl(dataUri));
+        }
+    }
+
+    private record ImageUrl(String url) { }
+
     // Cohere v2/embed response shape. We need embeddings.float — a list of vectors — and the
     // billed token count that meta carries, which is what the cost dashboard is built from.
     // Jackson deserializes each JSON number array straight into a float[]. "float" is a Java
@@ -221,11 +366,22 @@ public class CohereEmbeddingClient implements EmbeddingClient {
             }
             return meta.billedUnits().inputTokens().intValue();
         }
+
+        // The count an image call reports. Measured against the live API rather than assumed: an
+        // image request comes back with `input_tokens: 0` and the real number in `image_tokens`,
+        // so a client reading the field above would file every page render as a free call.
+        int billedImageTokens() {
+            if (meta == null || meta.billedUnits() == null || meta.billedUnits().imageTokens() == null) {
+                return 0;
+            }
+            return meta.billedUnits().imageTokens().intValue();
+        }
     }
 
     private record Embeddings(@JsonProperty("float") List<float[]> floats) { }
 
     private record Meta(@JsonProperty("billed_units") BilledUnits billedUnits) { }
 
-    private record BilledUnits(@JsonProperty("input_tokens") Double inputTokens) { }
+    private record BilledUnits(@JsonProperty("input_tokens") Double inputTokens,
+                               @JsonProperty("image_tokens") Double imageTokens) { }
 }

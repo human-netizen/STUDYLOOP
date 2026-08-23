@@ -1,5 +1,6 @@
 package com.studyloop.backend.retrieval;
 
+import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.DocumentSource;
 
 import java.util.UUID;
@@ -26,6 +27,12 @@ public record RetrievedChunk(
         String sectionPath,
         String content,
         int tokenCount,
+        // TEXT, or VISUAL when this came back from the page-image search (Phase 17.3). The client
+        // reads it to mark a citation as pointing at a figure rather than at a passage, and the
+        // eval reads it to say how often the third list put something in the top six — the
+        // instrument this phase would otherwise be missing, in the same way Phase 14's synthetic
+        // queries were invisible until a marker was counted out of the corpus.
+        ChunkModality modality,
         double score,
         Double cosineSimilarity,
         // The cross-encoder's calibrated 0..1 relevance for this chunk against this query, or null
@@ -39,12 +46,16 @@ public record RetrievedChunk(
     static RetrievedChunk of(ChunkHit hit, double score) {
         return new RetrievedChunk(
                 hit.id(), hit.documentId(), hit.filename(), hit.source(), hit.pageNumber(),
-                hit.pageEnd(), hit.sectionPath(), hit.content(), hit.tokenCount(), score,
-                hit.cosineSimilarity(), null);
+                hit.pageEnd(), hit.sectionPath(), hit.content(), hit.tokenCount(), hit.modality(),
+                score, hit.cosineSimilarity(), null);
     }
 
     RetrievedChunk withRerankScore(double relevance) {
         return new RetrievedChunk(chunkId, documentId, filename, source, pageNumber, pageEnd,
-                sectionPath, content, tokenCount, score, cosineSimilarity, relevance);
+                sectionPath, content, tokenCount, modality, score, cosineSimilarity, relevance);
+    }
+
+    public boolean visual() {
+        return modality == ChunkModality.VISUAL;
     }
 }

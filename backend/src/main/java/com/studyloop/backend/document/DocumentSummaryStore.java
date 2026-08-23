@@ -45,7 +45,11 @@ class DocumentSummaryStore {
     // quoting locations instead of synthesizing.
     private String gatherMaterial(UUID documentId, int budget) {
         StringBuilder material = new StringBuilder();
-        for (DocumentChunk chunk : chunkRepository.findByDocumentIdOrderByChunkIndex(documentId)) {
+        // Text chunks only. A visual chunk (17.2) carries a copy of its page's text so that a
+        // page retrieved by its picture still reaches a text-only generator; summing them in here
+        // would spend the budget reading the figure pages twice.
+        for (DocumentChunk chunk : chunkRepository.findByDocumentIdAndModalityOrderByChunkIndex(
+                documentId, ChunkModality.TEXT)) {
             if (material.length() >= budget) {
                 break;
             }

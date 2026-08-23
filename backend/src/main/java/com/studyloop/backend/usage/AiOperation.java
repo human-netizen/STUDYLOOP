@@ -20,6 +20,11 @@ public enum AiOperation {
     EMBED_DOCUMENTS,
     // Embedding a single question, for retrieval and for the semantic cache probe.
     EMBED_QUERY,
+    // Embedding a rendered page image, at ingest (Phase 17.1). The same model and the same call as
+    // EMBED_DOCUMENTS and kept apart from it for the reason the router's entry is kept apart from
+    // the rest of ingestion: it bills in image tokens rather than text tokens, at a different rate,
+    // and it scales with how many figures a course uploads rather than with how much it wrote.
+    EMBED_IMAGES,
     // Cross-encoder reranking of a retrieved candidate set (Phase 12.1). The only operation billed
     // per search rather than per token, so its rows carry a cost against zero tokens.
     RERANK,

@@ -12,6 +12,7 @@ import com.studyloop.backend.document.Document;
 import com.studyloop.backend.document.DocumentChunk;
 import com.studyloop.backend.document.DocumentChunkRepository;
 import com.studyloop.backend.document.DocumentRepository;
+import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.DocumentSource;
 import com.studyloop.backend.document.DocumentStatus;
 import com.studyloop.backend.document.StubAiConfig;
@@ -121,7 +122,8 @@ class SectionExpansionTest {
     private RetrievedChunk retrieved(DocumentChunk chunk) {
         return new RetrievedChunk(chunk.getId(), document.getId(), document.getFilename(),
                 DocumentSource.UPLOAD, chunk.getPageNumber(), chunk.getPageEnd(),
-                chunk.getSectionPath(), chunk.getContent(), chunk.getTokenCount(), 0.01, 0.5, 0.9);
+                chunk.getSectionPath(), chunk.getContent(), chunk.getTokenCount(),
+                ChunkModality.TEXT, 0.01, 0.5, 0.9);
     }
 
     @Test

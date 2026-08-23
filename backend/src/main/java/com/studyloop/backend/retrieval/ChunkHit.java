@@ -1,5 +1,6 @@
 package com.studyloop.backend.retrieval;
 
+import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.DocumentSource;
 
 import java.util.UUID;
@@ -20,6 +21,10 @@ record ChunkHit(
         String sectionPath,
         String content,
         int tokenCount,
+        // What this row's vector was made from (Phase 17). TEXT for everything the two original
+        // halves return; VISUAL only ever comes from the image search, and carrying it forward is
+        // what lets the eval report say whether the third list contributed anything.
+        ChunkModality modality,
         Double cosineSimilarity
 ) {
 }

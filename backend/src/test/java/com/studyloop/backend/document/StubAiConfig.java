@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 // Stubs both AI providers for the document tests, so ingestion end to end is deterministic, free,
 // and runs in CI with no API keys.
@@ -53,22 +54,67 @@ public class StubAiConfig {
     // Deterministic 768-dim vectors — enough to exercise storage and search without a real API.
     @Bean
     @Primary
-    EmbeddingClient stubEmbeddingClient() {
-        return new EmbeddingClient() {
-            @Override
-            public boolean isConfigured() {
-                return true;
-            }
+    StubEmbeddingClient stubEmbeddingClient() {
+        return new StubEmbeddingClient();
+    }
 
-            @Override
-            public List<float[]> embed(List<String> texts) {
-                List<float[]> vectors = new ArrayList<>(texts.size());
-                for (String text : texts) {
-                    vectors.add(vectorFor(text));
-                }
-                return vectors;
+    // An embedder that is deterministic in text and *controllable* in images.
+    //
+    // The image half is the interesting one. A real multimodal embedder puts a picture of a page
+    // and a sentence describing it near each other, and no stub can imitate that from bytes — so
+    // instead of pretending, this asks the test what the picture means and embeds that string. A
+    // test then queries with the same words and the page comes back at similarity 1.0, which is
+    // the behaviour being tested: that a chunk whose vector came from an image is searched by the
+    // query vector, fused, and returned. What the stub cannot show is whether embed-v4.0 is any
+    // good at pictures, which is a judgement about a provider rather than about this code.
+    public static class StubEmbeddingClient implements EmbeddingClient {
+
+        // Off by default, so the visual path has to be switched on the way the vision stub is —
+        // and so the "provider cannot embed images" branch is the default rather than an
+        // afterthought, since it is what Google's and Ollama's clients do.
+        public volatile boolean images = false;
+        // What a given page image "looks like" to this embedder. Keyed on the PNG bytes so a test
+        // can give two pages two different meanings.
+        public volatile Function<byte[], String> imageMeaning = png -> "page-image-" + png.length;
+        public final AtomicInteger imageCalls = new AtomicInteger();
+
+        public void reset() {
+            images = false;
+            imageMeaning = png -> "page-image-" + png.length;
+            imageCalls.set(0);
+        }
+
+        @Override
+        public boolean isConfigured() {
+            return true;
+        }
+
+        @Override
+        public List<float[]> embed(List<String> texts) {
+            List<float[]> vectors = new ArrayList<>(texts.size());
+            for (String text : texts) {
+                vectors.add(vectorFor(text));
             }
-        };
+            return vectors;
+        }
+
+        @Override
+        public boolean supportsImages() {
+            return images;
+        }
+
+        @Override
+        public List<float[]> embedImages(List<byte[]> pngImages) {
+            imageCalls.incrementAndGet();
+            if (!images) {
+                throw new EmbeddingException("stub embedder was not asked to accept images");
+            }
+            List<float[]> vectors = new ArrayList<>(pngImages.size());
+            for (byte[] png : pngImages) {
+                vectors.add(vectorFor(imageMeaning.apply(png)));
+            }
+            return vectors;
+        }
     }
 
     // Keyed on the text's content, not its shape: the same string always embeds to the same

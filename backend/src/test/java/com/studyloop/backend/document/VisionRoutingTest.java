@@ -1,6 +1,7 @@
 package com.studyloop.backend.document;
 
 import com.studyloop.backend.config.VisionProperties;
+import com.studyloop.backend.config.VisualProperties;
 import com.studyloop.backend.document.TestPdfs.Kind;
 import org.junit.jupiter.api.Test;
 
@@ -28,8 +29,26 @@ class VisionRoutingTest {
     }
 
     private PdfExtractionRouter router(VisionProperties properties) {
+        // The visual selector is handed an embedder that takes no images, which switches it off —
+        // this class is about the vision router, and a selector rendering pages underneath it
+        // would add cost and noise to every assertion here. VisualChunkingTest is its opposite.
+        VisualPageSelector selector = new VisualPageSelector(
+                new PageImageRenderer(), VisualProperties.defaults(), new TextOnlyEmbedder());
         return new PdfExtractionRouter(new PdfTextExtractor(), new PageQualityGate(properties),
-                new PageImageRenderer(), vision, properties);
+                new PageImageRenderer(), vision, properties, selector);
+    }
+
+    private static final class TextOnlyEmbedder implements EmbeddingClient {
+
+        @Override
+        public boolean isConfigured() {
+            return true;
+        }
+
+        @Override
+        public List<float[]> embed(List<String> texts) {
+            throw new UnsupportedOperationException("not used");
+        }
     }
 
     private static VisionProperties withCap(int cap) {

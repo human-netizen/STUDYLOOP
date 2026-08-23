@@ -7,6 +7,7 @@ import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
+import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.Document;
 import com.studyloop.backend.document.DocumentChunk;
 import com.studyloop.backend.document.DocumentChunkRepository;
@@ -156,7 +157,10 @@ public class QuizService {
     private String gatherMaterial(List<Document> documents) {
         StringBuilder material = new StringBuilder();
         for (Document document : documents) {
-            List<DocumentChunk> chunks = chunkRepository.findByDocumentIdOrderByChunkIndex(document.getId());
+            // Text chunks only, for the reason the flashcard generator gives: a visual chunk is a
+            // second copy of its page's text, kept so a picture can be handed to a text model.
+            List<DocumentChunk> chunks = chunkRepository.findByDocumentIdAndModalityOrderByChunkIndex(
+                    document.getId(), ChunkModality.TEXT);
             for (DocumentChunk chunk : chunks) {
                 if (material.length() >= MATERIAL_CHAR_BUDGET) {
                     return material.toString();

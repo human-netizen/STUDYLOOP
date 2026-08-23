@@ -22,4 +22,26 @@ public interface EmbeddingClient {
         }
         return vectors.get(0);
     }
+
+    // Whether this provider puts images in the same vector space as text (Phase 17.1).
+    //
+    // Defaulted to false so the two providers that cannot — Google's text-embedding-004 and a
+    // local Ollama model — need no edit, and so the visual half of the pipeline gates on a
+    // capability rather than on a provider name. A corpus ingested against a text-only embedder
+    // still gets its visual chunk *rows*; they simply carry no vector, which is the same graceful
+    // nothing an unconfigured provider has produced for text chunks since Phase 4.
+    default boolean supportsImages() {
+        return false;
+    }
+
+    // One vector per image, in the same order, in the same space as embed() and embedQuery().
+    //
+    // That last clause is the entire point and it is a property of the model rather than of this
+    // interface: embed-v4.0 is trained so a typed question and a picture of a page land near each
+    // other, which is what lets a query about "the diagram with the three layers" match a page
+    // nobody wrote a caption for. A provider that cannot do that says so above rather than
+    // returning vectors from a second space that would compare against the first as noise.
+    default List<float[]> embedImages(List<byte[]> pngImages) {
+        throw new EmbeddingException("This embedding provider does not accept images.");
+    }
 }

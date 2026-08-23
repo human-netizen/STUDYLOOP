@@ -1,6 +1,7 @@
 package com.studyloop.backend.retrieval.eval;
 
 import com.studyloop.backend.config.VisionProperties;
+import com.studyloop.backend.config.VisualProperties;
 import com.studyloop.backend.document.Chunkers;
 import com.studyloop.backend.document.PageDefect;
 import com.studyloop.backend.document.PageQuality;
@@ -48,9 +49,18 @@ class FixtureCorpusTest {
     // and the router has become a vision pipeline with a gate bolted on the front.
     private static final double MAX_ROUTED_SHARE = 0.10;
 
+    // Phase 17.4. What share of a real textbook becomes a page image, and therefore what a full
+    // corpus rebuild costs in image embeddings. Looser than the vision router's 10% because the
+    // rule is looser by design — this counts every page with a picture on it, including the dense
+    // prose pages the router correctly leaves alone — but it is still a *share*, because a rule
+    // that took half the corpus would not be selecting figures, it would be embedding the book
+    // twice.
+    private static final double MAX_VISUAL_SHARE = 0.35;
+
     private final PdfTextExtractor extractor = new PdfTextExtractor();
     private final TextChunker chunker = Chunkers.standard();
     private final PageQualityGate qualityGate = new PageQualityGate(VisionProperties.defaults());
+    private final VisualProperties visualProperties = VisualProperties.defaults();
 
     @Test
     void everyFixtureExtractsRealText() {
@@ -106,6 +116,93 @@ class FixtureCorpusTest {
                         .isEqualTo(i + 1);
             }
         }
+    }
+
+    // Phase 17.4 — what embedding this corpus's pictures costs, and whether it aims at the pages
+    // the golden set says are hard.
+    //
+    // The same two-part claim Phase 15.4 makes about the vision router, for a rule that is
+    // deliberately broader. The router asks whether PDFBox's text can be trusted and answers "yes"
+    // for a dense page with a diagram on it, which is correct and is exactly why those pages'
+    // figures have never been reachable. This rule drops the sparse-text requirement, so it takes
+    // more pages — and the number has to stay a fraction of the corpus, or the phase has stopped
+    // selecting figures and started embedding the book a second time.
+    //
+    // Runs with no key, no database and no provider: the selection is arithmetic over measurements
+    // the gate already produced.
+    @Test
+    void embeddingThePicturesCostsAFractionOfTheCorpusAndCoversTheFigureQuestions() throws IOException {
+        int totalPages = 0;
+        Set<PageRef> visualPages = new HashSet<>();
+        StringBuilder report = new StringBuilder(System.lineSeparator()
+                + "===== pages embedded as pictures (Phase 17.2) =====" + System.lineSeparator());
+
+        for (FixtureDocument fixture : FixtureDocument.values()) {
+            List<PageQuality> qualities;
+            try (PDDocument document = Loader.loadPDF(fixture.bytes())) {
+                qualities = qualityGate.score(document);
+            }
+            totalPages += qualities.size();
+            List<PageQuality> pictures = qualities.stream().filter(this::looksLikeAPicture).toList();
+            for (PageQuality quality : pictures) {
+                visualPages.add(PageRef.of(fixture, quality.pageNumber()));
+            }
+            report.append(String.format("%-44s %3d pages %3d pictures  (cap %d)%n",
+                    fixture.fileName(), qualities.size(), pictures.size(),
+                    visualProperties.maxPagesPerDocument()));
+            // The per-document cap is a guardrail against a pathological upload, not a routine
+            // trim. A real chapter tripping it would mean the threshold, not the cap, is wrong.
+            assertThat(pictures.size())
+                    .as("%s alone would fill the per-document visual budget", fixture.fileName())
+                    .isLessThanOrEqualTo(visualProperties.maxPagesPerDocument());
+        }
+
+        report.append(String.format("%-44s %3d pages %3d pictures  (%.1f%%)%n",
+                "TOTAL (" + FixtureDocument.values().length + " documents)",
+                totalPages, visualPages.size(), 100.0 * visualPages.size() / totalPages));
+
+        report.append(System.lineSeparator())
+                .append("--- pages behind the golden set's figure questions ---")
+                .append(System.lineSeparator());
+        int covered = 0;
+        int figureQuestions = 0;
+        for (GoldenSet.GoldenQuestion question : GoldenSet.load().questions()) {
+            if (question.kind() != GoldenSet.Kind.FIGURE_TABLE) {
+                continue;
+            }
+            figureQuestions++;
+            List<String> hits = new ArrayList<>();
+            for (PageRef ref : question.expected()) {
+                hits.add(ref + (visualPages.contains(ref) ? " PICTURE" : " -"));
+            }
+            if (question.expected().stream().anyMatch(visualPages::contains)) {
+                covered++;
+            }
+            report.append(String.format("%-6s %s%n", question.id(), String.join(", ", hits)));
+        }
+        System.out.println(report);
+
+        assertThat((double) visualPages.size() / totalPages)
+                .as("%d of %d pages of a textbook would be embedded as pictures — at that share "
+                        + "this is not figure selection, it is indexing the corpus twice",
+                        visualPages.size(), totalPages)
+                .isLessThanOrEqualTo(MAX_VISUAL_SHARE);
+
+        // The half that says the spend is aimed. These questions are the corpus's known weakness:
+        // Phase 12 measured them lowest, Phase 13 traded them back down, and Phase 14 demonstrated
+        // that generated *text* does not touch them. A rule that missed most of the pages behind
+        // them would be spending on the wrong pages however little it spent.
+        assertThat(covered)
+                .as("only %d of the golden set's %d figure questions point at a page this phase "
+                        + "would embed, so it cannot be what fixes them", covered, figureQuestions)
+                .isGreaterThanOrEqualTo(figureQuestions / 2);
+    }
+
+    // The selector's rule, duplicated here rather than reached through Spring: this test runs
+    // without a context on purpose, and the rule is two comparisons.
+    private boolean looksLikeAPicture(PageQuality quality) {
+        return quality.imageCoverage() >= visualProperties.minImageCoverage()
+                || quality.vectorSegments() >= visualProperties.minVectorSegments();
     }
 
     // Phase 15.4 — what the VLM extraction router costs on this corpus, and whether it spends it in

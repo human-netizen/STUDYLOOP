@@ -154,6 +154,11 @@ export interface Citation {
   filename: string
   documentSource: DocumentSourceKind | null
   pageNumber: number | null
+  // True when retrieval found this page by looking at it rather than by reading it (Phase 17).
+  // It is a different promise from an ordinary citation — the answer is in the picture on that
+  // page, not in a sentence to be found on it — so the link says so. Older cached answers predate
+  // the field and arrive undefined, which reads as false.
+  visual?: boolean
   snippet: string
 }
 

@@ -60,6 +60,7 @@ public class PdfExtractionRouter implements DocumentExtractor {
     private final PageImageRenderer renderer;
     private final VisionClient visionClient;
     private final VisionProperties properties;
+    private final VisualPageSelector visualPageSelector;
 
     @Override
     public boolean supports(DocumentFormat format) {
@@ -75,22 +76,29 @@ public class PdfExtractionRouter implements DocumentExtractor {
     //
     // Phase 16 moved the return type out of this class: three more formats produce the same thing,
     // and a shared `Extraction` is what lets the ingestion orchestrator stay format-blind.
+    // Phase 17 added a second reader of the same measurements, which is why the scoring pass moved
+    // up here. The gate asks "can PDFBox's text be trusted on this page" and the visual selector
+    // asks "is there a picture on this page"; those are different questions with a shared answer
+    // sheet, and scoring twice would let the two disagree about the same page.
     @Override
     public Extraction extract(byte[] pdfBytes) {
         try (PDDocument document = Loader.loadPDF(pdfBytes)) {
             List<PageText> pages = textExtractor.extract(document);
-            if (!properties.enabled()) {
+            if (!properties.enabled() && !visualPageSelector.enabled()) {
                 return Extraction.of(pages);
             }
-            return route(document, pages);
+            List<PageQuality> qualities = qualityGate.score(document);
+            Extraction extraction = properties.enabled()
+                    ? route(document, pages, qualities)
+                    : Extraction.of(pages);
+            return extraction.withImages(visualPageSelector.select(document, qualities));
         } catch (IOException e) {
             throw new DocumentExtractionException(
                     "Could not read the PDF. It may be corrupt or password-protected.", e);
         }
     }
 
-    private Extraction route(PDDocument document, List<PageText> pages) {
-        List<PageQuality> qualities = qualityGate.score(document);
+    private Extraction route(PDDocument document, List<PageText> pages, List<PageQuality> qualities) {
         List<PageQuality> failing = qualities.stream().filter(PageQuality::needsVision).toList();
         if (failing.isEmpty()) {
             return Extraction.of(pages);

@@ -64,7 +64,7 @@ public class EvalCorpus {
     // against. `ingested` vs `reused` is the line that explains a slow run, and a run that ingested
     // nothing is the cheap case this class exists to make possible.
     public record Seeded(UUID courseId, UUID actorId, int documents, int chunks, int ingested,
-                         int reused, int synthetic, int pages, int visionPages) {
+                         int reused, int synthetic, int pages, int visionPages, int visualChunks) {
 
         public boolean rebuilt() {
             return ingested > 0;
@@ -92,7 +92,8 @@ public class EvalCorpus {
         return new Seeded(course.getId(), owner.getId(),
                 FixtureDocument.values().length, chunks, ingested, reused,
                 syntheticChunks(course.getId()),
-                sum(course.getId(), "page_count"), sum(course.getId(), "vision_pages"));
+                sum(course.getId(), "page_count"), sum(course.getId(), "vision_pages"),
+                visualChunks(course.getId()));
     }
 
     // Phase 15.4 — how much of the corpus a vision model read, straight out of the corpus.
@@ -127,6 +128,25 @@ public class EvalCorpus {
                 where d.course_space_id = ?
                   and c.embed_text like ?
                 """, Integer.class, courseId, "%" + SyntheticQueryGenerator.MARKER + "%");
+        return count == null ? 0 : count;
+    }
+
+    // Phase 17.4 — how many of the corpus's chunks are pages embedded as pictures.
+    //
+    // Read out of the rows rather than off `studyloop.visual.enabled`, for the reason Phase 14 had
+    // to learn twice: a flag says what was asked for on the day the report ran, and the corpus was
+    // built on some other day. Here it needs no archaeology — a visual chunk is a row with a
+    // modality on it, so the report can simply count them. Zero is a real reading and an important
+    // one: it is what a corpus ingested against a text-only embedder shows, and what a
+    // `visual=ON` run that forgot `-Deval.reset=true` shows as well.
+    private int visualChunks(UUID courseId) {
+        Integer count = jdbcTemplate.queryForObject("""
+                select count(*)
+                from document_chunks c
+                join documents d on d.id = c.document_id
+                where d.course_space_id = ?
+                  and c.modality = 'VISUAL'
+                """, Integer.class, courseId);
         return count == null ? 0 : count;
     }
 

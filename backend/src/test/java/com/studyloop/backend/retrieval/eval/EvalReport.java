@@ -62,6 +62,11 @@ public final class EvalReport {
             // present, so the separability section is computed over whichever one applied.
             Double topRelevance,
             int lexicalHits,
+            // How many of the k chunks came back from the page-image list (Phase 17.3). The
+            // instrument this stage would otherwise be missing: a third list can only add
+            // candidates, so "did it contribute" and "did it help" are different questions and the
+            // report has to be able to answer the first before the second means anything.
+            int visualHits,
             boolean refused
     ) {
     }
@@ -84,6 +89,33 @@ public final class EvalReport {
         return mean(answerable().stream().map(Row::ndcg).toList());
     }
 
+    // The same three numbers over the questions that existed before Phase 17.4 added four.
+    //
+    // Printed alongside the full set rather than instead of it, because the two answer different
+    // questions and neither is honest on its own. The full set says what this corpus can now be
+    // asked; this says what Phases 12 to 16 measured, and it is the only version of the numbers
+    // that can be put beside theirs. A golden set that grew without saying so would make every
+    // published comparison wrong by a denominator, and nothing would ever report it.
+    public double baselineRecall() {
+        return mean(baseline().stream().map(Row::recall).toList());
+    }
+
+    public double baselineMrr() {
+        return mean(baseline().stream().map(Row::reciprocalRank).toList());
+    }
+
+    public double baselineNdcg() {
+        return mean(baseline().stream().map(Row::ndcg).toList());
+    }
+
+    private List<Row> baseline() {
+        return answerable().stream().filter(row -> row.question().addedIn() == 0).toList();
+    }
+
+    private boolean hasAddedQuestions() {
+        return rows.stream().anyMatch(row -> row.question().addedIn() > 0);
+    }
+
     // The fraction of unanswerable questions the gate correctly declined. The regression alarm for
     // Phase 18.2: HyDE invents a plausible passage for a question the corpus cannot answer, which
     // raises its similarity score, and the only symptom is this number falling.
@@ -103,6 +135,13 @@ public final class EvalReport {
             return 0.0;
         }
         return (double) answerable.stream().filter(Row::refused).count() / answerable.size();
+    }
+
+    // Answerable questions whose top-k held at least one page retrieved by its picture. Read off
+    // the rows rather than off the stage flag, for the same reason `reranked()` below is: a flag
+    // says a list was searched, and this says something came back from it.
+    public int questionsWithVisualHits() {
+        return (int) rows.stream().filter(row -> row.visualHits() > 0).count();
     }
 
     public List<Row> misses() {
@@ -177,6 +216,11 @@ public final class EvalReport {
         // of documents.vision_pages rather than off a flag, so it describes the corpus that exists.
         out.append(line("vision extraction", "%d/%d pages read by a vision model".formatted(
                 corpus.visionPages(), corpus.pages())));
+        // Phase 17.4, and printed on every run for the third time for the same reason: a corpus
+        // with no visual chunks in it is a different corpus from one with eighty, and a report that
+        // only mentioned them when the stage was on could not tell the two apart.
+        out.append(line("visual chunks", "%d of %d chunks are page images".formatted(
+                corpus.visualChunks(), corpus.chunks())));
         if (reranked()) {
             out.append(line("reranked", "%d/%d questions%s".formatted(
                     rows.size() - rerankFallbacks(), rows.size(),
@@ -196,6 +240,25 @@ public final class EvalReport {
                 format(falseRefusalRate()),
                 (int) answerable().stream().filter(Row::refused).count(),
                 answerable().size())));
+        if (corpus.visualChunks() > 0) {
+            // Two numbers rather than one, because they answer different objections. The first is
+            // whether the third list reached the prompt at all; the second is how much of the
+            // prompt it took, which is what it cost the text halves. A stage that fills four of
+            // six slots on every question has not been fused in, it has taken over.
+            out.append(line("questions with a visual hit", "%d/%d".formatted(
+                    questionsWithVisualHits(), rows.size())));
+            out.append(line("visual share of returned chunks", "%d/%d".formatted(
+                    rows.stream().mapToInt(Row::visualHits).sum(), rows.size() * k)));
+        }
+
+        if (hasAddedQuestions()) {
+            int added = (int) rows.stream().filter(row -> row.question().addedIn() > 0).count();
+            out.append("\n--- headline over the original %d questions (comparable with Phases 12-16) ---\n"
+                    .formatted(rows.size() - added));
+            out.append(line("Recall@" + k, format(baselineRecall())));
+            out.append(line("MRR", format(baselineMrr())));
+            out.append(line("nDCG@" + k, format(baselineNdcg())));
+        }
 
         out.append("\n--- by question kind ---\n");
         out.append(String.format(Locale.ROOT, "%-14s %5s %8s %8s %8s%n",

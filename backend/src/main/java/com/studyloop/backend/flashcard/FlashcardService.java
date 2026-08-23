@@ -7,6 +7,7 @@ import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
+import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.Document;
 import com.studyloop.backend.document.DocumentChunk;
 import com.studyloop.backend.document.DocumentChunkRepository;
@@ -192,7 +193,10 @@ public class FlashcardService {
 
     private String gatherMaterial(Document document) {
         StringBuilder material = new StringBuilder();
-        List<DocumentChunk> chunks = chunkRepository.findByDocumentIdOrderByChunkIndex(document.getId());
+        // Text chunks only: a visual chunk repeats its page's text (17.2), and a deck generated
+        // from the duplicate would ask the same question twice.
+        List<DocumentChunk> chunks = chunkRepository.findByDocumentIdAndModalityOrderByChunkIndex(
+                document.getId(), ChunkModality.TEXT);
         for (DocumentChunk chunk : chunks) {
             if (material.length() >= MATERIAL_CHAR_BUDGET) {
                 break;

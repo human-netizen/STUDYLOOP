@@ -17,6 +17,12 @@ public record Citation(
         // it as what it is — an answer the class wrote — rather than offering a dead link.
         DocumentSource documentSource,
         Integer pageNumber,
+        // True when this source is a page the retriever found by looking at it rather than by
+        // reading it (Phase 17.3). The client says so, because the two are a different promise: a
+        // passage citation means "these words are on that page", and this one means "the thing you
+        // asked about is in the picture on that page" — and a student who clicks expecting to find
+        // their sentence highlighted should know which they are getting.
+        boolean visual,
         String snippet
 ) {
 
@@ -30,6 +36,7 @@ public record Citation(
                 chunk.filename(),
                 chunk.source(),
                 chunk.pageNumber(),
+                chunk.visual(),
                 snippet(chunk.content()));
     }
 

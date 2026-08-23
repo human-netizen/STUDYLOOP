@@ -32,7 +32,7 @@ import java.util.List;
 //
 // It also keeps the repository honest about size: the eval fixtures are fourteen real chapters
 // because retrieval has to be measured on real prose, and none of these has to be.
-final class TestPdfs {
+public final class TestPdfs {
 
     // Roughly 80 characters, which makes the page arithmetic legible: a US Letter page is ~485
     // units of a thousand square points, so twenty-five lines of this is a little over four
@@ -56,7 +56,7 @@ final class TestPdfs {
     }
 
     // What a page is wrong about, or PROSE for a page that is not wrong about anything.
-    enum Kind {
+    public enum Kind {
         // Ordinary single-column text. The control: every signal must read clean on it, or the
         // router would send a working corpus to a vision model.
         PROSE,
@@ -79,10 +79,17 @@ final class TestPdfs {
         // image XObject anywhere. This is what a LaTeX book actually produces, and it is the case
         // the plan's image-coverage signal is blind to: the fourteen fixture chapters contain zero
         // image XObjects across all 306 pages and a diagram on dozens of them.
-        VECTOR_FIGURE
+        VECTOR_FIGURE,
+        // A full page of prose *and* a diagram — the page the two phases disagree about.
+        //
+        // Phase 15's gate declines it, correctly: the text extracted perfectly and its job was the
+        // text. Phase 17 takes it, because a page whose diagram nobody captioned is unfindable no
+        // matter how good the prose around it is. Every existing signal reads this page as clean,
+        // which is exactly why it needs its own fixture.
+        DENSE_FIGURE
     }
 
-    static byte[] of(Kind... kinds) {
+    public static byte[] of(Kind... kinds) {
         try (PDDocument document = new PDDocument()) {
             for (Kind kind : kinds) {
                 addPage(document, kind);
@@ -114,6 +121,12 @@ final class TestPdfs {
             }
             case VECTOR_FIGURE -> {
                 writeLines(document, page, 5, false);
+                drawTree(document, page);
+            }
+            case DENSE_FIGURE -> {
+                // Twenty-five lines is an ordinary page of a book, which puts chars-per-area above
+                // the figure gate's sparse ceiling. The tree underneath it is the same tree.
+                writeLines(document, page, 25, false);
                 drawTree(document, page);
             }
         }
