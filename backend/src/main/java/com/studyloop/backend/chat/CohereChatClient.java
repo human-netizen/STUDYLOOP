@@ -8,8 +8,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.config.ChatProperties;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -17,6 +20,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -30,6 +34,8 @@ import java.util.function.Consumer;
 // the difference between a real invoice and a guess.
 @Component
 public class CohereChatClient implements ChatClient {
+
+    private static final Logger log = LoggerFactory.getLogger(CohereChatClient.class);
 
     private static final String CHAT_URL = "https://api.cohere.com/v2/chat";
     private static final String DEFAULT_MODEL = "command-r-08-2024";
@@ -81,8 +87,61 @@ public class CohereChatClient implements ChatClient {
         return send(new ChatRequest(model, messages, false, ResponseFormat.jsonObject()), AiOperation.OTHER);
     }
 
+    // How many times one request may be sent before the caller is told it failed, and how long
+    // to wait between tries.
+    //
+    // **Only a 5xx is retried.** A 4xx is a request this client will keep getting wrong — a bad
+    // key, a spent trial allowance, a model name that does not exist — and repeating it wastes
+    // three calls to learn what one already said. A read timeout is not retried either, for a
+    // different reason: the provider may well have completed the work, so a second send is a
+    // second bill for an answer that already exists.
+    private static final int MAX_ATTEMPTS = 3;
+    private static final Duration RETRY_BACKOFF = Duration.ofSeconds(2);
+
     // Shared non-streaming call: posts the request, reads the first text block of the reply.
+    //
+    // **Retried, because the expensive callers are not one call but fourteen.** A chat turn that
+    // hits a provider hiccup is a person pressing the button again; a video is up to fourteen
+    // model calls behind a single POST, spread over minutes, and losing the whole job to one
+    // transient 500 throws away every call that came before it. At a 2% failure rate per call, a
+    // fourteen-call job fails a quarter of the time without this and 1 in 8000 with it.
+    //
+    // Not applied to streamComplete: a stream that has already delivered tokens cannot be replayed
+    // from the start without the reader seeing the answer twice, and its caller is a person who
+    // can ask again.
     private String send(ChatRequest request, AiOperation operation) {
+        HttpServerErrorException lastFailure = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                return sendOnce(request, operation);
+            } catch (HttpServerErrorException e) {
+                lastFailure = e;
+                if (attempt < MAX_ATTEMPTS) {
+                    Duration wait = RETRY_BACKOFF.multipliedBy(attempt);
+                    log.warn("Cohere returned {} on attempt {} of {}; retrying in {}s",
+                            e.getStatusCode(), attempt, MAX_ATTEMPTS, wait.toSeconds());
+                    pause(wait);
+                }
+            }
+        }
+        throw new ChatException(
+                "Cohere chat request failed after " + MAX_ATTEMPTS + " attempts: " + lastFailure.getMessage(),
+                lastFailure);
+    }
+
+    // Interrupting the thread cancels the request rather than sleeping through it: the caller here
+    // may be the single video render thread, and a shutdown that has to wait out a backoff is a
+    // shutdown that looks hung.
+    private static void pause(Duration wait) {
+        try {
+            Thread.sleep(wait.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ChatException("Interrupted while waiting to retry a Cohere chat request.", e);
+        }
+    }
+
+    private String sendOnce(ChatRequest request, AiOperation operation) {
         ChatCompletion response;
         try {
             response = restClient.post()
@@ -92,6 +151,10 @@ public class CohereChatClient implements ChatClient {
                     .body(request)
                     .retrieve()
                     .body(ChatCompletion.class);
+        } catch (HttpServerErrorException e) {
+            // Rethrown as-is so send() can decide whether another attempt is worth making; every
+            // other failure becomes a ChatException here and stops.
+            throw e;
         } catch (RestClientException e) {
             throw new ChatException("Cohere chat request failed: " + e.getMessage(), e);
         }

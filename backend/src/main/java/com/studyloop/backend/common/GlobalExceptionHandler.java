@@ -33,6 +33,10 @@ import com.studyloop.backend.quiz.QuizNotFoundException;
 import com.studyloop.backend.usage.QuotaExceededException;
 import com.studyloop.backend.usage.RateLimitExceededException;
 import com.studyloop.backend.usage.TokenBudgetExceededException;
+import com.studyloop.backend.video.VideoDailyCapExceededException;
+import com.studyloop.backend.video.VideoDisabledException;
+import com.studyloop.backend.video.VideoJobNotFoundException;
+import com.studyloop.backend.video.VideoJobRunningException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -371,6 +375,47 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, Long.toString(ex.retryAfterSeconds()))
                 .body(problem);
+    }
+
+    // ── Phase 21 · video generation ─────────────────────────────────────────────────────────
+
+    @ExceptionHandler(VideoJobNotFoundException.class)
+    ProblemDetail handleVideoJobNotFound(VideoJobNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Video not found");
+        return problem;
+    }
+
+    // 503 rather than 404: the endpoint exists, the renderer does not. The distinction matters to
+    // the person reading it — a 404 says "you typed it wrong" and this says "this installation
+    // cannot do that yet", which is the truth and is fixable.
+    @ExceptionHandler(VideoDisabledException.class)
+    ProblemDetail handleVideoDisabled(VideoDisabledException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        problem.setTitle("Video generation unavailable");
+        problem.setProperty("reason", "VIDEO_UNAVAILABLE");
+        return problem;
+    }
+
+    @ExceptionHandler(VideoJobRunningException.class)
+    ProblemDetail handleVideoJobRunning(VideoJobRunningException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Video still rendering");
+        return problem;
+    }
+
+    // The daily cap, and it says the number. A limit the person cannot see is indistinguishable
+    // from a bug, and this one is deliberately low enough to be hit.
+    @ExceptionHandler(VideoDailyCapExceededException.class)
+    ProblemDetail handleVideoDailyCap(VideoDailyCapExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+        problem.setTitle("Daily video limit reached");
+        problem.setProperty("reason", "VIDEO_DAILY_CAP");
+        return problem;
     }
 
     // A @PreAuthorize check failing (e.g. non-admin hitting /admin/**) throws this.

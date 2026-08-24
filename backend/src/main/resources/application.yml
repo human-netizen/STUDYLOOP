@@ -549,6 +549,68 @@ studyloop:
     # lectures is at most 20 retrievals and 20 model calls per file, and every one of them is
     # skipped for a thread the assistant has already answered.
     watch-max-threads: ${FORUM_WATCH_MAX_THREADS:20}
+  video:
+    # Phase 21 — narrated, animated explanations rendered from a course's own materials.
+    #
+    # **Off by default, and that is the honest default rather than a cautious one.** The renderer
+    # is an optional sidecar container that carries ffmpeg, Manim and a speech engine; a backend
+    # running without it must show no video UI at all, because a button that fails is worse than a
+    # feature that is absent. Phase 15.1 settled the same question for a missing vision key. Turn
+    # it on with VIDEO_ENABLED=true once `docker compose --profile video up` has the worker running.
+    enabled: ${VIDEO_ENABLED:false}
+    # Where the sidecar answers. localhost in development (the container publishes the port);
+    # http://video-worker:8000 inside compose, where it is a service name on the compose network.
+    worker-url: ${VIDEO_WORKER_URL:http://localhost:8000}
+    # Finished mp4s and their caption tracks, mirroring studyloop.storage.documents-dir so the
+    # deploy phase inherits one volume decision rather than two.
+    videos-dir: ${VIDEOS_DIR:./data/videos}
+
+    # **One render at a time, globally, and 1 is not a placeholder.** A Manim render saturates the
+    # cores it can see, so two concurrent jobs finish later than the same two run serially, and
+    # both look broken while they do it. The value is configuration because a build server with
+    # sixteen cores may honestly disagree; the queue is the executor either way.
+    max-concurrent: ${VIDEO_MAX_CONCURRENT:1}
+    # Per member, per rolling 24 hours, across every course. One video is roughly an order of
+    # magnitude more expensive than one chat answer in model calls and several orders of magnitude
+    # more expensive in wall clock, so this is the limit that actually protects the machine — the
+    # AI quota in studyloop.quota counts requests and cannot see the difference. Refusals do not
+    # count against it: asking about something the corpus does not cover costs one embedding.
+    daily-cap-per-user: ${VIDEO_DAILY_CAP:3}
+
+    # The shape of one film. Six scenes at around two and a half minutes is the length a student
+    # still watches to the end; past that they scrub, and everything scrubbed past was rendered
+    # for nobody.
+    max-scenes: ${VIDEO_MAX_SCENES:6}
+    # How many of those six may attempt Manim. The rest are slides by design rather than by
+    # failure, which is what keeps the worst case bounded — the fix loop is the expensive path.
+    max-animated-scenes: ${VIDEO_MAX_ANIMATED:4}
+    target-seconds: ${VIDEO_TARGET_SECONDS:150}
+
+    # One scene's entire wall-clock budget, shared across its first attempt and both fixes.
+    # ZenLearn gives each of three attempts a fresh 120-second timeout and no overall bound, which
+    # is how a job spends twenty minutes and still produces slides.
+    scene-budget: ${VIDEO_SCENE_BUDGET:PT3M}
+    # How many times the model may be shown its own stderr and asked again. Two, because the third
+    # fix almost never lands and always bills.
+    max-fixes: ${VIDEO_MAX_FIXES:2}
+    # The whole job. Exceeding it fails the job rather than blocking the single render slot.
+    job-timeout: ${VIDEO_JOB_TIMEOUT:PT25M}
+
+    # 720p30. A 1080p Manim render is minutes *per scene* on a laptop, and this phase's report is
+    # measured in wall clock per finished minute — the resolution is a term in that number.
+    width: ${VIDEO_WIDTH:1280}
+    height: ${VIDEO_HEIGHT:720}
+    fps: ${VIDEO_FPS:30}
+
+    # The same k as a chat turn, for CorpusAnswerService's reason: two features grounded on
+    # different amounts of context is a difference nobody can see and everybody has to explain.
+    retrieval-k: ${VIDEO_RETRIEVAL_K:6}
+
+    # edge-tts voices, one per Language value. Two entries rather than a map of ISO codes, because
+    # Phase 19.1 deliberately refused a column that could hold 180 languages nothing here detects.
+    voices:
+      english: ${VIDEO_VOICE_EN:en-US-AriaNeural}
+      bangla: ${VIDEO_VOICE_BN:bn-BD-NabanitaNeural}
   quota:
     # Phase 10: the two guardrails on the paid surface, both per user. They are separate switches
     # because they fail differently — a rate limit clears in seconds, a spent budget does not.

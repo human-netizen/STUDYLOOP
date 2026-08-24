@@ -32,6 +32,8 @@ import type {
   SubmitAttemptRequest,
   TokenResponse,
   UserResponse,
+  VideoJob,
+  VideoLibrary,
 } from './types'
 
 // The backend origin. Override with VITE_API_URL (e.g. in production); defaults to the
@@ -220,19 +222,25 @@ export const documentsApi = {
       `/courses/${courseId}/documents/${documentId}/summary${refresh ? '?refresh=true' : ''}`,
       { method: 'POST', auth: true },
     ),
-  // Fetches the raw PDF bytes (auth-guarded) as a Blob for client-side rendering. Same
-  // single-retry-on-401 refresh as the JSON calls; the caller turns it into an object URL.
-  async fileBlob(courseId: string, documentId: string): Promise<Blob> {
-    const path = `/courses/${courseId}/documents/${documentId}/file`
-    const get = (token: string | null) =>
-      fetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-    let res = await get(tokenStore.getAccess())
-    if (res.status === 401 && (await tryRefresh())) {
-      res = await get(tokenStore.getAccess())
-    }
-    if (!res.ok) throw await toError(res)
-    return res.blob()
-  },
+  // Fetches the raw PDF bytes (auth-guarded) as a Blob for client-side rendering. The caller
+  // turns it into an object URL.
+  fileBlob: (courseId: string, documentId: string) =>
+    fetchBlob(`/courses/${courseId}/documents/${documentId}/file`),
+}
+
+// Any authenticated endpoint that answers with bytes rather than JSON — a PDF, a LaTeX export, an
+// mp4, a caption track. Same single-retry-on-401 refresh as `request`; extracted when Phase 21
+// made it the third caller, because three copies of a token refresh is three places for it to
+// drift.
+export async function fetchBlob(path: string): Promise<Blob> {
+  const get = (token: string | null) =>
+    fetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  let res = await get(tokenStore.getAccess())
+  if (res.status === 401 && (await tryRefresh())) {
+    res = await get(tokenStore.getAccess())
+  }
+  if (!res.ok) throw await toError(res)
+  return res.blob()
 }
 
 // Digitised handwritten notes (Phase 16.3). A separate surface from documents, because the rules
@@ -264,17 +272,8 @@ export const notesApi = {
   // The note as a LaTeX document, carrying only the blocks that were confident enough to index.
   // Fetched with the bearer token and turned into an object URL by the caller, the same way the
   // PDF viewer fetches a document's bytes — a plain <a href> would arrive unauthenticated.
-  async latex(courseId: string, noteId: string): Promise<Blob> {
-    const path = `/courses/${courseId}/notes/${noteId}/latex`
-    const get = (token: string | null) =>
-      fetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-    let res = await get(tokenStore.getAccess())
-    if (res.status === 401 && (await tryRefresh())) {
-      res = await get(tokenStore.getAccess())
-    }
-    if (!res.ok) throw await toError(res)
-    return res.blob()
-  },
+  latex: (courseId: string, noteId: string) =>
+    fetchBlob(`/courses/${courseId}/notes/${noteId}/latex`),
 }
 
 export const quizzesApi = {
@@ -356,6 +355,36 @@ export const forumApi = {
 
 // Search a course's materials. The same retrieval the assistant runs, returned as passages
 // instead of an answer — one embedding call, no generation. Any member may search.
+// Phase 21 — narrated videos rendered from the course's own materials.
+//
+// Every call here is scoped to the member who made the job, not to the course: a video can be
+// grounded on the requester's own private notes, so it inherits their visibility. That is why
+// there is no "the course's videos" endpoint to call.
+export const videosApi = {
+  // Whether this installation can make videos at all, plus this member's jobs. One request, so the
+  // button and the list cannot disagree about whether the feature exists.
+  library: (courseId: string) =>
+    request<VideoLibrary>(`/courses/${courseId}/videos`, { auth: true }),
+  // 202 and a job handle. The render takes minutes; there is no synchronous version of this.
+  request: (courseId: string, topic: string) =>
+    request<VideoJob>(`/courses/${courseId}/videos`, {
+      method: 'POST',
+      body: { topic },
+      auth: true,
+    }),
+  get: (courseId: string, jobId: string) =>
+    request<VideoJob>(`/courses/${courseId}/videos/${jobId}`, { auth: true }),
+  remove: (courseId: string, jobId: string) =>
+    request<void>(`/courses/${courseId}/videos/${jobId}`, { method: 'DELETE', auth: true }),
+  // The mp4 and its caption track, both behind the bearer token — a <video src> pointing at the
+  // API would be an unauthenticated request, and these bytes can come from private notes. The
+  // caller turns them into object URLs and revokes them when the player unmounts.
+  file: (courseId: string, jobId: string) =>
+    fetchBlob(`/courses/${courseId}/videos/${jobId}/file`),
+  captions: (courseId: string, jobId: string) =>
+    fetchBlob(`/courses/${courseId}/videos/${jobId}/captions`),
+}
+
 export const searchApi = {
   query: (courseId: string, q: string, limit?: number) =>
     request<SearchResponse>(

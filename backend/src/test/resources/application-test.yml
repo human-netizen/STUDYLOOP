@@ -1,8 +1,9 @@
 # Phase 10.1: the suite gets its own Supabase project, never the one the app runs against.
 #
-# Only the datasource is redirected. Flyway, the AI stubs, the quota defaults and everything else
-# stay exactly as main's application.yml declares them, so a test still exercises the real
-# configuration rather than a simplified copy of it.
+# The datasource is redirected; everything else stays as main's application.yml declares it, so a
+# test exercises the real configuration rather than a simplified copy of it. The handful of
+# exceptions below are all one idea — **a developer's `.env.properties` must not be able to change
+# what the suite proves** — and each carries the reason it was added.
 #
 # The placeholders have no defaults on purpose. A missing TEST_DB_URL fails the context outright,
 # which is the entire point of this file: the failure this profile exists to prevent is a suite
@@ -30,3 +31,30 @@ studyloop:
   # them; VisionRoutingTest hands the router a deterministic stub reader instead.
   vision:
     api-key: ""
+  # Phase 21. On for the suite, which is the opposite of the two entries above and for a
+  # complementary reason: those blank a key so no test can reach a paid provider by accident, and
+  # this one switches a feature on so the video tests do not need a `properties` override of their
+  # own. An override there would fork the ApplicationContext — a second Hikari pool against a
+  # fifteen-client cap — to say something that is true for the whole suite anyway. Nothing can reach
+  # a real renderer regardless: StubAiConfig publishes a stub `VideoWorker`.
+  video:
+    enabled: true
+    # Under target/, so `mvn clean` takes the test renders with it and nothing lands in the
+    # directory the development server serves from.
+    videos-dir: ./target/test-videos
+    # **Pinned, because a limit a test asserts on cannot be a limit the developer can change.**
+    # Both of these are `${VAR:default}` in application.yml, so a `VIDEO_DAILY_CAP=20` line in a
+    # git-ignored `.env.properties` — added to get through an afternoon of debugging renders —
+    # reaches the suite too, and `theDailyCapRefusesTheNextRequest` fails with 202 instead of 429.
+    # It looks like a broken cap and is a broken test environment. Same hazard as the two blanked
+    # keys above, one step further on: those stop a test *doing* something expensive, these stop a
+    # developer's machine *deciding* what a test proves.
+    daily-cap-per-user: 3
+
+  quota:
+    budget:
+      # Pinned for the reason directly above, and the number QuotaTest hard-codes. That test says
+      # it hard-codes 200k so it cannot pass with the code and the config both wrong; this line is
+      # what makes the hard-coding true on every machine rather than only on one with an untouched
+      # environment.
+      tokens: 200000

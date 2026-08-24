@@ -4,17 +4,21 @@ import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
 import com.studyloop.backend.retrieval.RerankClient;
 import com.studyloop.backend.retrieval.RerankException;
+import com.studyloop.backend.video.RecordingVideoWorker;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -43,6 +47,17 @@ public class StubAiConfig {
     @Primary
     StubRerankClient stubRerankClient() {
         return new StubRerankClient();
+    }
+
+    // Phase 21's renderer. Here rather than in a video-only config for the reason this whole class
+    // exists: a second `@TestConfiguration` is a second cached context and a second Hikari pool,
+    // and the cap is fifteen clients. It is also the safer default — with this bean present, no
+    // test can reach a real renderer by accident, in the same way the blanked keys in
+    // application-test.yml stop one from reaching a real provider.
+    @Bean
+    @Primary
+    RecordingVideoWorker recordingVideoWorker() {
+        return new RecordingVideoWorker();
     }
 
     @Bean
@@ -311,6 +326,15 @@ public class StubAiConfig {
         public volatile List<LlmMessage> lastMessages = List.of();
         public volatile String nextJson = DEFAULT_JSON;
         public volatile String nextAnswer = DEFAULT_ANSWER;
+        // Scripted replies, in order, for a feature that makes several *different* calls in one
+        // operation (Phase 21: a script, then a scene plan, then a Manim module per scene). A
+        // single nextJson cannot express that, and a test that could not tell the second call from
+        // the first could not assert that the scene plan was built from the script.
+        //
+        // Empty falls back to nextJson / nextAnswer, so every test written before this is
+        // unaffected.
+        public final Deque<String> jsonQueue = new ArrayDeque<>();
+        public final Deque<String> answerQueue = new ArrayDeque<>();
         // One-shot: the next call throws, and the one after that succeeds again. Lets a test say
         // "the provider was down during ingestion" and then exercise the recovery path.
         public volatile boolean failNext = false;
@@ -321,7 +345,15 @@ public class StubAiConfig {
             nextJson = DEFAULT_JSON;
             nextAnswer = DEFAULT_ANSWER;
             failNext = false;
+            jsonQueue.clear();
+            answerQueue.clear();
+            prompts.clear();
         }
+
+        // Every system prompt this client has been given, oldest first. `lastSystemPrompt` answers
+        // "what was the model told" for a feature that calls once; this answers it for one that
+        // calls three times and is only correct if each call was told something different.
+        public final List<String> prompts = new CopyOnWriteArrayList<>();
 
         // The system message of the last call, or null if there was none. Every prompt this
         // application builds puts its instructions there, so this is the string under test.
@@ -341,13 +373,15 @@ public class StubAiConfig {
         @Override
         public String complete(List<LlmMessage> messages) {
             countCall(messages);
-            return nextAnswer;
+            String scripted = answerQueue.poll();
+            return scripted == null ? nextAnswer : scripted;
         }
 
         @Override
         public String completeJson(List<LlmMessage> messages) {
             countCall(messages);
-            return nextJson;
+            String scripted = jsonQueue.poll();
+            return scripted == null ? nextJson : scripted;
         }
 
         @Override
@@ -361,6 +395,10 @@ public class StubAiConfig {
         // provider regardless of which shape was asked for.
         private void countCall(List<LlmMessage> messages) {
             lastMessages = messages == null ? List.of() : List.copyOf(messages);
+            String system = lastSystemPrompt();
+            if (system != null) {
+                prompts.add(system);
+            }
             calls.incrementAndGet();
             if (failNext) {
                 failNext = false;
