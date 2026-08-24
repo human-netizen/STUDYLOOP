@@ -547,3 +547,71 @@ export interface CreateThreadRequest {
   body?: string | null
   questionEventId?: string | null
 }
+
+// ── Phase 21 · video generation ─────────────────────────────────────────────────────────────
+
+// The same shape as DocumentStatus, and the page polls it the same way. QUEUED means a render is
+// already running for somebody — the slot is one deep on purpose. REFUSED is not a failure: the
+// corpus could not support the topic and the gate said so before anything was rendered.
+export type VideoJobStatus =
+  | 'QUEUED'
+  | 'PLANNING'
+  | 'RENDERING'
+  | 'COMPOSING'
+  | 'READY'
+  | 'FAILED'
+  | 'REFUSED'
+
+// What the scene turned out to be, never what was planned for it.
+export type SceneRendering = 'ANIMATED' | 'SLIDE'
+
+export interface VideoScene {
+  index: number
+  title: string
+  // Also this scene's caption text, so the rail can show what is being said without the video
+  // being played.
+  narration: string
+  renderedAs: SceneRendering
+  // Present only when an animation was attempted and lost: the sandbox layer that stopped it and
+  // what the toolchain said. Shown rather than swallowed — a fallback nobody can see is the exact
+  // defect this feature was rejected for in the first place.
+  fallbackReason: string | null
+  durationSeconds: number | null
+  citations: Citation[]
+}
+
+export interface VideoJob {
+  id: string
+  courseId: string
+  topic: string
+  language: DocumentLanguage
+  status: VideoJobStatus
+  // The sentence under the progress bar — "rendering scene 3 of 6".
+  stage: string | null
+  scenesTotal: number
+  scenesAnimated: number
+  scenesFallback: number
+  durationSeconds: number | null
+  hasCaptions: boolean
+  // The reason it stopped. For REFUSED this is the confidence gate speaking, and the page renders
+  // it with the same two buttons a refused chat answer gets.
+  error: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  scenes: VideoScene[]
+}
+
+// One call answers both questions the page has: can this installation make videos, and what has
+// this member already asked for. Together, so a button cannot be drawn from a flag fetched at a
+// different moment than the jobs.
+export interface VideoLibrary {
+  enabled: boolean
+  // Separate from `enabled` because they are different sentences: one means this installation does
+  // not do videos, the other means the renderer is not running right now — and only the second one
+  // is something the person reading it can fix.
+  workerReachable: boolean
+  dailyCap: number
+  usedToday: number
+  jobs: VideoJob[]
+}

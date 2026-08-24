@@ -36,7 +36,15 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/v1/courses/*/quizzes/*/attempts",
                         "/api/v1/courses/*/flashcards/generate",
                         "/api/v1/courses/*/documents/*/summary",
-                        "/api/v1/courses/*/forum/threads/*/answers/*/accept");
+                        "/api/v1/courses/*/forum/threads/*/answers/*/accept",
+                        // Phase 21. By far the most expensive entry on this list — up to fourteen
+                        // model calls behind one POST — and the only one whose spending happens
+                        // after the response has been sent. The interceptor still belongs here:
+                        // it is the door, and a door that only guards cheap requests is guarding
+                        // the wrong thing. The feature has a second, tighter limit of its own (a
+                        // per-member daily cap) because a quota sized for chat turns would let one
+                        // person spend an afternoon of the machine before this one noticed.
+                        "/api/v1/courses/*/videos");
 
         // Embedding calls. A search is one embedding of the query — far cheaper than a chat turn,
         // but not free, and it is the endpoint easiest to call in a loop.

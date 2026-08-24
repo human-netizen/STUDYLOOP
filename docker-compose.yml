@@ -1,0 +1,99 @@
+# StudyLoop, locally, in containers.
+#
+# This file arrives with Phase 21 and it is the first thing in this project that needed one. The
+# backend and the frontend have had Dockerfiles since Phase 6 and neither needed orchestrating —
+# one runs `mvn spring-boot:run`, the other `npm run dev`, and the database is Supabase. The video
+# renderer changes that: it is a third process that has to be reachable from the backend by name,
+# and it carries ffmpeg, Manim and a speech engine that must not end up anywhere near the deploy
+# target.
+#
+# **The renderer is behind a profile, so `docker compose up` does not start it.** That is the
+# default on purpose. The backend runs identically with it absent — `studyloop.video.enabled` is
+# false, no video UI is drawn, and nothing 500s — which is the whole of the first answer to
+# AddNewFeature.md §4. To bring it up:
+#
+#     docker compose --profile video up --build
+#
+# and set VIDEO_ENABLED=true for the backend. The first build pulls Manim's graphics stack and
+# takes a few minutes; after that it is cached.
+#
+# **This is a development file and it is not the deploy.** Phase 23.4 deploys the backend and the
+# frontend, and it deploys them without this container.
+
+services:
+
+  backend:
+    build:
+      context: ./backend
+    # **The same git-ignored file Spring already reads**, handed to the container as environment
+    # variables instead. `backend/.env.properties` is a plain `KEY=VALUE` list, which is exactly
+    # what compose expects here — so there is one place secrets live on this machine rather than
+    # two that can disagree, and nothing sensitive is written into this committed file.
+    env_file:
+      - ./backend/.env.properties
+    environment:
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:8081
+      # Off unless the renderer is up. Turn it on together with the `video` profile.
+      VIDEO_ENABLED: ${VIDEO_ENABLED:-false}
+      # A service name, not localhost: inside the compose network the renderer answers on its own
+      # hostname, and `localhost` there is the backend container itself.
+      VIDEO_WORKER_URL: http://video-worker:8000
+      DOCUMENTS_DIR: /data/documents
+      VIDEOS_DIR: /data/videos
+    ports:
+      - "8080:8080"
+    volumes:
+      # One volume for everything a user generated — uploads and renders together. Phase 23.4
+      # inherits one mount decision rather than two, which is why VideoStorageService copies
+      # DocumentStorageService's relative-path convention instead of inventing its own.
+      - studyloop-data:/data
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+
+  video-worker:
+    # `--profile video` or it does not exist. An installation that never asks for a video never
+    # builds a 2 GB image, and the backend never notices.
+    profiles: ["video"]
+    build:
+      context: ./video-worker
+    # Not published to the host by default. The renderer has no authentication of its own — it is
+    # reachable only from the compose network, and that is a property worth keeping true. Uncomment
+    # to poke at /health by hand.
+    # ports:
+    #   - "8000:8000"
+    expose:
+      - "8000"
+    # **An init process, and this one is load-bearing rather than hygiene.**
+    #
+    # The sandbox kills a runaway render by signalling its whole process group. The direct child is
+    # reaped by the code that started it; anything Manim spawned underneath it is orphaned and
+    # re-parented to PID 1 — which, without this, is uvicorn, and uvicorn reaps nothing. Those
+    # zombies keep counting against `RLIMIT_NPROC` for the renderer's uid, so after enough killed
+    # renders the next one cannot fork at all and fails with "Resource temporarily unavailable"
+    # instead of rendering.
+    #
+    # Found by running the hostile-input suite in one container: the fork-bomb fixture left enough
+    # zombies behind that the *next* test could not start a subprocess. `init: true` puts tini at
+    # PID 1, which reaps them.
+    init: true
+    # Sandbox layer 3 needs to create a user namespace and a network namespace. Docker's default
+    # seccomp profile blocks `unshare` outright, so without this the render still runs — behind the
+    # allow-list and the rlimits — and /health says so rather than claiming an isolation it does
+    # not have. This is deliberately not `--privileged`: the container gains the ability to drop
+    # its own network, not the ability to reach the host's.
+    security_opt:
+      - seccomp:unconfined
+    # Scratch space only. Everything here is deleted when the backend has fetched the finished
+    # file, and nothing in it survives a restart — the worker keeps no state that anything else
+    # depends on.
+    tmpfs:
+      - /tmp/studyloop-video:size=2g
+
+volumes:
+  studyloop-data:

@@ -63,6 +63,22 @@ public enum AiOperation {
     // the only model call in the system with no user on the other end, so its cost scales with how
     // many threads a course leaves open rather than with what anybody did today.
     FORUM_ANSWER,
+    // Writing the narration for a video, scene by scene, from retrieved chunks (Phase 21.2). One
+    // call per video, and the only one of the three video rows that scales with how many videos
+    // are asked for rather than with how well the other two go.
+    VIDEO_SCRIPT,
+    // Turning that script into a visual specification per scene — animate this one, put these
+    // three lines on a slide for that one (Phase 21.2). Also one call per video, kept apart from
+    // the script because they fail differently: a bad script is a bad video, and a bad scene plan
+    // is a video of slides.
+    VIDEO_SCENE_PLAN,
+    // Writing the Manim module for one scene, and rewriting it when the sandbox or the compiler
+    // rejects it (Phase 21.3). **The only row here whose count is a quality measurement rather
+    // than a usage one.** One call per animated scene means the model wrote working Manim first
+    // time; three means the fix loop ran twice and the scene probably still became a slide. The
+    // ratio of this row to VIDEO_SCRIPT is the number that decides whether generated animation is
+    // worth its cost, and it is the reason the three are not one VIDEO entry.
+    VIDEO_SCENE_CODE,
     // A call no scope claimed. A row landing here means an unlabelled call site, not a bug in
     // the caller — it still costs money and still shows up in the total.
     OTHER

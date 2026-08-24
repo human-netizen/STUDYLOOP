@@ -1,0 +1,26 @@
+# Pinned to majors rather than exact versions: this image is rebuilt rarely and a floating minor is
+# how a container that worked in August fails to build in November. Manim in particular moves.
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+pydantic==2.9.*
+
+# The animation half. Manim pulls cairo, pango, numpy and moderngl behind it — the reason this
+# service is a container and not a dependency of the backend.
+manim==0.18.*
+
+# The voice. No key, no account: edge-tts speaks over Microsoft's public endpoint, which is what
+# makes a narrated video possible on a student project with no billing relationship for speech.
+#
+# **7, not 6.** The 6.1 line is refused by that endpoint today — every request comes back `403
+# Invalid response status`, because the token scheme it signs with has since changed. It is a
+# reminder that this dependency talks to a service nobody here controls: the pin is on the major so
+# a fix ships, and the failure, if it ever returns, is one scene without narration rather than a
+# crash.
+edge-tts==7.*
+
+# Slides, and the closing source list.
+pillow==10.4.*
+
+# The hostile-fixture suite (tests/test_sandbox.py) — the phase's actual deliverable.
+pytest==8.3.*
+httpx==0.27.*

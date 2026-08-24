@@ -54,7 +54,7 @@ are embedded back into the corpus.
 
 ## 2. Feature set
 
-Twenty-three Flyway migrations and 500 backend tests, the integration ones running against a real
+Twenty-five Flyway migrations and 536 backend tests, the integration ones running against a real
 Postgres with pgvector rather than an in-memory stand-in.
 
 | Capability | What it does |
@@ -78,6 +78,7 @@ Postgres with pgvector rather than an in-memory stand-in.
 | **Course forum** | Any refusal escalates to the class. An instructor accepts an answer; the accepted answer is embedded back into the course. |
 | **Corpus watch** | Uploading a document re-asks the course's open forum threads and answers the ones it just made answerable. The reply is labelled, the thread stays open, and it can never become course material itself. |
 | **General knowledge** | A refusal offers one explicit way out: the same question answered from outside the materials, visibly marked, with no citations — and counted, so the instructor can see which gaps students worked around. |
+| **Video explanations** | A narrated, captioned video built from the course's own passages: animated where movement explains something, and every scene carrying the citation it was written from. A topic the corpus cannot support is refused before anything renders. Optional — the renderer is a separate container, and without it the feature is absent rather than broken. |
 | **Cost visibility** | Every paid call recorded and priced from the provider's own billing figures, with an admin dashboard by feature and by day. |
 | **Answer cache** | Near-identical questions reuse a previous answer. Uploading a document clears the course's cache. |
 | **Usage limits** | Per-user request rate limits and a rolling token allowance on everything that costs money. |
@@ -246,7 +247,46 @@ materials and carrying no citations, since it has none. It is never cached and n
 and it is counted: the confusion page reports how many refusals a student cared about enough to ask
 a second way, which is a sharper signal about missing material than the refusal count itself.
 
-### 3.9 Cost, cache and quotas
+### 3.9 Generated animation code, executed behind three layers
+
+The animated half of a video is Manim — Python that a language model wrote, which this application
+then runs. That is a hazard rather than a feature, and it is allowed only because the sandbox around
+it is a deliverable with its own hostile-input suite rather than a comment promising care.
+
+**Layer one is an allow-list over the parsed syntax tree, never a blocklist.** The generated module
+must consist of exactly `from manim import *`, one `GeneratedScene` class, and statements built from
+a permitted set of node types. No second import, no name or attribute beginning with two
+underscores, no `open`, `eval`, `exec`, `getattr`, decorators, `while`, `try` or `with`. Anything
+unrecognised is rejected unread. The claim it rests on is stated in the source so that it can be
+attacked: *with no import statement and no dunder access, there is no I/O primitive within reach* —
+Manim's namespace is the entire vocabulary available to the scene. The canonical Python escape,
+`().__class__.__bases__[0].__subclasses__()`, is caught by a rule about spelling rather than by a
+rule about that expression, which is the difference between an allow-list and being one attribute
+behind the next published trick.
+
+**Layer two is the process**, because a bug in Manim's own tens of thousands of lines is not
+something an AST walk can see: a non-root uid, an empty environment (the renderer holds no API key
+at all — the backend makes every model call and hands it text), a scratch directory that is the only
+writable path, `RLIMIT_CPU`, `RLIMIT_AS`, `RLIMIT_FSIZE` and `RLIMIT_NPROC`, and a wall-clock kill of
+the whole **process group**. Killing the child alone is the classic mistake: Manim spawns ffmpeg, and
+an orphaned encoder keeps writing after the timeout has reported success.
+
+**Layer three is the network**, removed with `unshare -rn` where the kernel permits it. Where it does
+not, the health endpoint says so in words instead of claiming an isolation it does not have — which
+is precisely why layer one is an allow-list, since a blocklist that is sometimes the last line of
+defence is not a defence.
+
+The tests are attacks, not happy paths: a fork bomb, a ten-gigabyte write, `import os`,
+`__import__("os")`, a socket, an infinite loop, a `getattr` into builtins — each asserted rejected or
+killed **with the layer that stopped it named**, because a test that only knows the render failed
+cannot tell a blocked import from a syntax error.
+
+A scene that loses is not a lost video. It becomes a slide drawn in the product's own palette, the
+job records which layer stopped it and what the toolchain said, and the count is displayed: *"6
+scenes · 4 animated · 2 rendered as static slides"*. Degradation is acceptable; silent degradation
+is the defect.
+
+### 3.10 Cost, cache and quotas
 
 Every provider call is recorded with its token counts and priced from the provider's own billing
 figures. A semantic cache serves near-identical questions from a previous answer and is invalidated
@@ -411,6 +451,7 @@ openable at [diagrams.net](https://app.diagrams.net).
 | **Assessment** | `quiz/`, `flashcard/`, `review/` | Quiz generation and auto-grading, flashcards, SM-2 spaced repetition |
 | **Knowledge loop** | `forum/` | Escalated refusals, accepted answers embedded back into the corpus, and the corpus watch that answers open threads when new material arrives |
 | **Analytics** | `analytics/` | Question clustering by meaning, per-lecture confusion heatmap, unanswered questions |
+| **Video** | `video/`, `video-worker/` | Job queue with a startup sweep, retrieval-grounded scripting, per-scene citations, the Manim sandbox and its hostile-input suite, narration, captions and composition. The Python half is an optional sidecar container; the backend runs without it |
 | **Cost and limits** | `usage/` | Token ledger priced from provider billing, rate limits, rolling quotas, admin cost dashboard |
 | **Configuration** | `config/`, `common/` | `@ConfigurationProperties` for every tunable, one JSON error shape for every failure |
 | **Evaluation** | `test/.../retrieval/eval/` | Golden set, corpus seeding, Recall@k · MRR · nDCG, the reproducible eval report |
@@ -420,12 +461,18 @@ openable at [diagrams.net](https://app.diagrams.net).
 ## 7. Technology stack
 
 **Backend and AI.** Java 21 on Spring Boot 4.1 (Web MVC, Security, Data JPA, Validation, Actuator),
-over PostgreSQL hosted at Supabase with pgvector and Flyway migrations `V1` to `V21`. Embeddings are
+over PostgreSQL hosted at Supabase with pgvector and Flyway migrations `V1` to `V25`. Embeddings are
 Cohere `embed-v4.0` truncated to 768 dimensions, with Google `gemini-embedding-001` and a local
 Ollama `qwen3-embedding` sitting behind the same interface as swappable adapters. Reranking is
 Cohere `rerank-v3.5`. Generation is Cohere Command R, called directly over Spring's `RestClient`.
 Vision is Google Gemini 2.5 Flash, used for badly extracted PDF pages and for handwritten notes.
 Extraction is Apache PDFBox 3 for PDFs and Apache POI 5.5 for XSLF slides and XWPF documents.
+
+**Video renderer (optional).** A separate FastAPI service on Python 3.12, carrying Manim Community
+Edition for animation, `edge-tts` for narration, Pillow for slides and ffmpeg for composition. It
+runs only as a container behind a compose profile, holds no credentials, and never opens a database
+connection — the backend hands it text and it hands back files. Keeping it out of the Spring image is
+what stops an animation engine from becoming a dependency of the deployed application.
 
 **Frontend.** React 19 on Vite 8 with TypeScript, routed by React Router 7 and styled with Tailwind
 CSS 4. Citations open in a `react-pdf` viewer. Answers render through `react-markdown` with KaTeX
@@ -442,7 +489,8 @@ images.
 ### Prerequisites
 
 JDK 21 or newer, Node.js 20 or newer, and a free [Supabase](https://supabase.com) project with the
-`vector` extension enabled.
+`vector` extension enabled. Docker is needed only for the optional video renderer; everything else
+runs without it.
 
 ### Backend
 
@@ -501,6 +549,14 @@ uploaded bytes survive restarts.
 | `GOOGLE_API_KEY` | vision extraction and handwritten notes |
 | `CORS_ALLOWED_ORIGINS` | the deployed frontend origin, comma-separated |
 | `DOCUMENTS_DIR` | defaults to `/data/documents` in the image |
+| `VIDEO_ENABLED` | `false` unless the renderer is running; off means no video UI is drawn at all |
+| `VIDEO_WORKER_URL` | where the renderer answers, e.g. `http://video-worker:8000` under compose |
+| `VIDEOS_DIR` | finished renders; put it on the same disk as `DOCUMENTS_DIR` |
+
+The video renderer is deliberately **not** part of a cloud deployment. It is a two-gigabyte image
+that saturates the cores of whatever it runs on, and the application is designed to be complete
+without it: leave `VIDEO_ENABLED` unset and the feature is absent rather than broken. Locally,
+`docker compose --profile video up --build` starts it beside the other two services.
 
 Build the frontend with `--build-arg VITE_API_URL=https://<your-backend-host>`, since Vite inlines it
 at build time, then serve the resulting nginx image. `/actuator/health` is the platform health
@@ -533,6 +589,13 @@ the test, because there is no Bangla textbook in this project; the figures descr
 rather than a real course. Bangla PDFs also still extract poorly, which is an extraction problem
 rather than a language one and is what the vision router exists for.
 
+Video generation has not been measured. Everything except the model calls is built and tested —
+the queue, the sandbox, the fallback accounting, the narration, the captions, the composition — but
+the three numbers that decide whether it is a feature or a demo (how often an animation survives,
+wall clock per finished minute of video, and cost per video) need a chat key with quota, and the
+one available is out of its monthly allowance. The renderer also needs a machine with cores to
+spare, which is why it is local-only.
+
 Legacy `.ppt` and `.doc` are refused by design, and Markdown files are not accepted at all, since
 they have no page concept at any level.
 
@@ -546,7 +609,7 @@ one.
 |---|---|
 | **Query understanding** | Built and behind flags, awaiting the run that decides whether to enable it: trigram matching for typos, a conditional HyDE second pass, and refusal thresholds per question type. Replayed against the last published run, the thresholds refuse 8 of 8 unanswerable questions instead of 6, with no real question refused |
 | **The keyword half** | Built and behind a flag for the same reason: the sparse query ORs its terms and ranks by how many matched, instead of demanding all of them. Every published baseline has to be re-measured against it before it goes on |
-| **Knowledge loop, round two** | Uploading a document goes back and answers the questions the corpus previously could not |
+| **Video, measured** | The pipeline is built; what is outstanding is ten real jobs and the three numbers they produce — animated-scene survival rate, wall clock per finished minute, and cost per video |
 | **Study guides** | A cited, exportable revision guide generated for any topic, with diagrams |
 | **Hardening** | Coverage, material taxonomy and metadata filters, seed data, deployment |
 

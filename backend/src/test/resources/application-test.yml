@@ -30,3 +30,14 @@ studyloop:
   # them; VisionRoutingTest hands the router a deterministic stub reader instead.
   vision:
     api-key: ""
+  # Phase 21. On for the suite, which is the opposite of the two entries above and for a
+  # complementary reason: those blank a key so no test can reach a paid provider by accident, and
+  # this one switches a feature on so the video tests do not need a `properties` override of their
+  # own. An override there would fork the ApplicationContext — a second Hikari pool against a
+  # fifteen-client cap — to say something that is true for the whole suite anyway. Nothing can reach
+  # a real renderer regardless: StubAiConfig publishes a stub `VideoWorker`.
+  video:
+    enabled: true
+    # Under target/, so `mvn clean` takes the test renders with it and nothing lands in the
+    # directory the development server serves from.
+    videos-dir: ./target/test-videos

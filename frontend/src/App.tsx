@@ -12,6 +12,7 @@ import { QuizPage } from './pages/QuizPage'
 import { FlashcardsPage } from './pages/FlashcardsPage'
 import { ReviewPage } from './pages/ReviewPage'
 import { CourseNotesPage } from './pages/CourseNotesPage'
+import { CourseVideosPage } from './pages/CourseVideosPage'
 import { CourseConfusionPage } from './pages/CourseConfusionPage'
 import { JoinPage } from './pages/JoinPage'
 import { AdminCostsPage } from './pages/AdminCostsPage'
@@ -94,6 +95,17 @@ function App() {
         element={
           <ProtectedRoute>
             <FlashcardsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Phase 21: narrated videos built from the course's materials. Routed unconditionally —
+          the page itself reports that the renderer is absent, which is the one case where a
+          pasted link has to say something rather than 404. */}
+      <Route
+        path="/courses/:id/videos"
+        element={
+          <ProtectedRoute>
+            <CourseVideosPage />
           </ProtectedRoute>
         }
       />

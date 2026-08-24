@@ -38,4 +38,29 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    // Phase 21.1 — the video queue, and it is a queue precisely because the pool is one thread.
+    //
+    // **The concurrency limit is the executor rather than a check inside the job.** A semaphore or
+    // a count-then-decide is a race with whatever request arrives next; a single-slot pool with a
+    // bounded backlog is a queue by construction, and the job that waits is QUEUED rather than
+    // rejected or lost. `max-concurrent` is configuration because the right value is a property of
+    // the machine the renderer runs on, but the honest default is 1: a Manim render saturates the
+    // cores it can see, so two at once finish later than the same two run serially and both look
+    // broken while they do it.
+    //
+    // The queue is deliberately shallow. A backlog of 20 renders at three minutes each is an hour,
+    // which is longer than anybody waits, and the rejection at the door — a 429 with the daily cap
+    // in it — is a better answer than a job that sits QUEUED past the end of the session.
+    @Bean("videoExecutor")
+    public ThreadPoolTaskExecutor videoExecutor(VideoProperties properties) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        int slots = Math.max(1, properties.maxConcurrent());
+        executor.setCorePoolSize(slots);
+        executor.setMaxPoolSize(slots);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("video-");
+        executor.initialize();
+        return executor;
+    }
 }

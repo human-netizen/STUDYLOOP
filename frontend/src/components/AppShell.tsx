@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useParams } from 'react-router-dom'
-import { coursesApi, reviewApi } from '../lib/api'
+import { coursesApi, reviewApi, videosApi } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { Button, Eyebrow } from './ui'
 import { cx } from '../lib/style'
@@ -44,6 +44,7 @@ function Rail({ courseName }: { courseName?: string }) {
   const dueCount = useDueCount()
   const courseRole = useCourseRole(courseId)
   const teaches = courseRole === 'OWNER' || courseRole === 'INSTRUCTOR'
+  const videos = useVideoEnabled(courseId)
 
   return (
     <aside className="flex flex-col gap-6 border-b border-line bg-ground-2 px-5 py-6 sm:px-8 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:py-8 lg:pr-5 lg:pl-7">
@@ -74,14 +75,21 @@ function Rail({ courseName }: { courseName?: string }) {
             <RailLink to={`/courses/${courseId}/search`} index="06" label="Search" />
             <RailLink to={`/courses/${courseId}/quizzes`} index="07" label="Quizzes" />
             <RailLink to={`/courses/${courseId}/flashcards`} index="08" label="Flashcards" />
+            {/* Phase 21. Absent rather than disabled where the renderer is not installed: an
+                optional service that advertises itself and then fails is worse than one nobody
+                was told about. Same rule as Confusion and Spend, for a different reason — those
+                are hidden by role, this one by whether the machine can do it at all. */}
+            {videos && (
+              <RailLink to={`/courses/${courseId}/videos`} index="09" label="Video" />
+            )}
             {/* Phase 16.3. Every member has one, and what is in it is theirs until a manager
                 promotes it — so this is not gated the way Confusion and Spend are. */}
-            <RailLink to={`/courses/${courseId}/notes`} index="09" label="Your notes" end />
-            <RailLink to={`/courses/${courseId}/review`} index="10" label="Review this course" end />
+            <RailLink to={`/courses/${courseId}/notes`} index="10" label="Your notes" end />
+            <RailLink to={`/courses/${courseId}/review`} index="11" label="Review this course" end />
             {/* Same rule as the Spend link: hidden for a plain MEMBER rather than offered and
                 refused. The page still handles a 403 for anyone who pastes the URL. */}
             {teaches && (
-              <RailLink to={`/courses/${courseId}/confusion`} index="11" label="Confusion" end />
+              <RailLink to={`/courses/${courseId}/confusion`} index="12" label="Confusion" end />
             )}
           </>
         )}
@@ -139,6 +147,45 @@ function useDueCount(): number {
 // rather than threaded down as a prop: the rail is rendered by every course page, and a prop
 // only some of them pass would make the link appear and vanish as you navigate. A failure
 // resolves to null, which hides the link — the backend refuses the request anyway.
+// Whether this installation renders videos at all (Phase 21.5).
+//
+// One request per course visit, and the answer is remembered for the session: the flag is a
+// property of the deployment, not of the course, so re-asking on every navigation would be a
+// round trip to learn something that cannot have changed. It fails closed — an error means no
+// link, which is the same thing the flag being off means.
+const videoEnabled = new Map<string, boolean>()
+
+function useVideoEnabled(courseId: string | undefined): boolean {
+  const [enabled, setEnabled] = useState(courseId ? (videoEnabled.get(courseId) ?? false) : false)
+
+  useEffect(() => {
+    if (!courseId) {
+      setEnabled(false)
+      return
+    }
+    const known = videoEnabled.get(courseId)
+    if (known !== undefined) {
+      setEnabled(known)
+      return
+    }
+    let active = true
+    videosApi
+      .library(courseId)
+      .then((library) => {
+        videoEnabled.set(courseId, library.enabled)
+        if (active) setEnabled(library.enabled)
+      })
+      .catch(() => {
+        if (active) setEnabled(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [courseId])
+
+  return enabled
+}
+
 function useCourseRole(courseId: string | undefined): MembershipRole | null {
   const [role, setRole] = useState<MembershipRole | null>(null)
 
