@@ -1,0 +1,51 @@
+# Pings the deployed API so two different clocks never run out.
+#
+# 1. Render free web services spin down after 15 minutes with no inbound request, and the next
+#    caller waits about a minute for the JVM to come back. On 0.1 vCPU it is longer.
+# 2. Supabase pauses a free project after 7 days with no *database* activity, and a paused
+#    project has to be restored by hand from the dashboard.
+#
+# One request settles both, because /actuator/health aggregates Spring's DataSourceHealthIndicator
+# and that indicator runs a validation query. An HTTP ping is therefore also a database ping.
+#
+# **The schedule is a budget, not a habit.** Render allows 750 instance-hours per workspace per
+# month, and a service kept awake around the clock spends 720 in a 30-day month and 744 in a
+# 31-day one — which fits only just, and not at all beside a second free service. Pinging a
+# 16-hour window instead costs about 500 hours and leaves the service asleep while nobody is
+# awake to use it. Widen it by editing the hour range below.
+#
+# Times are UTC. 02:00–17:59 UTC is 08:00–23:59 in Dhaka (UTC+6).
+#
+# Two caveats worth knowing rather than discovering: GitHub delays or drops scheduled runs when
+# its runners are busy, so treat this as best-effort, and it disables scheduled workflows
+# entirely after 60 days with no commits to the repository. If the deployment needs to outlive
+# that, use an external pinger (cron-job.org and similar are free) instead of this file.
+
+name: keepalive
+
+on:
+  schedule:
+    - cron: '*/10 2-17 * * *'
+  # Lets you confirm the URL works without waiting for the next slot.
+  workflow_dispatch:
+
+# The URL is not a secret, but it is deployment-specific, so it lives in repository variables
+# (Settings → Secrets and variables → Actions → Variables) rather than in this file:
+#   KEEPALIVE_URL = https://studyloop-api.onrender.com/actuator/health
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the API health endpoint
+        env:
+          KEEPALIVE_URL: ${{ vars.KEEPALIVE_URL }}
+        run: |
+          if [ -z "$KEEPALIVE_URL" ]; then
+            echo "KEEPALIVE_URL repository variable is not set; nothing to ping."
+            exit 0
+          fi
+          # A cold start is the case this exists for, so the timeout has to outlast one.
+          # --fail turns a 5xx into a non-zero exit so a broken deployment shows as a red run.
+          curl --silent --show-error --fail --location \
+               --max-time 180 --retry 2 --retry-delay 30 \
+               "$KEEPALIVE_URL"

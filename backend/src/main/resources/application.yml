@@ -84,9 +84,31 @@ studyloop:
     # dev server (5173). Override in the cloud via CORS_ALLOWED_ORIGINS (comma-separated).
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
   storage:
+    # Where uploaded document bytes live: "filesystem" (the default) or "supabase".
+    # Free hosting tiers offer no persistent disk — the container filesystem is rebuilt on every
+    # deploy and every wake from idle — so the deployed backend sets STORAGE_PROVIDER=supabase.
+    # Everything derived from a document is in Postgres and survives either way; the bytes are
+    # what object storage saves, and DocumentService.getContent is their only reader.
+    provider: ${STORAGE_PROVIDER:filesystem}
     # Filesystem root for uploaded document bytes. Relative to the backend working dir in
     # dev (→ backend/data/documents, git-ignored); a mounted volume via DOCUMENTS_DIR in the cloud.
+    # Ignored when the provider is "supabase".
     documents-dir: ${DOCUMENTS_DIR:./data/documents}
+    supabase:
+      # Required only when provider is "supabase"; StorageConfig refuses to start without them
+      # rather than failing on a student's first upload.
+      url: ${SUPABASE_URL:}
+      # Service-role key — bypasses row-level security, so it stays server-side. Never VITE_*.
+      service-key: ${SUPABASE_SERVICE_KEY:}
+      bucket: ${SUPABASE_BUCKET:documents}
+  ingestion:
+    # The ingestion executor, sized from configuration because the right value is a property of
+    # the machine. Defaults are the pre-Phase-23.4 constants. A page rasterised at 150 DPI is
+    # ~7 MB of BufferedImage, so a 512 MB container sets INGESTION_CORE_POOL=1 and ingests
+    # serially; the queue absorbs the rest and the upload still returns 202.
+    core-pool-size: ${INGESTION_CORE_POOL:2}
+    max-pool-size: ${INGESTION_MAX_POOL:4}
+    queue-capacity: ${INGESTION_QUEUE_CAPACITY:50}
   embedding:
     # Which backend embeds chunks: "cohere" (hosted, the default) or "google" (hosted), or
     # "ollama" (local, offline). Override with EMBEDDING_PROVIDER (e.g. in the cloud).
@@ -681,4 +703,10 @@ management:
   endpoint:
     health:
       # Dev convenience: show the db component inside /actuator/health.
-      show-details: always
+      #
+      # Set HEALTH_SHOW_DETAILS=never in the cloud. The endpoint is permitAll in SecurityConfig
+      # so the platform can health-check it unauthenticated, which on a public deployment also
+      # means anyone can read it — and "always" publishes the database vendor and version and
+      # the instance's free disk space to them. The aggregate status still runs the db indicator,
+      # so a health ping still counts as database activity; only the internals stop being shown.
+      show-details: ${HEALTH_SHOW_DETAILS:always}

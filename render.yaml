@@ -1,0 +1,105 @@
+# Render Blueprint — the deployed backend (Phase 23.4).
+#
+# The frontend is not here: it is a static Vite bundle on Vercel, which builds it with
+# VITE_API_URL pointing at this service. Only the API and its configuration live on Render.
+#
+# The video renderer is deliberately absent. It is a two-gigabyte image that saturates whatever
+# cores it can see, video.enabled defaults to false, and the application is complete without it.
+#
+# NO SECRET APPEARS IN THIS FILE. Every credential is `sync: false`, which makes Render prompt
+# for the value once at Blueprint creation and store it on its side. This file is tracked and
+# public; .env.properties, which holds the same keys locally, is not.
+
+services:
+  - type: web
+    name: studyloop-api
+    runtime: docker
+    plan: free
+    # Closest free region to Dhaka. Changing it later means recreating the service.
+    region: singapore
+    branch: main
+    autoDeployTrigger: commit
+
+    # The Dockerfile copies pom.xml and src relative to its own directory, so the build context
+    # is backend/ and not the repository root.
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+
+    # Permitted without a token in SecurityConfig, so the platform can call it unauthenticated.
+    healthCheckPath: /actuator/health
+
+    envVars:
+      # ── Database: the existing Supabase project, via its session pooler ────────────────────
+      - key: DB_URL
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+
+      # ── Auth ──────────────────────────────────────────────────────────────────────────────
+      # Generated once by Render rather than pasted. JwtService calls hmacShaKeyFor on the raw
+      # UTF-8 bytes and throws WeakKeyException below 256 bits, so the value must be >= 32
+      # characters; Render's generated value is longer. Rotating it invalidates live sessions.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # ── Model providers ───────────────────────────────────────────────────────────────────
+      # Without COHERE_API_KEY chunks store without vectors and chat returns 502; without
+      # GOOGLE_API_KEY PDFs still ingest but photographed notes fail. Both are set here.
+      - key: COHERE_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+
+      # ── CORS ──────────────────────────────────────────────────────────────────────────────
+      # The exact Vercel origin, scheme included, no trailing slash, comma-separated for more
+      # than one. SecurityConfig sets allowCredentials(true), which forbids the "*" wildcard —
+      # so a wrong value here is a browser-side CORS failure, not a server error in the log.
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+      # ── Storage: object storage, because a free instance has no persistent disk ────────────
+      # Render free services cannot attach a disk, and the filesystem is rebuilt on every deploy
+      # and every wake from idle. Postgres holds every derived artifact, so only the uploaded
+      # bytes need moving — and DocumentService.getContent is their only reader.
+      - key: STORAGE_PROVIDER
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      # Service-role key: bypasses row-level security, stays server-side, never VITE_*.
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: documents
+
+      # ── Fitting 512 MB ────────────────────────────────────────────────────────────────────
+      # Ingest one document at a time. PageImageRenderer rasterises a page at 150 DPI — roughly
+      # seven megabytes of BufferedImage before the PNG buffer beside it — and the local default
+      # of two concurrent ingests does not fit beside a Spring context in this heap. The queue
+      # absorbs the backlog, so uploads still return 202 and nothing is rejected.
+      - key: INGESTION_CORE_POOL
+        value: "1"
+      - key: INGESTION_MAX_POOL
+        value: "1"
+
+      # Page caps, lowered from 40/60. Each page beyond these is a model call and a bitmap, and
+      # on 0.1 vCPU the wall clock matters as much as the memory.
+      - key: VISION_MAX_PAGES
+        value: "20"
+      - key: VISUAL_MAX_PAGES
+        value: "24"
+
+      # Heap at 55% rather than the image's 75%. The remaining 45% is not spare: metaspace for a
+      # Spring context is ~100 MB on its own, and thread stacks, code cache and PDFBox's direct
+      # buffers all live outside the heap. At 75% the container is killed by the platform for
+      # exceeding its memory limit, which looks like a crash rather than an OutOfMemoryError.
+      # SerialGC because G1's threads and bookkeeping are a poor trade on 0.1 vCPU.
+      # /actuator/health is permitAll so Render can call it, which on a public URL means anyone
+      # can. "never" keeps the aggregate status (and the database check behind it) while not
+      # publishing the DB vendor, version and free disk space to the open internet.
+      - key: HEALTH_SHOW_DETAILS
+        value: never
+
+      - key: JAVA_OPTS
+        value: "-XX:MaxRAMPercentage=55.0 -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -Xss512k"

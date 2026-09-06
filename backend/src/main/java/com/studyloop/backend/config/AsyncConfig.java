@@ -12,14 +12,18 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @EnableAsync
 public class AsyncConfig {
 
+    // Sized from configuration since Phase 23.4, defaults unchanged. Concurrency stays modest to
+    // stay inside Supabase's small connection budget — and, on a 512 MB free-tier container, to
+    // stay inside the heap: a single page rasterised at 150 DPI is about seven megabytes, so the
+    // deployment sets INGESTION_CORE_POOL=1 and ingests one document at a time. The queue absorbs
+    // the rest, so an upload still returns 202 and nothing is rejected.
     @Bean("ingestionExecutor")
-    public ThreadPoolTaskExecutor ingestionExecutor() {
+    public ThreadPoolTaskExecutor ingestionExecutor(IngestionProperties properties) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
-        // Queue backlog before spawning beyond the core pool; ingestion is I/O-bound and
-        // we keep concurrency modest to stay within Supabase's small connection budget.
-        executor.setQueueCapacity(50);
+        int core = Math.max(1, properties.corePoolSize());
+        executor.setCorePoolSize(core);
+        executor.setMaxPoolSize(Math.max(core, properties.maxPoolSize()));
+        executor.setQueueCapacity(properties.queueCapacity());
         executor.setThreadNamePrefix("ingest-");
         executor.initialize();
         return executor;

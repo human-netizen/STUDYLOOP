@@ -1,29 +1,23 @@
 package com.studyloop.backend.document;
 
-import com.studyloop.backend.config.StorageProperties;
-import org.springframework.stereotype.Service;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.UUID;
 
-// Writes uploaded document bytes to the local filesystem and computes their content hash.
-// Bytes live at {documentsDir}/{courseId}/{sha256}; we persist the relative
-// "{courseId}/{sha256}" on the entity so the root can move between environments.
-@Service
-public class DocumentStorageService {
+// Where uploaded document bytes live, behind an interface because the answer differs by
+// deployment rather than by code path. Two implementations: the local filesystem (dev, and any
+// host with a durable disk) and Supabase Storage (a free-tier container, whose filesystem does
+// not survive a restart). StorageConfig picks one from studyloop.storage.provider.
+//
+// The contract is content-addressed and relative: bytes are stored under "{courseId}/{sha256}"
+// and that relative path is what the entity keeps, so the root can move between environments —
+// or stop being a filesystem root at all — without rewriting a single row.
+public interface DocumentStorageService {
 
-    private final Path root;
-
-    public DocumentStorageService(StorageProperties properties) {
-        this.root = Path.of(properties.documentsDir()).toAbsolutePath().normalize();
-    }
-
-    public String sha256Hex(byte[] bytes) {
+    // Pure, and identical whatever backs the store, so it is defaulted here rather than
+    // reimplemented — and duplicated — per provider.
+    default String sha256Hex(byte[] bytes) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
             return HexFormat.of().formatHex(digest);
@@ -35,30 +29,9 @@ public class DocumentStorageService {
 
     // Persists the bytes and returns the relative storage path to record on the entity.
     // Content-addressed, so re-writing the same file just overwrites identical bytes.
-    public String store(UUID courseId, String sha256, byte[] bytes) {
-        String relativePath = courseId + "/" + sha256;
-        Path target = root.resolve(relativePath);
-        try {
-            Files.createDirectories(target.getParent());
-            Files.write(target, bytes);
-        } catch (IOException e) {
-            throw new DocumentStorageException("Could not store the uploaded file.", e);
-        }
-        return relativePath;
-    }
+    String store(UUID courseId, String sha256, byte[] bytes);
 
-    // Resolves a stored relative path back to an absolute path (used by later extraction).
-    public Path resolve(String relativePath) {
-        return root.resolve(relativePath);
-    }
-
-    // Reads previously-stored bytes back. A missing/unreadable file throws, which the
+    // Reads previously-stored bytes back. A missing or unreadable object throws, which the
     // ingestion pipeline turns into a FAILED document rather than a crash.
-    public byte[] read(String relativePath) {
-        try {
-            return Files.readAllBytes(root.resolve(relativePath));
-        } catch (IOException e) {
-            throw new DocumentStorageException("Could not read stored document bytes.", e);
-        }
-    }
+    byte[] read(String relativePath);
 }
