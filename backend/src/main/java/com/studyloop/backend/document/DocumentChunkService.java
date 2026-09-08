@@ -24,14 +24,14 @@ public class DocumentChunkService {
 
     @Transactional
     public void replaceChunks(UUID documentId, List<TextChunk> chunks, int pageCount, int visionPages) {
-        replaceChunks(documentId, chunks, List.of(), pageCount, visionPages);
+        replaceChunks(documentId, chunks, List.of(), pageCount, visionPages, 0);
     }
 
     // Text chunks and visual chunks in one transaction, because they are one document's index and
     // a document half-rebuilt is a document that answers questions about two ingests at once.
     @Transactional
     public void replaceChunks(UUID documentId, List<TextChunk> chunks, List<VisualChunk> visuals,
-                              int pageCount, int visionPages) {
+                              int pageCount, int visionPages, int degradedPages) {
         Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
 
@@ -69,5 +69,10 @@ public class DocumentChunkService {
         }
         document.setPageCount(pageCount);
         document.setVisionPages(visionPages);
+        // Phase 25.3, written beside visionPages because they are the two halves of one sentence:
+        // how many pages this ingest paid a vision call for, and how many of those calls it did not
+        // get an answer from in time. Overwritten on every re-ingest rather than accumulated — it
+        // describes the corpus as it stands, not the history of how it got there.
+        document.setDegradedPages(degradedPages);
     }
 }

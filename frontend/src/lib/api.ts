@@ -204,10 +204,21 @@ export const documentsApi = {
     request<DocumentResponse[]>(`/courses/${courseId}/documents`, { auth: true }),
   get: (courseId: string, documentId: string) =>
     request<DocumentResponse>(`/courses/${courseId}/documents/${documentId}`, { auth: true }),
-  upload: (courseId: string, file: File) => {
+  // `range` is Phase 25.1's page cut, sent as query params rather than as extra form parts: the
+  // body is already multipart for the file, and the backend reads them as plain @RequestParams
+  // either way. Omitted entirely when the whole document is wanted, so the request is byte-for-byte
+  // what it was before this phase.
+  upload: (courseId: string, file: File, range?: { firstPage?: number; lastPage?: number }) => {
     const form = new FormData()
     form.append('file', file)
-    return upload<DocumentResponse>(`/courses/${courseId}/documents`, form)
+    const params = new URLSearchParams()
+    if (range?.firstPage != null) params.set('firstPage', String(range.firstPage))
+    if (range?.lastPage != null) params.set('lastPage', String(range.lastPage))
+    const query = params.toString()
+    return upload<DocumentResponse>(
+      `/courses/${courseId}/documents${query ? `?${query}` : ''}`,
+      form,
+    )
   },
   // The cached summary + glossary. Cheap — it never triggers generation, so `summary` comes
   // back null for a document that hasn't been summarized yet.

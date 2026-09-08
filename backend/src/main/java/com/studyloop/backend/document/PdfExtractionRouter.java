@@ -13,9 +13,11 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -89,12 +91,24 @@ public class PdfExtractionRouter implements DocumentExtractor {
     // sheet, and scoring twice would let the two disagree about the same page.
     @Override
     public Extraction extract(byte[] pdfBytes) {
+        return extract(pdfBytes, PageRange.all());
+    }
+
+    // Phase 25.1 — the same routing over a slice of the document.
+    //
+    // The range is pushed down into both readers rather than applied to their results, because the
+    // saving is the point: the quality gate runs three passes per page and the vision loop renders
+    // and uploads one image per routed page, and neither should touch a page nobody asked to
+    // ingest. What comes back still carries the source document's own page numbers — see PageRange
+    // for why renumbering would be a citation bug with no symptom at ingest.
+    @Override
+    public Extraction extract(byte[] pdfBytes, PageRange range) {
         try (PDDocument document = Loader.loadPDF(pdfBytes)) {
-            List<PageText> pages = textExtractor.extract(document);
+            List<PageText> pages = textExtractor.extract(document, range);
             if (!properties.enabled() && !visualPageSelector.enabled()) {
                 return Extraction.of(pages);
             }
-            List<PageQuality> qualities = qualityGate.score(document);
+            List<PageQuality> qualities = qualityGate.score(document, range);
             Extraction extraction = properties.enabled()
                     ? route(document, pages, qualities)
                     : Extraction.of(pages);
@@ -134,21 +148,65 @@ public class PdfExtractionRouter implements DocumentExtractor {
                     failing.size(), pages.size(), properties.maxPagesPerDocument());
         }
 
+        // Phase 25.2 — the first thing an uploader is told that a log line used to keep to itself.
+        // The routed count is the only honest input to an estimate, and it does not exist until
+        // this moment: it is 0% of a typeset PDF and 100% of a scan, and nothing before the gate
+        // can tell those apart.
+        IngestionProgress.report(IngestionProgress.EXTRACTING_FLOOR,
+                sentence("%d of %d pages need the vision model".formatted(failing.size(), pages.size()),
+                        IngestionEstimate.describe(IngestionEstimate.forVisionPages(failing.size()))));
+
         PDFRenderer pageRenderer = renderer.rendererFor(document);
-        List<PageText> routed = new ArrayList<>(pages);
-        for (PageQuality quality : failing) {
-            byte[] png = renderer.renderPng(pageRenderer, quality.pageNumber(), properties.dpi());
-            String markdown = readWithRetries(png, quality);
-            routed.set(quality.pageNumber() - 1, new PageText(quality.pageNumber(), markdown));
+        // Indexed by page number rather than by list position: with a page range in force, `pages`
+        // holds pages 12-240 and page 120 is not at index 119.
+        Map<Integer, PageText> routed = new LinkedHashMap<>();
+        for (PageText page : pages) {
+            routed.put(page.pageNumber(), page);
         }
-        return Extraction.withVision(routed, failing.size());
+
+        int degraded = 0;
+        int done = 0;
+        for (PageQuality quality : failing) {
+            IngestionProgress.report(IngestionProgress.EXTRACTING_FLOOR,
+                    IngestionProgress.EXTRACTING_CEILING, done, failing.size(),
+                    sentence("Reading page %d with the vision model (%d of %d)"
+                                    .formatted(quality.pageNumber(), done + 1, failing.size()),
+                            IngestionEstimate.describe(
+                                    IngestionEstimate.forVisionPages(failing.size() - done))));
+
+            byte[] png = renderer.renderPng(pageRenderer, quality.pageNumber(), properties.dpi());
+            String markdown = readOrFallBack(png, quality);
+            if (markdown == null) {
+                degraded++;
+            } else {
+                routed.put(quality.pageNumber(), new PageText(quality.pageNumber(), markdown));
+            }
+            done++;
+        }
+        // Counted as routed even when it fell back, because `visionPages` records what the ingest
+        // *cost* — the call was made and billed — and `degradedPages` records what it got. Folding
+        // the two would make a document that spent fifteen calls look like one that spent twelve.
+        return Extraction.withVision(List.copyOf(routed.values()), failing.size(), degraded);
+    }
+
+    // "Reading page 120 with the vision model (3 of 15) - about 50s left", or just the first half
+    // when the remainder is too short to be worth a number. Written for a person: the client
+    // renders this string and never parses it.
+    private static String sentence(String what, String estimate) {
+        return estimate == null ? what + "." : what + " · " + estimate + " left.";
     }
 
     // One page, with a bounded wait for the failures that pass on their own and none for the rest.
     // A 429 during a fifty-page scan is the expected case on a free-tier key, and it is the one
-    // failure that resolves itself by doing nothing; a 5xx or a timeout is the same kind of answer
-    // arriving for a different reason.
-    private String readWithRetries(byte[] png, PageQuality quality) {
+    // failure that resolves itself by doing nothing; a 5xx is the same kind of answer arriving for
+    // a different reason.
+    //
+    // **Returns null when the page took too long (Phase 25.3), meaning "keep what PDFBox
+    // extracted".** Null rather than an exception because a timeout is not a failure of the
+    // document — it is one page taking the other branch — and the caller is holding the fallback
+    // text already. Every other failure still throws: see below for why an exhausted daily quota in
+    // particular must not degrade quietly.
+    private String readOrFallBack(byte[] png, PageQuality quality) {
         RuntimeException lastFailure = null;
         for (int attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
             try {
@@ -156,6 +214,14 @@ public class PdfExtractionRouter implements DocumentExtractor {
             } catch (RuntimeException e) {
                 lastFailure = e;
                 Retry retry = retryKindOf(e);
+                if (retry == Retry.TOO_SLOW) {
+                    // WARN, not DEBUG: the document is about to be indexed slightly worse than it
+                    // could be, and this line plus documents.degraded_pages are the only two places
+                    // that will ever say so.
+                    log.warn("Page {} did not come back within the vision timeout; "
+                                    + "keeping the text PDFBox extracted", quality.pageNumber());
+                    return null;
+                }
                 if (attempt == MAX_RATE_LIMIT_RETRIES || retry == Retry.NEVER) {
                     break;
                 }
@@ -166,6 +232,12 @@ public class PdfExtractionRouter implements DocumentExtractor {
                         quality.pageNumber(), wait / 1000, attempt + 1, MAX_RATE_LIMIT_RETRIES);
                 sleep(wait);
             }
+        }
+        // A quota failure names the quota rather than the page, because the page is not the
+        // problem and telling somebody "could not read page 289" sends them to look at page 289.
+        String quota = exhaustedQuotaOf(lastFailure);
+        if (quota != null) {
+            throw new VisionExtractionException(quota, lastFailure);
         }
         throw new VisionExtractionException(
                 "The vision extractor could not read page %d (%s)."
@@ -191,7 +263,11 @@ public class PdfExtractionRouter implements DocumentExtractor {
     // Package-private, with retryKindOf below, so the classification can be tested without the
     // waiting: exercising it through extract() would mean a test that really sleeps for two
     // minutes, and the logic worth pinning is which status means which, not that Thread.sleep works.
-    enum Retry { RATE_LIMIT, TRANSIENT, NEVER }
+    // TOO_SLOW is Phase 25.3's, and it is the one kind that is neither retried nor fatal: the page
+    // keeps the text PDFBox extracted and the ingest carries on. It is deliberately not folded into
+    // TRANSIENT — retrying a call that has already spent the full timeout is three more timeouts,
+    // 45 seconds to re-learn what the first 15 established.
+    enum Retry { RATE_LIMIT, TRANSIENT, TOO_SLOW, NEVER }
 
     // **Classified by status code, because the message is not evidence.** Until 2026-09-07 this
     // matched the words "429", "rate limit" and "quota" in the exception text, which made
@@ -210,16 +286,60 @@ public class PdfExtractionRouter implements DocumentExtractor {
             if (cause instanceof RestClientResponseException http) {
                 HttpStatusCode status = http.getStatusCode();
                 if (status.value() == 429) {
-                    return Retry.RATE_LIMIT;
+                    // **A 429 is two different answers and the body says which.** Added 2026-09-08,
+                    // after a 296-page ingest died on page 289 having successfully transcribed
+                    // fourteen pages. Google's error carries a quotaId, and
+                    // `GenerateRequestsPerDayPerProjectPerModel-FreeTier` is a *daily* allowance:
+                    // waiting 20s, then 40s, then 60s cannot make a day pass, so all two minutes
+                    // are guaranteed futile and each attempt spends another request against an
+                    // allowance that is already gone. The quota id was in the response body the
+                    // whole time; the code was reading the status and throwing the body away.
+                    return isDailyQuota(http) ? Retry.NEVER : Retry.RATE_LIMIT;
                 }
                 return status.is5xxServerError() ? Retry.TRANSIENT : Retry.NEVER;
             }
             // No response at all: connect or read timeout, DNS, a dropped socket.
             if (cause instanceof ResourceAccessException) {
-                return Retry.TRANSIENT;
+                // A read timeout is the provider being slow, not absent, and Phase 25.3 gives it
+                // its own answer. Everything else here fails in milliseconds and genuinely does
+                // pass on its own, so it keeps the short retry it had.
+                return isTimeout(cause) ? Retry.TOO_SLOW : Retry.TRANSIENT;
             }
         }
         return Retry.NEVER;
+    }
+
+    private static boolean isTimeout(Throwable resourceAccess) {
+        for (Throwable cause = resourceAccess; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SocketTimeoutException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Whether this 429 is a per-day allowance rather than a per-minute rate limit. Matched on the
+    // quota id's own wording, which is the provider's structured statement of the contract —
+    // "GenerateRequestsPerDayPerProjectPerModel-FreeTier" says per-day *and* per-model, and the
+    // second half is why naming a different model is a fresh budget rather than the same one.
+    private static boolean isDailyQuota(RestClientResponseException http) {
+        String body = http.getResponseBodyAsString();
+        return body != null && body.contains("PerDay");
+    }
+
+    // The sentence to fail with when the allowance, not the page, is what went wrong. Null when
+    // this failure was something else, so the caller keeps its page-shaped message.
+    private static String exhaustedQuotaOf(RuntimeException failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof RestClientResponseException http
+                    && http.getStatusCode().value() == 429 && isDailyQuota(http)) {
+                return ("The vision model's daily free-tier quota is used up, so the rest of this "
+                        + "document cannot be read today. Set VISION_MODEL to a different model — "
+                        + "the quota is per model, so another one is a fresh allowance — or "
+                        + "re-upload tomorrow.");
+            }
+        }
+        return null;
     }
 
     private static void sleep(long millis) {

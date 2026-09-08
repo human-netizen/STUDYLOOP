@@ -3,6 +3,7 @@ package com.studyloop.backend.config;
 import com.studyloop.backend.config.VisionProperties.Thresholds;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,8 +40,8 @@ class VisionPropertiesTest {
         // The rule the rerank stage and the embedding clients already follow: an installation with
         // no key for an optional provider keeps working rather than failing every request.
         assertThat(VisionProperties.defaults().isConfigured()).isFalse();
-        assertThat(new VisionProperties(true, "   ", null, 0, 0, null, null, 0).isConfigured()).isFalse();
-        assertThat(new VisionProperties(true, "a-key", null, 0, 0, null, null, 0).isConfigured()).isTrue();
+        assertThat(new VisionProperties(true, "   ", null, 0, 0, null, null, 0, null).isConfigured()).isFalse();
+        assertThat(new VisionProperties(true, "a-key", null, 0, 0, null, null, 0, null).isConfigured()).isTrue();
     }
 
     @Test
@@ -58,7 +59,8 @@ class VisionPropertiesTest {
     @Test
     void explicitValuesAreKept() {
         VisionProperties properties = new VisionProperties(true, "a-key", "gemini-3-pro", 220, 8,
-                List.of("BENGALI", "COMMON"), new Thresholds(1.5, 0.7, 0.4, 220, 3.0, 0.6, 0.5), 0.8);
+                List.of("BENGALI", "COMMON"), new Thresholds(1.5, 0.7, 0.4, 220, 3.0, 0.6, 0.5), 0.8,
+                Duration.ofSeconds(42));
 
         assertThat(properties.model()).isEqualTo("gemini-3-pro");
         assertThat(properties.dpi()).isEqualTo(220);
@@ -67,5 +69,6 @@ class VisionPropertiesTest {
         assertThat(properties.thresholds().minCharsPerThousandPoints()).isEqualTo(1.5);
         assertThat(properties.thresholds().figureCharsPerThousandPoints()).isEqualTo(3.0);
         assertThat(properties.thresholds().maxOrderDisagreement()).isEqualTo(0.5);
+        assertThat(properties.pageTimeout()).isEqualTo(Duration.ofSeconds(42));
     }
 }

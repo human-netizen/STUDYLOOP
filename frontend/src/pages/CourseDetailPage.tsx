@@ -16,12 +16,15 @@ import {
   Eyebrow,
   Loading,
   Meta,
+  NumberField,
   PageTitle,
   Pill,
+  ProgressBar,
   Row,
   Rows,
   SectionHead,
 } from '../components/ui'
+import { estimateFor, pageCountOf } from '../lib/pdf'
 import { cx, linkButton } from '../lib/style'
 
 // Statuses that are still moving through the pipeline — while any document sits in one of
@@ -149,17 +152,21 @@ function UploadDropzone({
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [reading, setReading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A PDF that has been read but not yet sent: Phase 25.1's cut is chosen here, between picking the
+  // file and uploading it, which is the only moment at which the page count is known and nothing
+  // has been stored yet.
+  const [pending, setPending] = useState<{ file: File; pages: number } | null>(null)
 
-  const handleFiles = useCallback(
-    async (files: FileList | null) => {
-      const file = files?.[0]
-      if (!file) return
+  const send = useCallback(
+    async (file: File, range?: { firstPage?: number; lastPage?: number }) => {
       setError(null)
       setUploading(true)
       try {
-        const doc = await documentsApi.upload(courseId, file)
+        const doc = await documentsApi.upload(courseId, file, range)
         onUploaded(doc)
+        setPending(null)
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Upload failed.')
       } finally {
@@ -169,10 +176,54 @@ function UploadDropzone({
     [courseId, onUploaded],
   )
 
+  const handleFiles = useCallback(
+    async (files: FileList | null) => {
+      const file = files?.[0]
+      if (!file) return
+      setError(null)
+      // Only a PDF can be cut, and only a multi-page one is worth asking about. Everything else —
+      // a deck, a Word document, a one-page handout — takes the path it took before this phase, so
+      // the common upload is still one gesture.
+      if (!isPdf(file)) {
+        void send(file)
+        return
+      }
+      setReading(true)
+      const pages = await pageCountOf(file)
+      setReading(false)
+      if (pages == null || pages < 2) {
+        void send(file)
+        return
+      }
+      setPending({ file, pages })
+    },
+    [send],
+  )
+
+  const busy = uploading || reading
+
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
     setDragging(false)
-    if (!uploading) void handleFiles(event.dataTransfer.files)
+    if (!busy) void handleFiles(event.dataTransfer.files)
+  }
+
+  if (pending) {
+    return (
+      <div>
+        <PageRangePanel
+          file={pending.file}
+          pages={pending.pages}
+          uploading={uploading}
+          onCancel={() => {
+            setPending(null)
+            setError(null)
+          }}
+          onStart={(range) => void send(pending.file, range)}
+        />
+        {error && <ErrorText className="mt-3">{error}</ErrorText>}
+      </div>
+    )
   }
 
   return (
@@ -180,9 +231,9 @@ function UploadDropzone({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => !uploading && inputRef.current?.click()}
+        onClick={() => !busy && inputRef.current?.click()}
         onKeyDown={(event) => {
-          if ((event.key === 'Enter' || event.key === ' ') && !uploading) {
+          if ((event.key === 'Enter' || event.key === ' ') && !busy) {
             event.preventDefault()
             inputRef.current?.click()
           }
@@ -198,11 +249,11 @@ function UploadDropzone({
           dragging
             ? 'border-accent bg-surface-2'
             : 'border-line bg-surface hover:border-line-strong',
-          uploading && 'pointer-events-none opacity-60',
+          busy && 'pointer-events-none opacity-60',
         )}
       >
         <p className="m-0 font-display text-[17px] font-bold tracking-[-0.015em] text-ink">
-          {uploading ? 'Uploading…' : 'Drop a file here'}
+          {uploading ? 'Uploading…' : reading ? 'Reading the file…' : 'Drop a file here'}
         </p>
         {/* Phase 16 widened this from PDF alone. A deck is read as a deck rather than as a PDF
             export of one, which is where its speaker notes and slide titles come from. */}
@@ -220,6 +271,77 @@ function UploadDropzone({
         }}
       />
       {error && <ErrorText className="mt-3">{error}</ErrorText>}
+    </div>
+  )
+}
+
+function isPdf(file: File) {
+  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+}
+
+// Phase 25.1 — which pages of a picked PDF to ingest, and what that is going to cost.
+//
+// It defaults to the whole document, so the reader who wants everything presses one button and the
+// cut is a thing they can ignore. The reason it is offered at all is that a 300-page textbook whose
+// student needs chapter four spends minutes and a chunk of a free-tier vision quota reading the
+// other fourteen chapters, and every page of those is also a page retrieval has to sift past.
+function PageRangePanel({
+  file,
+  pages,
+  uploading,
+  onStart,
+  onCancel,
+}: {
+  file: File
+  pages: number
+  uploading: boolean
+  onStart: (range?: { firstPage?: number; lastPage?: number }) => void
+  onCancel: () => void
+}) {
+  const [first, setFirst] = useState(1)
+  const [last, setLast] = useState(pages)
+
+  const from = Math.min(first, last)
+  const to = Math.max(first, last)
+  const selected = to - from + 1
+  const whole = from === 1 && to === pages
+
+  return (
+    <div className="rounded-card border border-line bg-surface px-6 py-5">
+      <Eyebrow>Ready to ingest</Eyebrow>
+      <p className="m-0 mt-1 truncate font-mono text-[13px] text-ink">{file.name}</p>
+      <Meta className="mt-1 block">
+        {pages} pages · {estimateFor(selected)}
+      </Meta>
+
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <NumberField label="From page" value={first} min={1} max={pages} disabled={uploading} onChange={setFirst} />
+        <NumberField label="To page" value={last} min={1} max={pages} disabled={uploading} onChange={setLast} />
+        <div className="flex flex-1 items-center justify-end gap-2">
+          <Button variant="quiet" size="sm" onClick={onCancel} disabled={uploading}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={uploading}
+            onClick={() =>
+              // Sent as "no range at all" when it is the whole document, so an uncut upload is
+              // byte-for-byte the request it was before this phase and the row stores null rather
+              // than a range that happens to cover everything.
+              onStart(whole ? undefined : { firstPage: from, lastPage: to })
+            }
+          >
+            {uploading ? 'Uploading…' : whole ? 'Ingest all pages' : `Ingest pages ${from}–${to}`}
+          </Button>
+        </div>
+      </div>
+
+      {!whole && (
+        <Meta className="mt-3 block">
+          {selected} of {pages} pages. The whole file is stored either way, so citations still open
+          at the page they name.
+        </Meta>
+      )}
     </div>
   )
 }
@@ -290,10 +412,24 @@ function DocumentRow({ courseId, document }: { courseId: string; document: Docum
           <Meta>
             {formatBytes(document.sizeBytes)}
             {document.pageCount != null && ` · ${document.pageCount} pages`}
+            {/* Phase 25.1. Shown only for a cut document, and shown in the source file's own page
+                numbers — the stored file is the whole book, so these are the numbers the citation
+                viewer opens at. */}
+            {document.firstPage != null &&
+              ` · ${document.firstPage}–${document.lastPage ?? 'end'}`}
             {/* Shown only when it is not the default: a row that says "English" on every English
                 document is a column of noise, and the useful signal is that this one is not. */}
             {document.language === 'BANGLA' && ' · বাংলা'}
           </Meta>
+          {/* Phase 25.3. The whole defence of falling back instead of failing is that the fallback
+              is visible, so this line is not optional decoration — it is the thing that makes a
+              degraded document different from one that quietly answers nothing. */}
+          {document.degradedPages > 0 && document.status === 'READY' && (
+            <p className="m-0 mt-1 text-[12px] text-warn">
+              {document.degradedPages} page{document.degradedPages === 1 ? '' : 's'} took too long
+              to read and kept the text extracted from the file.
+            </p>
+          )}
           {document.status === 'FAILED' && document.errorMessage && (
             <p className="m-0 mt-1 text-[12px] text-bad">{document.errorMessage}</p>
           )}
@@ -316,6 +452,15 @@ function DocumentRow({ courseId, document }: { courseId: string; document: Docum
         </button>
       ) : (
         header
+      )}
+
+      {/* Phase 25.2 — where the pipeline has got to, polled with the list it is already polling.
+          Only while it is moving: a READY row showing 100% would be a bar that never goes away, and
+          a FAILED one keeps its number in the badge and its reason in the line above. */}
+      {IN_FLIGHT.includes(document.status) && (
+        <div className="border-t border-line-soft px-5 py-3">
+          <ProgressBar percent={document.progress} label={document.stage} />
+        </div>
       )}
 
       {open && (

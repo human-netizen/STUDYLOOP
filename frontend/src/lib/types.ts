@@ -89,7 +89,21 @@ export interface DocumentResponse {
   status: DocumentStatus
   // Present only when status is FAILED.
   errorMessage: string | null
+  // How far through the pipeline this document is, 0-100, and the sentence to show under the bar
+  // (Phase 25.2). Always present: a finished document reads 100, and a failed one holds where it
+  // stopped rather than resetting, because how far it got is the most useful thing it can say.
+  progress: number
+  stage: string | null
   pageCount: number | null
+  // The slice of the source document that was ingested (Phase 25.1), or null for all of it. In the
+  // source document's own page numbers — the stored file is never cut, so these line up with what
+  // the citation viewer shows.
+  firstPage: number | null
+  lastPage: number | null
+  // Pages whose vision call passed its timeout and kept the text PDFBox extracted (Phase 25.3).
+  // Zero for almost everything; non-zero is shown on the row, because degrading quietly is the
+  // failure this fallback is only defensible for avoiding.
+  degradedPages: number
   // ENGLISH until extraction has run, and ENGLISH afterwards for everything the detector found no
   // Bengali script in — never null and never unknown.
   language: DocumentLanguage

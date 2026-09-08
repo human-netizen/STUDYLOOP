@@ -95,9 +95,37 @@ public class Document {
     @Column(name = "vision_pages")
     private Integer visionPages;
 
+    // The slice of the source document the pipeline was told to read (Phase 25.1), inclusive and
+    // 1-based, in the source document's own numbering. Null means the whole thing.
+    //
+    // **Applied at extraction, never to the stored bytes.** The object in storage stays the whole
+    // PDF, which is what keeps citations pointing at pages the reader can actually find and what
+    // will let a later re-ingest choose a different range without a second upload.
+    @Column(name = "first_page")
+    private Integer firstPage;
+
+    @Column(name = "last_page")
+    private Integer lastPage;
+
+    // Pages that were routed to the vision model, did not answer inside the timeout, and kept the
+    // text PDFBox extracted (Phase 25.3). Non-zero means this document is indexed slightly worse
+    // than it could be — a statement the library row makes out loud, because the alternative to
+    // saying it is a page that quietly answers nothing and looks identical to one that is fine.
+    @Column(name = "degraded_pages", nullable = false)
+    private int degradedPages;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DocumentStatus status;
+
+    // How far through the pipeline this document is, 0-100, and the sentence to show under the bar
+    // (Phase 25.2). Not derivable from `status`: EXTRACTING covers both "opened the file" and
+    // "reading page 210 of 296 with the vision model", which are eight minutes apart.
+    @Column(nullable = false)
+    private int progress;
+
+    @Column(columnDefinition = "text")
+    private String stage;
 
     // Populated when status is FAILED — the reason the pipeline stopped.
     @Column(name = "error_message", length = 500)

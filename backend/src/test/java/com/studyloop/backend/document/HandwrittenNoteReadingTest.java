@@ -29,7 +29,7 @@ class HandwrittenNoteReadingTest {
     }
 
     private static VisionProperties properties(double minNoteConfidence) {
-        return new VisionProperties(true, "a-key", null, 0, 0, null, null, minNoteConfidence);
+        return new VisionProperties(true, "a-key", null, 0, 0, null, null, minNoteConfidence, null);
     }
 
     // A minimal but real PNG header, which is all the extractor looks at: it sniffs the bytes

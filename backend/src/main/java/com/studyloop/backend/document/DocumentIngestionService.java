@@ -45,7 +45,23 @@ public class DocumentIngestionService {
         }
         String storagePath = document.getStoragePath();
         UUID courseId = document.getCourseSpace().getId();
+        // Phase 25.1 — the slice the uploader asked for, read off the row rather than passed in,
+        // so a later re-ingest of the same document gets the same range with no second parameter
+        // to keep in step.
+        PageRange range = PageRange.of(document.getFirstPage(), document.getLastPage());
 
+        // Phase 25.2 — every step that runs on this thread from here on can say where it has got
+        // to, without any of them being handed a document id. See IngestionProgress for why that
+        // is a thread scope and not a parameter; the short version is that DocumentExtractor is
+        // "bytes in, pages out" and widening it is what Phase 16 spent its design budget avoiding.
+        try (var ignoredProgress = IngestionProgress.to(
+                (percent, stage) -> statusService.markProgress(documentId, percent, stage))) {
+            run(documentId, courseId, document, storagePath, range);
+        }
+    }
+
+    private void run(UUID documentId, UUID courseId, Document document, String storagePath,
+                     PageRange range) {
         try {
             statusService.markStatus(documentId, DocumentStatus.EXTRACTING);
             byte[] bytes = storageService.read(storagePath);
@@ -56,7 +72,7 @@ public class DocumentIngestionService {
             // this method as the thing it already knew how to ingest, and why nothing below here
             // asks what the file was.
             Extraction extraction = extractors.extract(
-                    document.getContentType(), document.getFilename(), bytes);
+                    document.getContentType(), document.getFilename(), bytes, range);
             List<PageText> pages = extraction.pages();
 
             // 19.1, and here rather than at upload because a PDF's bytes say nothing about what
@@ -80,7 +96,7 @@ public class DocumentIngestionService {
             List<VisualChunk> visuals =
                     visualChunker.chunk(extraction.images(), pages, title, chunks.size());
             chunkService.replaceChunks(documentId, chunks, visuals, pages.size(),
-                    extraction.visionPages());
+                    extraction.visionPages(), extraction.degradedPages());
             // 16.3, and only ever non-empty for a photographed note. The blocks the model was not
             // sure about are not in `chunks` — that is the point of the threshold — so this is the
             // only record that they were on the page at all, and the review view reads it.
@@ -94,6 +110,13 @@ public class DocumentIngestionService {
             embeddingService.embedVisualChunks(documentId, visuals);
 
             statusService.markStatus(documentId, DocumentStatus.READY);
+            if (extraction.degradedPages() > 0) {
+                // Said in the log as well as on the row, because the row is read by whoever is
+                // watching the upload and the log is read by whoever asks later why an answer about
+                // one figure is thin.
+                log.warn("Document {} finished with {} page(s) that fell back to extracted text",
+                        documentId, extraction.degradedPages());
+            }
         } catch (Exception e) {
             // Log the exception, not just its message. markFailed persists only getMessage(), which
             // is the outermost wrapper and by construction the least informative frame: on

@@ -16,8 +16,15 @@ import java.util.List;
 // `images` is Phase 17's addition: the pages this extractor judged to be pictures, rendered, so
 // they can be embedded as pictures. Empty for every format that cannot render itself, which is
 // the same graceful nothing an unconfigured provider produces.
+//
+// `degradedPages` is Phase 25.3's, and it is the counterpart of `visionPages`: pages that were
+// routed to the vision model, did not come back inside the timeout, and kept the text PDFBox had
+// already extracted. **It exists so that degrading is not the same as quietly losing data.** The
+// router's own header calls a silently-unread page fatal — a document that "reaches READY and
+// cannot answer a question about half of itself, with no symptom anywhere" — and the only thing
+// separating this fallback from that failure is that this number is stored and shown.
 public record Extraction(List<PageText> pages, int visionPages, List<TranscribedBlock> blocks,
-                         List<PageImage> images) {
+                         List<PageImage> images, int degradedPages) {
 
     public Extraction {
         pages = List.copyOf(pages);
@@ -27,16 +34,16 @@ public record Extraction(List<PageText> pages, int visionPages, List<Transcribed
 
     // A file a text extractor read on its own: no provider call, nothing to show a reviewer.
     public static Extraction of(List<PageText> pages) {
-        return new Extraction(pages, 0, List.of(), List.of());
+        return new Extraction(pages, 0, List.of(), List.of(), 0);
     }
 
-    public static Extraction withVision(List<PageText> pages, int visionPages) {
-        return new Extraction(pages, visionPages, List.of(), List.of());
+    public static Extraction withVision(List<PageText> pages, int visionPages, int degradedPages) {
+        return new Extraction(pages, visionPages, List.of(), List.of(), degradedPages);
     }
 
     // The same extraction, plus the pages worth embedding as pictures. Separate from the
     // constructors above so an extractor that has no visual step keeps the call it already had.
     public Extraction withImages(List<PageImage> images) {
-        return new Extraction(pages, visionPages, blocks, images);
+        return new Extraction(pages, visionPages, blocks, images, degradedPages);
     }
 }

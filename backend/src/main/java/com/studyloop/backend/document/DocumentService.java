@@ -37,9 +37,19 @@ public class DocumentService {
     // letting one in here would give it manager permissions and course-wide visibility instead.
     @Transactional
     public UploadOutcome upload(UUID actorId, UUID courseId, MultipartFile file) {
+        return upload(actorId, courseId, file, PageRange.all());
+    }
+
+    // Phase 25.1 — the same upload, reading only the pages the uploader asked for.
+    //
+    // The range travels on the row rather than through the event, so the pipeline reads it from the
+    // document it is already loading. That is what will let a re-ingest re-run the same slice — or a
+    // different one — without a second upload, since the stored object is still the whole file.
+    @Transactional
+    public UploadOutcome upload(UUID actorId, UUID courseId, MultipartFile file, PageRange range) {
         Membership actor = courseAccess.requireManager(actorId, courseId);
         return accept(actor, courseId, file, DocumentFormat.materialFormats(),
-                DocumentSource.UPLOAD, DocumentVisibility.COURSE);
+                DocumentSource.UPLOAD, DocumentVisibility.COURSE, range);
     }
 
     // The shared half of every upload: validate, hash, dedupe, store, save, fire the ingestion
@@ -50,6 +60,13 @@ public class DocumentService {
     UploadOutcome accept(Membership actor, UUID courseId, MultipartFile file,
                          List<DocumentFormat> allowed, DocumentSource source,
                          DocumentVisibility visibility) {
+        return accept(actor, courseId, file, allowed, source, visibility, PageRange.all());
+    }
+
+    @Transactional
+    UploadOutcome accept(Membership actor, UUID courseId, MultipartFile file,
+                         List<DocumentFormat> allowed, DocumentSource source,
+                         DocumentVisibility visibility, PageRange range) {
         if (file == null || file.isEmpty()) {
             throw new EmptyDocumentException();
         }
@@ -79,6 +96,13 @@ public class DocumentService {
         document.setSizeBytes(bytes.length);
         document.setSha256(sha256);
         document.setStoragePath(storagePath);
+        // Null for the whole document, which is every note and every upload that did not ask for a
+        // cut. A range on a file that turns out to have fewer pages than it names is not caught
+        // here: the page count is not known until the file is parsed, and the extractor checks it
+        // there, where refusing is a FAILED document with a sentence rather than a 400 on an upload
+        // that already succeeded in storing the bytes.
+        document.setFirstPage(range.first());
+        document.setLastPage(range.last());
         document.setSource(source);
         document.setVisibility(visibility);
         document.setStatus(DocumentStatus.UPLOADED);

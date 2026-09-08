@@ -254,6 +254,44 @@ export function Pill({
   )
 }
 
+// A labelled progress bar: the percentage on the right, the sentence underneath (Phase 25.2).
+//
+// The number and the sentence are both shown because they answer different questions. "38%" says
+// whether to wait; "Reading page 120 with the vision model (3 of 15)" says what is taking the time,
+// which is the difference between a slow upload and a broken one. ReviewPage's bar is a hairline
+// with no number for the opposite reason — its count is already in the page title.
+export function ProgressBar({
+  percent,
+  label,
+  className,
+}: {
+  percent: number
+  label?: string | null
+  className?: string
+}) {
+  const pct = Math.min(100, Math.max(0, Math.round(percent)))
+  return (
+    <div className={className}>
+      <div className="mb-1.5 flex items-baseline justify-between gap-3">
+        {label && <span className="min-w-0 truncate text-[12.5px] text-ink-2">{label}</span>}
+        <Meta className="shrink-0">{pct}%</Meta>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="h-[3px] overflow-hidden rounded-full bg-ground-2"
+      >
+        <div
+          className="h-full rounded-full bg-accent transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 export function ErrorText({ children, className }: { children: ReactNode; className?: string }) {
   return <p className={cx('text-sm text-bad', className)}>{children}</p>
 }

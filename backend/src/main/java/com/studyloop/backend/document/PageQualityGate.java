@@ -86,19 +86,47 @@ public class PageQualityGate {
     // routed: the gate is an optimisation over what PDFBox already produced, and a gate that could
     // fail an upload would be a new way to lose a document that used to ingest.
     public List<PageQuality> score(PDDocument document) {
+        return score(document, PageRange.all());
+    }
+
+    // Phase 25.1 — the same scoring, skipping the pages nobody asked to ingest.
+    //
+    // **This is where a page range actually saves time.** Three passes per page — the sorted text,
+    // the unsorted text, and a content-stream walk — over pages that are about to be discarded is
+    // most of what an ingest spends before it reaches the vision model, and on a 0.1 vCPU instance
+    // it is minutes on a textbook.
+    //
+    // A skipped page still gets an entry, scored clean, rather than being left out. The list is
+    // consumed by two callers who index into it by page position — the router and Phase 17's
+    // visual selector — and shortening it under them would be a silent off-by-N on every page after
+    // the cut. Clean is also the honest verdict: an unread page needs no vision call and is not a
+    // picture worth embedding.
+    public List<PageQuality> score(PDDocument document, PageRange range) {
         Set<Character.UnicodeScript> expected = expectedScripts();
         Thresholds thresholds = properties.thresholds();
         List<PageQuality> qualities = new ArrayList<>(document.getNumberOfPages());
 
         for (int index = 0; index < document.getNumberOfPages(); index++) {
+            if (!range.contains(index + 1)) {
+                qualities.add(unscored(index));
+                continue;
+            }
             try {
                 qualities.add(scorePage(document, index, expected, thresholds));
             } catch (IOException | RuntimeException e) {
                 log.warn("Could not score page {} for extraction quality: {}", index + 1, e.toString());
-                qualities.add(new PageQuality(index + 1, 0, 0, 0, 0, 0, null));
+                qualities.add(unscored(index));
             }
         }
         return qualities;
+    }
+
+    // A page with no verdict on it: never routed to the vision model, never selected as a picture.
+    // Used both for a page outside the requested range and for one whose content stream could not
+    // be walked — the gate is an optimisation over what PDFBox already produced, and a gate that
+    // could fail an upload would be a new way to lose a document that used to ingest.
+    private static PageQuality unscored(int index) {
+        return new PageQuality(index + 1, 0, 0, 0, 0, 0, null);
     }
 
     private PageQuality scorePage(PDDocument document, int index,

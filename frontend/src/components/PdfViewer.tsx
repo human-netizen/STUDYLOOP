@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Document, Page, pdfjs } from 'react-pdf'
+import { Document, Page } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 import { ApiError, documentsApi } from '../lib/api'
+// Imported for its side effect as much as for nothing else: lib/pdf points pdf.js at the bundled
+// worker. It moved out of this file in Phase 25.1, when reading a picked file's page count before
+// upload made this the second caller and a worker path set in two modules a path that drifts.
+import '../lib/pdf'
 import { Button, ErrorText, Eyebrow, Loading, Meta } from './ui'
-
-// pdf.js runs its parser in a Web Worker. Vite bundles the worker file and hands us a URL for
-// it; pointing pdf.js at that URL keeps everything self-hosted (no CDN fetch).
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString()
 
 // A place in a document to open at. A Citation satisfies this, and so does a search hit — the
 // viewer needs a file and a page, not the chunk text behind them.

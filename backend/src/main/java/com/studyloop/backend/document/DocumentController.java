@@ -33,12 +33,20 @@ public class DocumentController {
     // Upload a course document for ingestion. A new file → 202 Accepted (the pipeline runs
     // asynchronously); an already-ingested identical file → 200 OK with the existing record.
     // The returned id is the job handle to poll via GET /{documentId}.
+    //
+    // Phase 25.1 added the optional page range. Two request params rather than a JSON body, because
+    // the request is already `multipart/form-data` for the file and mixing a JSON part into it would
+    // make every client build a multipart body by hand. Absent means the whole document, which is
+    // every caller that existed before this phase.
     @PostMapping
     public ResponseEntity<DocumentResponse> upload(Authentication authentication,
                                                    @PathVariable UUID courseId,
-                                                   @RequestParam("file") MultipartFile file) {
+                                                   @RequestParam("file") MultipartFile file,
+                                                   @RequestParam(required = false) Integer firstPage,
+                                                   @RequestParam(required = false) Integer lastPage) {
         UploadOutcome outcome = documentService.upload(
-                UUID.fromString(authentication.getName()), courseId, file);
+                UUID.fromString(authentication.getName()), courseId, file,
+                PageRange.of(firstPage, lastPage));
         HttpStatus status = outcome.created() ? HttpStatus.ACCEPTED : HttpStatus.OK;
         return ResponseEntity.status(status).body(outcome.document());
     }

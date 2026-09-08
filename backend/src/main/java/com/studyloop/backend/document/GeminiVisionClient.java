@@ -5,6 +5,7 @@ import com.studyloop.backend.config.VisionProperties;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -12,6 +13,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -52,7 +54,18 @@ public class GeminiVisionClient implements VisionClient {
     // See the note above: 3.x takes a level, not a budget, and "low" is as far down as it goes.
     private static final String THINKING_LEVEL = "low";
 
-    private final RestClient restClient = RestClient.create();
+    // A connect timeout long enough for a cold DNS lookup and a TLS handshake on a free-tier
+    // instance, and short enough that an unreachable host fails in seconds rather than minutes.
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+
+    // **Built with timeouts rather than by RestClient.create(), which sets none** (Phase 25.3).
+    // The JDK's default read timeout is no limit, so a request that connects and then hangs holds
+    // the single-threaded ingest open until the process dies — and the evidence it leaves is a
+    // document stuck in EXTRACTING and a log that stopped, which is exactly what a container killed
+    // for exceeding its memory limit leaves. A read timeout is what makes those two distinguishable,
+    // and it is why the router can offer a page a fallback at all: an unbounded call has no moment
+    // at which to give up on it.
+    private final RestClient restClient;
     // Jackson 3 (tools.jackson), not Jackson 2 (com.fasterxml.jackson.databind). Both generations
     // are on the classpath — Flyway drags 3 in, the pom declares 2 for jjwt and for the services
     // that parse model JSON themselves — and Spring 7's message converter binds to 3. So handing
@@ -73,6 +86,10 @@ public class GeminiVisionClient implements VisionClient {
         this.usageRecorder = usageRecorder;
         this.apiKey = properties.apiKey();
         this.model = properties.model();
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(CONNECT_TIMEOUT);
+        factory.setReadTimeout(properties.pageTimeout());
+        this.restClient = RestClient.builder().requestFactory(factory).build();
     }
 
     @Override

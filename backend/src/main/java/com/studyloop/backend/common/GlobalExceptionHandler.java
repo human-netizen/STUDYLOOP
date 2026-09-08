@@ -16,6 +16,7 @@ import com.studyloop.backend.document.DocumentNotFoundException;
 import com.studyloop.backend.document.DocumentStorageException;
 import com.studyloop.backend.document.DuplicateDocumentException;
 import com.studyloop.backend.document.EmptyDocumentException;
+import com.studyloop.backend.document.InvalidPageRangeException;
 import com.studyloop.backend.document.NoSummaryMaterialException;
 import com.studyloop.backend.document.NoteNotReadyException;
 import com.studyloop.backend.document.SummaryGenerationException;
@@ -184,6 +185,17 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.CONFLICT, ex.getMessage());
         problem.setTitle("Note not ready");
+        return problem;
+    }
+
+    // Phase 25.1 — a page range that is not a range. Deliberately narrow: a range running past the
+    // end of the document is not an error here, it is "to the end", and the extractor is the only
+    // place that knows how many pages there are.
+    @ExceptionHandler(InvalidPageRangeException.class)
+    ProblemDetail handleInvalidPageRange(InvalidPageRangeException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Invalid page range");
         return problem;
     }
 

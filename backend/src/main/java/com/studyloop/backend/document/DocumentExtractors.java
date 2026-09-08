@@ -22,12 +22,19 @@ public class DocumentExtractors {
     private final List<DocumentExtractor> extractors;
 
     public Extraction extract(String contentType, String filename, byte[] bytes) {
+        return extract(contentType, filename, bytes, PageRange.all());
+    }
+
+    // Phase 25.1 — the same dispatch, carrying the page range the uploader asked for. Formats that
+    // cannot act on a range ignore it through the interface's default, so this method is the only
+    // place that had to learn ranges exist and no extractor had to be touched to add one.
+    public Extraction extract(String contentType, String filename, byte[] bytes, PageRange range) {
         DocumentFormat format = DocumentFormat.of(contentType, filename)
                 .orElseThrow(() -> new UnsupportedDocumentTypeException(
                         "No extractor handles " + contentType + "."));
         for (DocumentExtractor extractor : extractors) {
             if (extractor.supports(format)) {
-                return extractor.extract(bytes);
+                return extractor.extract(bytes, range);
             }
         }
         // Reachable only by adding a DocumentFormat constant and forgetting the extractor, which

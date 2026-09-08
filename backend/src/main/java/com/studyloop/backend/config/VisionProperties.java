@@ -1,5 +1,6 @@
 package com.studyloop.backend.config;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -60,13 +61,29 @@ public record VisionProperties(
         //
         // 0.6 is deliberately generous. The cost of keeping a doubtful block is one weak passage
         // among many; the cost of dropping a good one is a note that answers nothing.
-        double minNoteConfidence
+        double minNoteConfidence,
+        // Phase 25.3. How long one page may spend inside the vision model before the router gives
+        // up on it and keeps the text PDFBox extracted.
+        //
+        // **This is the first read timeout any provider client in this application has had.**
+        // RestClient.create() sets none, and the JDK's default read timeout is *no limit* — so
+        // before this, a vision call that connected and then hung held the single-threaded ingest
+        // open forever, leaving a document in EXTRACTING with a log that simply stopped. That is
+        // byte-identical to a container killed for exceeding its memory limit (Phase 23.4), which
+        // is why the missing timeout was not merely untidy: it made two very different failures
+        // produce the same evidence, which is none.
+        //
+        // 15s against a measured per-page latency of 2.6-3.2s is about five times the expected
+        // case: late enough that it never fires on a call that is merely slow, early enough that a
+        // page cap's worth of them cannot add ten minutes to an upload.
+        Duration pageTimeout
 ) {
 
     private static final String DEFAULT_MODEL = "gemini-3.6-flash";
     private static final int DEFAULT_DPI = 150;
     private static final int DEFAULT_MAX_PAGES = 40;
     private static final double DEFAULT_MIN_NOTE_CONFIDENCE = 0.6;
+    private static final Duration DEFAULT_PAGE_TIMEOUT = Duration.ofSeconds(15);
     // Public because the gate falls back to it when every configured name turns out to be a
     // typo. Falling back to "nothing" there would make every character on every page foreign
     // and route the whole upload to a vision model over a misspelling.
@@ -94,6 +111,11 @@ public record VisionProperties(
         if (minNoteConfidence <= 0 || minNoteConfidence >= 1.0) {
             minNoteConfidence = DEFAULT_MIN_NOTE_CONFIDENCE;
         }
+        // Zero or negative would be every page timing out before it was sent, which is the feature
+        // switched off by a typo rather than a strict setting — the same rule the ratios above get.
+        if (pageTimeout == null || pageTimeout.isZero() || pageTimeout.isNegative()) {
+            pageTimeout = DEFAULT_PAGE_TIMEOUT;
+        }
     }
 
     // The router is only live when it is switched on *and* has somewhere to send a page. Both
@@ -104,7 +126,7 @@ public record VisionProperties(
     }
 
     public static VisionProperties defaults() {
-        return new VisionProperties(true, null, null, 0, 0, null, null, 0);
+        return new VisionProperties(true, null, null, 0, 0, null, null, 0, null);
     }
 
     // Where each of the four signals tips from "this page extracted fine" to "PDFBox is guessing".

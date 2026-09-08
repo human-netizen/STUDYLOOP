@@ -421,6 +421,19 @@ studyloop:
     # truncated document reaches READY with the right page count and no answers past page 40, and
     # every symptom of that is silence.
     max-pages-per-document: ${VISION_MAX_PAGES:40}
+    # Phase 25.3 - how long one page may spend inside the vision model before the router gives up
+    # on it and keeps the text PDFBox extracted.
+    #
+    # **The first read timeout any provider client here has had.** RestClient.create() sets none and
+    # the JDK's default is no limit, so before this a call that connected and then hung held the
+    # single-threaded ingest open forever - a document stuck in EXTRACTING behind a log that
+    # stopped, which is the same evidence a container killed for its memory limit leaves.
+    #
+    # 15s against a measured 2.6-3.2s per page is roughly five times the expected case: late enough
+    # never to fire on a call that is merely slow, early enough that a document at the 40-page cap
+    # cannot spend ten minutes discovering the provider is wedged. A page that hits it is counted in
+    # documents.degraded_pages and said out loud on the row, never swallowed.
+    page-timeout: ${VISION_PAGE_TIMEOUT:15s}
     # Scripts this corpus is expected to be written in, for the broken-encoding signal. Unicode
     # script names as Character.UnicodeScript spells them, comma-separated.
     #

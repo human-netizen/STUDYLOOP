@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -112,6 +113,28 @@ class DocumentIngestionTest {
         }
     }
 
+    // The same, with one numbered line per page, for the tests that need pages to tell apart.
+    private byte[] realMultiPagePdf(int pages) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            for (int number = 1; number <= pages; number++) {
+                PDPage page = new PDPage();
+                document.addPage(page);
+                try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                    content.beginText();
+                    content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                    content.newLineAtOffset(72, 720);
+                    content.showText("Chapter " + number + " opens with a definition of a heap.");
+                    content.newLineAtOffset(0, -16);
+                    content.showText("A heap keeps its smallest element at the root at all times.");
+                    content.endText();
+                }
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            document.save(out);
+            return out.toByteArray();
+        }
+    }
+
     private String uploadPdf(String courseId, String token, byte[] bytes) throws Exception {
         String body = mockMvc.perform(multipart("/api/v1/courses/" + courseId + "/documents")
                         .file(new MockMultipartFile("file", "lecture.pdf", "application/pdf", bytes))
@@ -192,5 +215,129 @@ class DocumentIngestionTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("FAILED"))
                 .andExpect(jsonPath("$.errorMessage").exists());
+    }
+
+    // ── Phase 25.1: the page range ──────────────────────────────────────────────────────────
+
+    @Test
+    void aPageRangeIsStoredOnTheRowAndOnlyItsPagesAreIngested() throws Exception {
+        User owner = saveUser();
+        String token = tokenFor(owner);
+        String courseId = createCourse(token, "Data Structures");
+
+        String body = mockMvc.perform(multipart("/api/v1/courses/" + courseId + "/documents")
+                        .file(new MockMultipartFile("file", "book.pdf", "application/pdf",
+                                realMultiPagePdf(6)))
+                        .param("firstPage", "2")
+                        .param("lastPage", "4")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.firstPage").value(2))
+                .andExpect(jsonPath("$.lastPage").value(4))
+                .andReturn().getResponse().getContentAsString();
+        String docId = objectMapper.readTree(body).get("id").asText();
+
+        ingestionService.ingest(UUID.fromString(docId));
+
+        // Three pages ingested out of six, and the range survives on the row so a later re-ingest
+        // reads the same slice without being told again.
+        mockMvc.perform(get("/api/v1/courses/" + courseId + "/documents/" + docId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("READY"))
+                .andExpect(jsonPath("$.pageCount").value(3))
+                .andExpect(jsonPath("$.firstPage").value(2));
+
+        // The chunks carry the source document's own page numbers, not 1-3. This is the assertion
+        // that would catch a slice that renumbered itself: every count above would still pass.
+        List<DocumentChunk> chunks = chunkRepository.findByDocumentIdAndModalityOrderByChunkIndex(
+                UUID.fromString(docId), ChunkModality.TEXT);
+        assertTrue(chunks.stream().allMatch(chunk -> chunk.getPageNumber() >= 2),
+                "expected every chunk to sit on page 2 or later");
+    }
+
+    @Test
+    void aRangeThatIsNotARangeIsRefusedAtTheEdge() throws Exception {
+        User owner = saveUser();
+        String token = tokenFor(owner);
+        String courseId = createCourse(token, "Data Structures");
+        byte[] pdf = realMultiPagePdf(4);
+
+        // The two mistakes a client can make without ever opening the file.
+        mockMvc.perform(multipart("/api/v1/courses/" + courseId + "/documents")
+                        .file(new MockMultipartFile("file", "book.pdf", "application/pdf", pdf))
+                        .param("firstPage", "0")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(multipart("/api/v1/courses/" + courseId + "/documents")
+                        .file(new MockMultipartFile("file", "book.pdf", "application/pdf", pdf))
+                        .param("firstPage", "9")
+                        .param("lastPage", "3")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void anUploadWithNoRangeIsUnchanged() throws Exception {
+        User owner = saveUser();
+        String token = tokenFor(owner);
+        String courseId = createCourse(token, "Data Structures");
+
+        String docId = uploadPdf(courseId, token, realMultiPagePdf(3));
+        ingestionService.ingest(UUID.fromString(docId));
+
+        // The regression guard on the whole of 25.1: the common upload still stores no range and
+        // reads the whole document.
+        mockMvc.perform(get("/api/v1/courses/" + courseId + "/documents/" + docId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.pageCount").value(3))
+                .andExpect(jsonPath("$.firstPage").doesNotExist())
+                .andExpect(jsonPath("$.lastPage").doesNotExist());
+    }
+
+    // ── Phase 25.2: progress ────────────────────────────────────────────────────────────────
+
+    @Test
+    void progressReachesOneHundredAndTheStageSaysSo() throws Exception {
+        User owner = saveUser();
+        String token = tokenFor(owner);
+        String courseId = createCourse(token, "Data Structures");
+
+        String docId = uploadPdf(courseId, token, realMultiPagePdf(2));
+
+        // Before the pipeline runs: nothing has happened, and the row says so rather than saying
+        // nothing.
+        mockMvc.perform(get("/api/v1/courses/" + courseId + "/documents/" + docId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.progress").value(0));
+
+        ingestionService.ingest(UUID.fromString(docId));
+
+        mockMvc.perform(get("/api/v1/courses/" + courseId + "/documents/" + docId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.status").value("READY"))
+                .andExpect(jsonPath("$.progress").value(100))
+                .andExpect(jsonPath("$.stage").isNotEmpty())
+                .andExpect(jsonPath("$.degradedPages").value(0));
+    }
+
+    @Test
+    void aFailedIngestHoldsThePercentageItReachedRatherThanResetting() throws Exception {
+        User owner = saveUser();
+        String token = tokenFor(owner);
+        String courseId = createCourse(token, "Data Structures");
+
+        byte[] notReallyPdf = "%PDF-1.4\nnot a real pdf".getBytes(StandardCharsets.UTF_8);
+        String docId = uploadPdf(courseId, token, notReallyPdf);
+        ingestionService.ingest(UUID.fromString(docId));
+
+        // Where it stopped is the most useful thing a failed row can say — a document that failed
+        // at 92% is a different problem from one that failed at 5% — so markFailed leaves the
+        // number alone. Extraction is where this one died, and EXTRACTING owns the floor of 5.
+        mockMvc.perform(get("/api/v1/courses/" + courseId + "/documents/" + docId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.progress").value(IngestionProgress.EXTRACTING_FLOOR));
     }
 }

@@ -43,6 +43,14 @@ public class DocumentEmbeddingService {
         if (chunks.isEmpty()) {
             return;
         }
+        // Phase 25.2. Three reports rather than one per provider call, because the batching lives
+        // inside the client — 96 chunks to a request — and the service cannot see the boundaries
+        // without duplicating a provider's constant in the wrong layer. Three points across a step
+        // that takes seconds is enough for the bar to move rather than teleport, which is all this
+        // step needs; the vision loop is the part of an ingest that is minutes long, and that one
+        // reports per page.
+        IngestionProgress.report(IngestionProgress.EMBEDDING_FLOOR,
+                "Indexing %d passages for search.".formatted(chunks.size()));
 
         // The indexed text, not the displayed text: as of Phase 13.4 a chunk carries a context
         // header — its document's title and heading path — that belongs in the vector and not in
@@ -54,6 +62,7 @@ public class DocumentEmbeddingService {
                     "Embedding count mismatch: expected " + chunks.size() + ", got " + vectors.size());
         }
 
+        IngestionProgress.report(88, "Storing %d search vectors.".formatted(vectors.size()));
         for (int i = 0; i < chunks.size(); i++) {
             jdbcTemplate.update("update document_chunks set embedding = cast(? as vector) where id = ?",
                     VectorSupport.toLiteral(vectors.get(i)), chunks.get(i).getId());

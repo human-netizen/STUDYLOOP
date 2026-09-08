@@ -73,9 +73,24 @@ public class PdfTextExtractor {
     // and render the failures off the one parse rather than loading the file three times. The
     // caller owns the document and closes it.
     public List<PageText> extract(PDDocument document) {
+        return extract(document, PageRange.all());
+    }
+
+    // Phase 25.1 — the pages the uploader asked for, keeping their own page numbers.
+    //
+    // **The range is applied after the furniture pass, not before, and that ordering is the whole
+    // subtlety.** Running heads and footers are found by counting how often a line repeats across
+    // the document; a reader who cuts to pages 12-40 of a 296-page book would otherwise hand the
+    // detector forty pages of evidence instead of two hundred and ninety-six, and a running head
+    // that changes every few sections ("4.1 The Basic Structure") stops clearing the repeat
+    // threshold and gets indexed as content. So the text pass stays whole-document and the range
+    // trims its result. That pass is seconds; the per-page work this phase actually saves is the
+    // quality gate's, the page renders, and every vision call.
+    public List<PageText> extract(PDDocument document, PageRange range) {
+        range.requireWithin(document.getNumberOfPages());
         try {
             List<PdfLine> lines = keepContent(PdfLineStripper.read(document));
-            return toMarkdown(lines, document.getNumberOfPages());
+            return range.filter(toMarkdown(lines, document.getNumberOfPages()));
         } catch (IOException e) {
             throw new DocumentExtractionException(
                     "Could not read the PDF. It may be corrupt or password-protected.", e);
