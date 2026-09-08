@@ -30,10 +30,15 @@ import java.util.List;
 // person does: it knows a two-column layout is two columns, that a grid of numbers is a table, and
 // that the picture is a plot of two functions.
 //
-// Thinking is switched off explicitly. Gemini 2.5 models reason before answering by default, which
-// is billed as output tokens and is worth paying for on a hard question; transcribing a page that
-// is in front of the model is not one. Left on, it roughly doubles the output bill of the phase for
-// no change in what comes back.
+// Thinking is held at its floor. Gemini models reason before answering by default, which bills as
+// output tokens and is worth paying for on a hard question; transcribing a page that is in front of
+// the model is not one.
+//
+// **It is "low" rather than off because Gemini 3 removed off.** 2.5 took `thinkingBudget: 0`; 3.x
+// replaced that field with `thinkingLevel`, whose floor is "low", and sending the old field to a 3.x
+// model is a 400 rather than a warning. Measured on one page: `thinkingLevel: "low"` bills no
+// thought tokens at all, while omitting the block entirely bills about a thousand — so the explicit
+// setting is still the cheap one, and leaving it out is the expensive default.
 @Component
 public class GeminiVisionClient implements VisionClient {
 
@@ -43,6 +48,9 @@ public class GeminiVisionClient implements VisionClient {
     private static final String MIME_TYPE = "image/png";
 
     private static final String JSON_MIME_TYPE = "application/json";
+
+    // See the note above: 3.x takes a level, not a budget, and "low" is as far down as it goes.
+    private static final String THINKING_LEVEL = "low";
 
     private final RestClient restClient = RestClient.create();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -70,7 +78,7 @@ public class GeminiVisionClient implements VisionClient {
                 new Content(List.of(new Part(instruction(hint), null))),
                 List.of(new Content(List.of(
                         new Part(null, new InlineData(MIME_TYPE, Base64.getEncoder().encodeToString(pngImage)))))),
-                new GenerationConfig(0.0, null, new ThinkingConfig(0)));
+                new GenerationConfig(0.0, null, new ThinkingConfig(THINKING_LEVEL)));
 
         JsonNode response;
         try {
@@ -97,8 +105,8 @@ public class GeminiVisionClient implements VisionClient {
     // hedging appended to the notes; `responseMimeType` makes the API itself enforce a parseable
     // shape, so the number arrives as a number and never lands in the corpus as text.
     //
-    // Thinking stays off here too. The model is not being asked to work anything out — it is being
-    // asked what the page says, and what it cannot read it should say it cannot read.
+    // Thinking stays at its floor here too. The model is not being asked to work anything out — it
+    // is being asked what the page says, and what it cannot read it should say it cannot read.
     @Override
     public List<TranscribedBlock> readHandwriting(byte[] image, String mimeType) {
         if (!isConfigured()) {
@@ -108,7 +116,7 @@ public class GeminiVisionClient implements VisionClient {
                 new Content(List.of(new Part(HANDWRITING_INSTRUCTION, null))),
                 List.of(new Content(List.of(new Part(null,
                         new InlineData(mimeType, Base64.getEncoder().encodeToString(image)))))),
-                new GenerationConfig(0.0, JSON_MIME_TYPE, new ThinkingConfig(0)));
+                new GenerationConfig(0.0, JSON_MIME_TYPE, new ThinkingConfig(THINKING_LEVEL)));
 
         JsonNode response;
         try {
@@ -190,8 +198,8 @@ public class GeminiVisionClient implements VisionClient {
         JsonNode usage = response.get("usageMetadata");
         int input = usage == null ? 0 : usage.path("promptTokenCount").asInt(0);
         // thoughtsTokenCount is billed as output and is separate from candidatesTokenCount. It is
-        // zero while thinking is off, and adding it anyway means the ledger stays honest the day
-        // somebody turns thinking back on.
+        // zero at thinkingLevel "low", and adding it anyway means the ledger stays honest the day
+        // somebody raises the level — or removes the block, which is not free.
         int output = usage == null ? 0
                 : usage.path("candidatesTokenCount").asInt(0) + usage.path("thoughtsTokenCount").asInt(0);
         usageRecorder.record(PROVIDER, model, operation, input, output);
@@ -335,5 +343,7 @@ public class GeminiVisionClient implements VisionClient {
     private record GenerationConfig(Double temperature, String responseMimeType,
                                     ThinkingConfig thinkingConfig) { }
 
-    private record ThinkingConfig(int thinkingBudget) { }
+    // `thinkingLevel` (3.x), not `thinkingBudget` (2.5). Renaming this field is not cosmetic: the
+    // old name on a 3.x model is rejected outright.
+    private record ThinkingConfig(String thinkingLevel) { }
 }

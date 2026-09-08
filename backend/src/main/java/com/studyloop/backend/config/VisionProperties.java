@@ -63,7 +63,7 @@ public record VisionProperties(
         double minNoteConfidence
 ) {
 
-    private static final String DEFAULT_MODEL = "gemini-2.5-flash";
+    private static final String DEFAULT_MODEL = "gemini-3.6-flash";
     private static final int DEFAULT_DPI = 150;
     private static final int DEFAULT_MAX_PAGES = 40;
     private static final double DEFAULT_MIN_NOTE_CONFIDENCE = 0.6;

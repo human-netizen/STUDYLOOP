@@ -95,6 +95,13 @@ public class DocumentIngestionService {
 
             statusService.markStatus(documentId, DocumentStatus.READY);
         } catch (Exception e) {
+            // Log the exception, not just its message. markFailed persists only getMessage(), which
+            // is the outermost wrapper and by construction the least informative frame: on
+            // 2026-09-07 it stored "The vision extractor could not read page 120 (figure)." while
+            // the actual cause — a 404 saying the Gemini model had been retired — sat unread in the
+            // cause chain, and diagnosing it needed the PDF pulled back out of object storage and
+            // the request replayed by hand. Passing `e` last hands SLF4J the whole chain.
+            log.warn("Ingestion failed for document {}", documentId, e);
             statusService.markFailed(documentId, e.getMessage());
             return;
         }

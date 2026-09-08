@@ -4,6 +4,10 @@ import com.studyloop.backend.config.VisionProperties;
 import com.studyloop.backend.config.VisualProperties;
 import com.studyloop.backend.document.TestPdfs.Kind;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -218,6 +222,61 @@ class VisionRoutingTest {
     }
 
     // ── the stub ────────────────────────────────────────────────────────────────────────────
+
+    // Phase 23.4 aftermath — which provider failures are worth trying again, and which are a verdict
+    // on the page. These pin the classification directly rather than through extract(), because a
+    // rate-limit retry really sleeps for twenty seconds and the thing worth testing is the decision.
+    //
+    // **The bug these exist for:** until 2026-09-07 retryability was decided by searching the
+    // exception *message* for "429", "rate limit" and "quota". On one afternoon a 404 (the pinned
+    // Gemini model had been retired) and a 503 (\"high demand … usually temporary\") both fell
+    // through it — and because one failed page rejects the whole document, each one cost a
+    // 296-page book.
+    @Test
+    void aRateLimitIsWaitedOutAndAServerErrorIsRetriedSooner() {
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(new HttpClientErrorException(HttpStatus.TOO_MANY_REQUESTS))))
+                .isEqualTo(PdfExtractionRouter.Retry.RATE_LIMIT);
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(new HttpServerErrorException(HttpStatus.SERVICE_UNAVAILABLE))))
+                .isEqualTo(PdfExtractionRouter.Retry.TRANSIENT);
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(new HttpServerErrorException(HttpStatus.INTERNAL_SERVER_ERROR))))
+                .isEqualTo(PdfExtractionRouter.Retry.TRANSIENT);
+        // No response at all — a read timeout is the provider being slow, not the page being bad.
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(new ResourceAccessException("read timed out"))))
+                .isEqualTo(PdfExtractionRouter.Retry.TRANSIENT);
+    }
+
+    @Test
+    void aRetiredModelIsNotRetried() {
+        // The regression guard for 2026-09-07. A 404 is a permanent verdict, and retrying it three
+        // times over two minutes per page only makes the same total failure slower.
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(new HttpClientErrorException(HttpStatus.NOT_FOUND))))
+                .isEqualTo(PdfExtractionRouter.Retry.NEVER);
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(new HttpClientErrorException(HttpStatus.BAD_REQUEST))))
+                .isEqualTo(PdfExtractionRouter.Retry.NEVER);
+    }
+
+    @Test
+    void aTwoHundredWithNoContentIsNotANetworkProblem() {
+        // A safety block and an empty candidate arrive as HTTP 200 and reach here with no HTTP
+        // cause at all. Retrying them spends the quota to be told the same thing again.
+        assertThat(PdfExtractionRouter.retryKindOf(
+                new VisionExtractionException("Gemini returned no candidate for the page (SAFETY)."))) 
+                .isEqualTo(PdfExtractionRouter.Retry.NEVER);
+    }
+
+    @Test
+    void theCauseChainIsWalkedRatherThanTheTopFrame() {
+        // The client wraps the HTTP failure before the router ever sees it, so a classifier that
+        // tested only the thrown exception would find nothing and call everything permanent.
+        RuntimeException nestedTwice = new VisionExtractionException("outer",
+                new VisionExtractionException("inner", new HttpClientErrorException(HttpStatus.TOO_MANY_REQUESTS)));
+        assertThat(PdfExtractionRouter.retryKindOf(nestedTwice))
+                .isEqualTo(PdfExtractionRouter.Retry.RATE_LIMIT);
+    }
+
+    private static RuntimeException wrapped(RuntimeException cause) {
+        return new VisionExtractionException("The vision extractor could not read page 1 (figure).", cause);
+    }
 
     // Records what it was asked as well as how often. The hints matter: "only the failing pages are
     // sent" and "each is sent with the right instruction" are different claims, and a router that

@@ -398,9 +398,16 @@ studyloop:
     # installation with no vision key keeps ingesting rather than failing every upload with a
     # figure in it. Cohere has no vision model, which is why this is a second provider at all.
     api-key: ${GOOGLE_API_KEY:}
-    # Gemini 2.5 Flash. Thinking is disabled in the client: reasoning before answering is worth
-    # paying for on a hard question and not on transcribing a page that is in front of the model.
-    model: ${VISION_MODEL:gemini-2.5-flash}
+    # Gemini 3.6 Flash. Thinking is pinned to its floor in the client: reasoning before answering
+    # is worth paying for on a hard question and not on transcribing a page in front of the model.
+    #
+    # **Was gemini-2.5-flash until 2026-09-07, when Google retired it** — `generateContent` began
+    # answering 404 "no longer available to new users" while the model stayed listed by
+    # GET /v1beta/models, so nothing failed until the first real page. Overriding VISION_MODEL back
+    # to a 2.x name will not work, and not only because of the 404: the client now sends
+    # `thinkingLevel`, which 2.x does not accept. **A pinned model is a dependency with an expiry
+    # date that no build step checks.**
+    model: ${VISION_MODEL:gemini-3.6-flash}
     # Render resolution. 150 is the floor at which body text in a scanned book stays legible; 72
     # (one PDF point per pixel) loses the ascenders, and 300 quadruples the bytes for text that was
     # already readable at 150.
@@ -686,11 +693,20 @@ studyloop:
       # every question, which is why the dashboard needs to show it rather than infer it.
       "[rerank-v3.5]":
         per-thousand-searches: 2.00
-      # Phase 15's vision extractor, and the only Google entry here. Images bill as input tokens —
-      # a 150-DPI page is roughly 250-400 of them under Gemini's tiling — so a routed page costs a
-      # fraction of a cent in and rather more out, because the output is the page rewritten as
-      # Markdown. Output is eight times the input rate, which is the arithmetic behind switching
-      # thinking off in the client: reasoning tokens bill at that same output rate.
+      # Phase 15's vision extractor. Images bill as input tokens — a 150-DPI page is roughly
+      # 250-400 of them under Gemini's tiling — so a routed page costs a fraction of a cent in and
+      # rather more out, because the output is the page rewritten as Markdown. Output is five times
+      # the input rate, which is the arithmetic behind pinning thinking to its floor in the client:
+      # reasoning tokens bill at that same output rate.
+      #
+      # **Prices rise on 2027-01-01** to 1.50 / 7.50 — Google is running an introductory rate, not a
+      # permanent one. Revisit then rather than discovering it in the ledger.
+      "[gemini-3.6-flash]":
+        input-per-million: 0.75
+        output-per-million: 3.75
+      # Retired by Google 2026-09-07 and kept only so historical ledger rows still price correctly.
+      # An unpriced model silently resolves to FREE in PricingProperties, which would rewrite past
+      # spend as zero rather than leave it alone. Nothing sends to this model any more.
       "[gemini-2.5-flash]":
         input-per-million: 0.30
         output-per-million: 2.50

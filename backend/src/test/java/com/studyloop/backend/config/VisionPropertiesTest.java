@@ -20,7 +20,10 @@ class VisionPropertiesTest {
     void absentConfigurationIsTheShippedRouter() {
         VisionProperties properties = VisionProperties.defaults();
 
-        assertThat(properties.model()).isEqualTo("gemini-2.5-flash");
+        // Pinned deliberately. gemini-2.5-flash was retired by Google on 2026-09-07 and its
+        // replacement takes a different thinking field, so a silent drift in this default is a
+        // 404 or a 400 on the first figure page rather than a degraded answer.
+        assertThat(properties.model()).isEqualTo("gemini-3.6-flash");
         assertThat(properties.dpi()).isEqualTo(150);
         assertThat(properties.maxPagesPerDocument()).isEqualTo(40);
         assertThat(properties.expectedScripts()).containsExactly("LATIN", "COMMON", "GREEK", "INHERITED");

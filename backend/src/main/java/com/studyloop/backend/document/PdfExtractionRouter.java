@@ -7,7 +7,10 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -54,6 +57,10 @@ public class PdfExtractionRouter implements DocumentExtractor {
     // "bytes in, Markdown out" and should stay usable by a caller who cannot afford to wait.
     private static final int MAX_RATE_LIMIT_RETRIES = 3;
     private static final Duration RETRY_WAIT = Duration.ofSeconds(20);
+    // A server-side blip is not a quota window and must not be waited out like one. Gemini's own
+    // 503 says "spikes in demand are usually temporary"; seconds is the right order, and on a
+    // 0.1 vCPU instance three pages each sleeping a minute is its own outage.
+    private static final Duration TRANSIENT_RETRY_WAIT = Duration.ofSeconds(3);
 
     private final PdfTextExtractor textExtractor;
     private final PageQualityGate qualityGate;
@@ -137,9 +144,10 @@ public class PdfExtractionRouter implements DocumentExtractor {
         return Extraction.withVision(routed, failing.size());
     }
 
-    // One page, with a bounded wait for a rate limit and no wait for anything else. A 429 during a
-    // fifty-page scan is the expected case on a free-tier key, and it is the one failure that
-    // resolves itself by doing nothing.
+    // One page, with a bounded wait for the failures that pass on their own and none for the rest.
+    // A 429 during a fifty-page scan is the expected case on a free-tier key, and it is the one
+    // failure that resolves itself by doing nothing; a 5xx or a timeout is the same kind of answer
+    // arriving for a different reason.
     private String readWithRetries(byte[] png, PageQuality quality) {
         RuntimeException lastFailure = null;
         for (int attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
@@ -147,11 +155,14 @@ public class PdfExtractionRouter implements DocumentExtractor {
                 return visionClient.readPage(png, quality.defect());
             } catch (RuntimeException e) {
                 lastFailure = e;
-                if (attempt == MAX_RATE_LIMIT_RETRIES || !isRateLimited(e)) {
+                Retry retry = retryKindOf(e);
+                if (attempt == MAX_RATE_LIMIT_RETRIES || retry == Retry.NEVER) {
                     break;
                 }
-                long wait = RETRY_WAIT.toMillis() * (attempt + 1);
-                log.warn("Rate-limited reading page {}; waiting {}s and retrying ({}/{})",
+                Duration base = retry == Retry.RATE_LIMIT ? RETRY_WAIT : TRANSIENT_RETRY_WAIT;
+                long wait = base.toMillis() * (attempt + 1);
+                log.warn("{} reading page {}; waiting {}s and retrying ({}/{})",
+                        retry == Retry.RATE_LIMIT ? "Rate-limited" : "Provider unavailable",
                         quality.pageNumber(), wait / 1000, attempt + 1, MAX_RATE_LIMIT_RETRIES);
                 sleep(wait);
             }
@@ -176,13 +187,39 @@ public class PdfExtractionRouter implements DocumentExtractor {
         return String.join(", ", parts);
     }
 
-    private static boolean isRateLimited(RuntimeException e) {
-        String message = e.getMessage();
-        if (message == null) {
-            return false;
+    // Whether the provider said "not now" or "not this page" — and how long to wait if the former.
+    // Package-private, with retryKindOf below, so the classification can be tested without the
+    // waiting: exercising it through extract() would mean a test that really sleeps for two
+    // minutes, and the logic worth pinning is which status means which, not that Thread.sleep works.
+    enum Retry { RATE_LIMIT, TRANSIENT, NEVER }
+
+    // **Classified by status code, because the message is not evidence.** Until 2026-09-07 this
+    // matched the words "429", "rate limit" and "quota" in the exception text, which made
+    // retryability a property of how a provider happened to word an error. Two failures walked
+    // straight through it on the same afternoon: a **404** (the pinned model had been retired) and a
+    // **503** whose own body read "spikes in demand are usually temporary — please try again later".
+    // The first is permanent and the second is the textbook retry, and the string test got both
+    // wrong in the same direction — every page failing, and one failed page rejects the document.
+    //
+    // The client wraps the HTTP failure in a VisionExtractionException, so the chain is walked
+    // rather than the top frame tested; the first HTTP-shaped cause decides, and anything with no
+    // HTTP cause at all (a parse failure, an empty candidate, a safety block) is not a network
+    // problem and is never retried — those return HTTP 200 and retrying them only spends the quota.
+    static Retry retryKindOf(RuntimeException e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof RestClientResponseException http) {
+                HttpStatusCode status = http.getStatusCode();
+                if (status.value() == 429) {
+                    return Retry.RATE_LIMIT;
+                }
+                return status.is5xxServerError() ? Retry.TRANSIENT : Retry.NEVER;
+            }
+            // No response at all: connect or read timeout, DNS, a dropped socket.
+            if (cause instanceof ResourceAccessException) {
+                return Retry.TRANSIENT;
+            }
         }
-        String lower = message.toLowerCase(Locale.ROOT);
-        return lower.contains("429") || lower.contains("rate limit") || lower.contains("quota");
+        return Retry.NEVER;
     }
 
     private static void sleep(long millis) {
