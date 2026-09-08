@@ -1,9 +1,6 @@
 package com.studyloop.backend.document;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.config.VisionProperties;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
@@ -11,6 +8,9 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Base64;
@@ -53,6 +53,17 @@ public class GeminiVisionClient implements VisionClient {
     private static final String THINKING_LEVEL = "low";
 
     private final RestClient restClient = RestClient.create();
+    // Jackson 3 (tools.jackson), not Jackson 2 (com.fasterxml.jackson.databind). Both generations
+    // are on the classpath — Flyway drags 3 in, the pom declares 2 for jjwt and for the services
+    // that parse model JSON themselves — and Spring 7's message converter binds to 3. So handing
+    // .body() a Jackson 2 JsonNode asks Jackson 3 to instantiate an abstract type it has never
+    // heard of, and it fails on the first real response with "no Creators, like default
+    // constructor, exist" — a message naming neither Gemini, nor the page, nor the two Jacksons.
+    //
+    // It compiles either way, and the tests stub this client rather than the converter, so nothing
+    // catches it before a live call. **Anything crossing a RestClient boundary must be Jackson 3.**
+    // Annotations are the exception and stay where they are: Jackson 3 deliberately keeps them at
+    // com.fasterxml.jackson.annotation, so the @JsonInclude below is already correct.
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AiUsageRecorder usageRecorder;
     private final String apiKey;
@@ -145,7 +156,7 @@ public class GeminiVisionClient implements VisionClient {
         JsonNode parsed;
         try {
             parsed = objectMapper.readTree(stripFence(json));
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new VisionExtractionException(
                     "Gemini did not return readable JSON for the note image.", e);
         }
@@ -155,7 +166,7 @@ public class GeminiVisionClient implements VisionClient {
         }
         List<TranscribedBlock> blocks = new ArrayList<>();
         for (JsonNode node : array) {
-            String content = node.path("content").asText("").strip();
+            String content = node.path("content").asString("").strip();
             if (content.isEmpty()) {
                 continue;
             }
@@ -217,7 +228,7 @@ public class GeminiVisionClient implements VisionClient {
         JsonNode parts = candidates.get(0).path("content").path("parts");
         StringBuilder markdown = new StringBuilder();
         for (JsonNode part : parts) {
-            String text = part.path("text").asText("");
+            String text = part.path("text").asString("");
             if (!text.isBlank()) {
                 markdown.append(text);
             }
@@ -231,9 +242,9 @@ public class GeminiVisionClient implements VisionClient {
     }
 
     private static String finishReason(JsonNode response) {
-        String reason = response.path("candidates").path(0).path("finishReason").asText("");
+        String reason = response.path("candidates").path(0).path("finishReason").asString("");
         if (reason.isBlank()) {
-            reason = response.path("promptFeedback").path("blockReason").asText("");
+            reason = response.path("promptFeedback").path("blockReason").asString("");
         }
         return reason.isBlank() ? "." : " (" + reason + ").";
     }

@@ -1,10 +1,10 @@
 package com.studyloop.backend.document;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.studyloop.backend.config.EmbeddingProperties;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +56,8 @@ public class GoogleEmbeddingClient implements EmbeddingClient {
                 .map(text -> new EmbedRequest(qualifiedModel, new Content(List.of(new Part(text))), OUTPUT_DIMENSIONS))
                 .toList());
 
+        // tools.jackson, not com.fasterxml: Spring 7's converter is Jackson 3, and a Jackson 2
+        // JsonNode here fails at conversion on the first live response. See GeminiVisionClient.
         JsonNode response;
         try {
             response = restClient.post()
