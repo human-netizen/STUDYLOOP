@@ -1,9 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError, chatApi, coursesApi, errorMessage, flashcardsApi, forumApi } from '../lib/api'
-import type { AskedBefore, Citation, CourseResponse } from '../lib/types'
+import {
+  ApiError,
+  chatApi,
+  coursesApi,
+  documentsApi,
+  errorMessage,
+  flashcardsApi,
+  forumApi,
+} from '../lib/api'
+import type {
+  AskedBefore,
+  Citation,
+  ConversationSummary,
+  CourseResponse,
+  DocumentResponse,
+} from '../lib/types'
+import { filenameSafe, saveBlob } from '../lib/download'
+import { threadToMarkdown } from '../lib/transcript'
+import { AnswerFeedback } from '../components/AnswerFeedback'
 import { AppShell } from '../components/AppShell'
 import { CitationPreview } from '../components/CitationPreview'
+import { ConversationSidebar } from '../components/ConversationSidebar'
+import { DocumentScopePicker } from '../components/DocumentScopePicker'
 import { Markdown } from '../components/Markdown'
 import { PdfViewer, pdfTargetOf, type PdfTarget } from '../components/PdfViewer'
 import { Button, ErrorText, Eyebrow } from '../components/ui'
@@ -30,6 +49,9 @@ interface Turn {
   // the progress report and a status line beside it would only compete with it.
   stage: string | null
   questionEventId: string | null
+  // Phase 28.3 — the handle a verdict on this answer attaches to. Set on every logged turn, unlike
+  // `questionEventId` above, which is the refusal handle and is what `refused` tests.
+  answerEventId: string | null
   askedBefore: AskedBefore | null
   general: boolean
 }
@@ -49,6 +71,15 @@ export function ChatPage() {
   // grounded on chunks retrieved a moment earlier — so this narrows and never drops one.
   const [activeCitation, setActiveCitation] = useState<PdfTarget | null>(null)
 
+  // Phase 28.1 — the threads this member has had with this course.
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [loadingThreads, setLoadingThreads] = useState(true)
+  const [resuming, setResuming] = useState(false)
+  // Phase 28.2 — which documents the next question may be answered from. Empty is the whole
+  // course, which is the default and stays the common case.
+  const [documents, setDocuments] = useState<DocumentResponse[]>([])
+  const [scope, setScope] = useState<string[]>([])
+
   const threadRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -57,6 +88,93 @@ export function ChatPage() {
       .then(setCourse)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load this course.'))
   }, [id])
+
+  // The document list feeds the scope chips. A failure here is not worth an error banner: the
+  // picker simply does not appear and every question searches the whole course, which is what it
+  // did before this phase.
+  useEffect(() => {
+    documentsApi
+      .list(id)
+      .then(setDocuments)
+      .catch(() => setDocuments([]))
+  }, [id])
+
+  const loadConversations = useCallback(async () => {
+    setLoadingThreads(true)
+    try {
+      setConversations(await chatApi.conversations(id))
+    } catch {
+      setConversations([])
+    } finally {
+      setLoadingThreads(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    void loadConversations()
+  }, [loadConversations])
+
+  // Reopen a thread: the transcript replaces what is on screen and the id goes back into state, so
+  // the next question continues it rather than opening a new one.
+  //
+  // **A resumed ASSISTANT turn carries its stored citations** (V29), which is what makes this worth
+  // doing at all — the alternative is a transcript whose [n] markers are dead text. A turn stored
+  // before that column existed comes back with an empty list and renders its markers as plain text,
+  // which is the honest reading of a turn whose sources were never kept.
+  async function openThread(threadId: string) {
+    setResuming(true)
+    setError(null)
+    try {
+      const transcript = await chatApi.transcript(id, threadId)
+      setConversationId(transcript.id)
+      setTurns(
+        transcript.messages.map((message) => ({
+          ...blank,
+          role: message.role === 'USER' ? 'user' : 'assistant',
+          text: message.content,
+          citations: message.citations,
+          general: message.role === 'GENERAL',
+        })),
+      )
+    } catch (err) {
+      setError(errorMessage(err, 'Could not open that thread.'))
+    } finally {
+      setResuming(false)
+    }
+  }
+
+  function newThread() {
+    setConversationId(null)
+    setTurns([])
+    setError(null)
+  }
+
+  async function deleteThread(threadId: string) {
+    try {
+      await chatApi.removeConversation(id, threadId)
+      if (threadId === conversationId) newThread()
+      await loadConversations()
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete that thread.'))
+    }
+  }
+
+  // Phase 29.1's last bullet, which needed this endpoint to exist. The file is built from the
+  // stored transcript rather than from what is on screen, so an exported thread is the whole thread
+  // even when the page was reopened halfway down it.
+  async function exportThread() {
+    if (!conversationId) return
+    try {
+      const transcript = await chatApi.transcript(id, conversationId)
+      const name = filenameSafe(transcript.title ?? 'conversation', 'conversation')
+      saveBlob(
+        new Blob([threadToMarkdown(transcript)], { type: 'text/markdown;charset=utf-8' }),
+        `${name}.md`,
+      )
+    } catch (err) {
+      setError(errorMessage(err, 'Could not export this thread.'))
+    }
+  }
 
   // Keep the newest turn in view as the answer streams in.
   useEffect(() => {
@@ -87,7 +205,9 @@ export function ChatPage() {
     try {
       await chatApi.stream(
         id,
-        { question, conversationId },
+        // An empty scope is sent as an empty list, which the server reads as the whole course —
+        // the same request every caller made before Phase 28.2.
+        { question, conversationId, documentIds: scope },
         {
           onStage: (stage) => updateLast((turn) => ({ ...turn, stage })),
           onMeta: (meta) => {
@@ -96,6 +216,7 @@ export function ChatPage() {
               ...turn,
               citations: meta.citations,
               questionEventId: meta.questionEventId,
+              answerEventId: meta.answerEventId,
               askedBefore: meta.askedBefore,
             }))
           },
@@ -125,25 +246,49 @@ export function ChatPage() {
       }))
     } finally {
       setSending(false)
+      // The thread list carries a turn count and an updated-at, and this turn changed both.
+      void loadConversations()
     }
   }
 
   return (
     <AppShell courseName={course?.name} fill>
-      <div className="mb-5 shrink-0">
-        <Eyebrow>{course?.name ?? 'Course'}</Eyebrow>
-        <h1 className="mt-1.5 mb-0 text-[clamp(28px,3.4vw,40px)] leading-[1] tracking-[-0.03em]">
-          Ask this course
-        </h1>
+      <div className="mb-5 flex shrink-0 flex-wrap items-end justify-between gap-3">
+        <div>
+          <Eyebrow>{course?.name ?? 'Course'}</Eyebrow>
+          <h1 className="mt-1.5 mb-0 text-[clamp(28px,3.4vw,40px)] leading-[1] tracking-[-0.03em]">
+            Ask this course
+          </h1>
+        </div>
+        {/* Phase 29.1's chat export, which needed 28.1's transcript endpoint before it could
+            exist. Only for a thread that has been saved — there is nothing to export from a
+            composer somebody has not sent yet. */}
+        {conversationId && (
+          <Button variant="quiet" onClick={() => void exportThread()}>
+            Export as Markdown
+          </Button>
+        )}
       </div>
 
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+        <ConversationSidebar
+          conversations={conversations}
+          activeId={conversationId}
+          loading={loadingThreads}
+          onOpen={(threadId) => void openThread(threadId)}
+          onNew={newThread}
+          onDelete={(threadId) => void deleteThread(threadId)}
+        />
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* The thread sits in a recessed well so the composer below it reads as a separate
           surface rather than as part of the same scrolling page. */}
       <div
         ref={threadRef}
         className="flex-1 space-y-4 overflow-y-auto rounded-card border border-line bg-ground-2 p-4 sm:p-5"
       >
-        {turns.length === 0 && (
+        {resuming && <p className="m-0 text-[13px] text-ink-muted">Opening that thread…</p>}
+        {turns.length === 0 && !resuming && (
           <div className="flex h-full min-h-40 items-center justify-center">
             <p className="m-0 max-w-[46ch] text-center text-sm text-ink-muted">
               Ask about this course's materials. Every answer cites the pages it came from —
@@ -176,9 +321,26 @@ export function ChatPage() {
 
       {error && <ErrorText className="mt-2 shrink-0">{error}</ErrorText>}
 
+      {/* Phase 28.2 — above the composer, so what is being searched is on screen while the
+          question is being typed rather than hidden behind a menu. */}
+      <div className="mt-3 shrink-0">
+        <DocumentScopePicker
+          documents={documents}
+          selected={scope}
+          onToggle={(documentId) =>
+            setScope((current) =>
+              current.includes(documentId)
+                ? current.filter((each) => each !== documentId)
+                : [...current, documentId],
+            )
+          }
+          onClear={() => setScope([])}
+        />
+      </div>
+
       {/* One bordered bar, send button inset — not a textarea with a button floating beside it. */}
       <form
-        className="mt-3 flex shrink-0 items-end gap-2 rounded-card border border-line bg-surface p-2 transition duration-150 focus-within:border-accent"
+        className="flex shrink-0 items-end gap-2 rounded-card border border-line bg-surface p-2 transition duration-150 focus-within:border-accent"
         onSubmit={(e) => {
           e.preventDefault()
           void submit()
@@ -201,6 +363,8 @@ export function ChatPage() {
           {sending ? 'Sending…' : 'Send'}
         </Button>
       </form>
+        </div>
+      </div>
 
       {activeCitation && (
         <PdfViewer
@@ -235,6 +399,7 @@ const blank: Turn = {
   streaming: false,
   stage: null,
   questionEventId: null,
+  answerEventId: null,
   askedBefore: null,
   general: false,
 }
@@ -323,6 +488,17 @@ function AssistantBubble({
         )}
         {answered && question && !refused && (
           <SaveFlashcardButton courseId={courseId} front={question} back={turn.text} />
+        )}
+        {/* Phase 28.3. Under a grounded answer only: a refusal already offers two better things
+            to do than rate it, and "was this right?" under "I don't have that" is a question
+            about the gate rather than about the answer. */}
+        {answered && !refused && (
+          <AnswerFeedback
+            courseId={courseId}
+            answerEventId={turn.answerEventId}
+            question={question}
+            citations={turn.citations}
+          />
         )}
       </div>
     </div>

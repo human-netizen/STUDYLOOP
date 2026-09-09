@@ -107,7 +107,23 @@ public class RetrievalService {
     // apart: `ChatService.prepare` resolved it, held the result, and then handed the same pair to
     // `search`, whose first line resolved it again.
     public RetrievalResult searchAsMember(Membership member, String query, float[] queryVector, int limit) {
-        return run(member.getUser().getId(), member.getCourseSpace().getId(), query, queryVector, limit);
+        return searchAsMember(member, query, queryVector, limit, DocumentScope.WHOLE_COURSE);
+    }
+
+    // Phase 28.2 — the same search, aimed at documents the reader picked.
+    //
+    // **The scope narrows what is searched and changes nothing about how it is ranked.** RRF still
+    // fuses the same lists in the same way; the cross-encoder still scores what comes back; the
+    // confidence gate still reads the top text-to-text cosine. That last one is the assertion worth
+    // testing rather than assuming: narrowing the corpus raises the *average* relevance of the
+    // candidates, so a question the chosen lecture cannot answer has to still refuse. It should,
+    // because the gate's threshold is a cross-encoder score and corpus-independent by construction
+    // (12.2) — but this is the first time retrieval has run over a caller-chosen subset, and
+    // "should" is what 28.6's test is for.
+    public RetrievalResult searchAsMember(Membership member, String query, float[] queryVector,
+                                          int limit, DocumentScope scope) {
+        return run(member.getUser().getId(), member.getCourseSpace().getId(), query, queryVector,
+                limit, scope);
     }
 
     // The same search with no member behind it, for work the course itself triggers rather than a
@@ -126,6 +142,11 @@ public class RetrievalService {
     }
 
     private RetrievalResult run(UUID actorId, UUID courseId, String query, float[] queryVector, int limit) {
+        return run(actorId, courseId, query, queryVector, limit, DocumentScope.WHOLE_COURSE);
+    }
+
+    private RetrievalResult run(UUID actorId, UUID courseId, String query, float[] queryVector,
+                                int limit, DocumentScope scope) {
         String trimmed = query == null ? "" : query.trim();
         if (trimmed.isEmpty()) {
             // Nothing was embedded, so there is no vector to hand back — not even the caller's,
@@ -155,7 +176,8 @@ public class RetrievalService {
         // load-bearing for every eval number this project has published.
         Candidates candidates = searchRepository.candidateSearch(
                 courseId, actorId, vector == null ? null : VectorSupport.toLiteral(vector), trimmed,
-                CANDIDATES_PER_SOURCE, properties.stages().lexicalOr(), visualStage.enabled());
+                CANDIDATES_PER_SOURCE, properties.stages().lexicalOr(), visualStage.enabled(),
+                scope);
         List<ChunkHit> vectorHits = candidates.vector();
         List<ChunkHit> textHits = candidates.text();
 
@@ -183,7 +205,7 @@ public class RetrievalService {
         // Fourth list (18.1): chunks holding a near-spelling of one of the question's distinctive
         // words. It exists for the case the lexical half above returns *nothing* — a typo does not
         // weaken `plainto_tsquery`, it empties it — so the two are fused rather than swapped.
-        List<ChunkHit> trigramHits = trigramStage.search(courseId, actorId, trimmed);
+        List<ChunkHit> trigramHits = trigramStage.search(courseId, actorId, trimmed, scope);
 
         // The second pass (18.2), and it runs only if the first one came back weak. Everything it
         // produces is *more lists*: the invented passage searches the dense half, the rewrites
@@ -196,7 +218,7 @@ public class RetrievalService {
         List<List<ChunkHit>> rankings = new ArrayList<>(
                 List.of(vectorHits, textHits, visualHits, trigramHits));
         HydeStage.Result expansion =
-                hydeStage.apply(courseId, actorId, trimmed, vector, topSimilarity);
+                hydeStage.apply(courseId, actorId, trimmed, vector, topSimilarity, scope);
         rankings.addAll(expansion.rankings());
 
         // **The gate signal is allowed to rise, and only in one specific way.** What HyDE found is

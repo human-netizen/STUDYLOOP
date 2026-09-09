@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, analyticsApi, coursesApi, forumApi } from '../lib/api'
-import type { ConfusionReport, LectureHeat, TopicCluster, UngroundedQuestion } from '../lib/types'
+import type {
+  AnswerComplaint,
+  ConfusionReport,
+  LectureHeat,
+  TopicCluster,
+  UngroundedQuestion,
+} from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import {
   Button,
@@ -187,7 +193,7 @@ export function CourseConfusionPage() {
             )}
           </section>
 
-          <section>
+          <section className="mb-14">
             <SectionHead
               index="04 · Gaps"
               title="Nothing in the materials answered these"
@@ -212,9 +218,74 @@ export function CourseConfusionPage() {
               becomes course material — the same question stops being a gap.
             </Meta>
           </section>
+
+          {/* Phase 28.3. Deliberately its own section rather than rows inside the one above: a
+              refusal about uncovered material and a wrong answer about covered material are
+              opposite problems, and until this phase the page could only show the first. */}
+          <section>
+            <SectionHead
+              index="05 · Reported"
+              title="Answers a reader said were wrong"
+              description="Newest first, with the passages each answer actually read."
+            />
+            {report.reportedAnswers.length === 0 ? (
+              <Empty>
+                {report.helpfulVotes + report.unhelpfulVotes === 0
+                  ? 'Nobody has rated an answer yet.'
+                  : 'Every rated answer was marked right.'}
+              </Empty>
+            ) : (
+              <Rows>
+                {report.reportedAnswers.map((item, index) => (
+                  <ReportedRow key={item.questionEventId ?? index} item={item} />
+                ))}
+              </Rows>
+            )}
+            <Meta className="mt-3 block">
+              {report.helpfulVotes + report.unhelpfulVotes > 0
+                ? `${count(report.unhelpfulVotes)} of ${count(
+                    report.helpfulVotes + report.unhelpfulVotes,
+                  )} rated answers were reported.`
+                : 'Readers can rate any grounded answer in chat.'}{' '}
+              The passages matter more than the verdict: if the right pages are listed, the writing
+              was wrong; if they are not, retrieval was.
+            </Meta>
+          </section>
         </>
       )}
     </AppShell>
+  )
+}
+
+// One reported answer. The question, what the reader said, and — the part that makes it
+// actionable — the sources that answer was shown with, as they were on screen rather than as a
+// fresh retrieval would return them now.
+function ReportedRow({ item }: { item: AnswerComplaint }) {
+  return (
+    <Row>
+      <div className="px-5 py-3.5">
+        <p className="m-0 text-[15px] leading-snug text-ink">{item.question}</p>
+        <Meta>
+          {shortDate(item.reportedAt)}
+          {item.citations.length > 0 &&
+            ` · read ${count(item.citations.length)} ${plural(item.citations.length, 'passage')}`}
+        </Meta>
+        {item.reason && <p className="mt-1.5 mb-0 text-[13px] text-ink-2">“{item.reason}”</p>}
+        {item.citations.length > 0 && (
+          <ul className="mt-1.5 mb-0 flex list-none flex-col gap-0.5 p-0">
+            {item.citations.map((citation) => (
+              <li
+                key={citation.index}
+                className="tnum truncate font-mono text-[11.5px] text-ink-muted"
+              >
+                [{citation.index}] {citation.filename}
+                {citation.pageNumber != null && ` · p.${citation.pageNumber}`}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Row>
   )
 }
 

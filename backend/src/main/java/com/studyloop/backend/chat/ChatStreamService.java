@@ -92,7 +92,7 @@ public class ChatStreamService {
             TurnContext context = chatService.readContext(actorId, courseId, request);
             PreparedTurn prepared = chatService.recordTurn(context, chatService.retrieve(context));
             send(emitter, "meta", new MetaEvent(prepared.conversationId(), prepared.citations(),
-                    prepared.questionEventId(), prepared.askedBefore()));
+                    prepared.questionEventId(), prepared.answerEventId(), prepared.askedBefore()));
 
             if (prepared.isAnswered()) {
                 // The confidence gate refused, or the semantic cache already had this answer.
@@ -143,7 +143,7 @@ public class ChatStreamService {
                     PreparedTurn prepared = chatService.recordTurn(context, retrieved);
                     searched.set(prepared);
                     sendMetaOnce(emitter, metaSent, prepared.conversationId(), prepared.citations(),
-                            prepared.questionEventId(), prepared.askedBefore());
+                            prepared.questionEventId(), prepared.answerEventId(), prepared.askedBefore());
                     // A cache hit or a refusal ends the turn here: the text exists already, so the
                     // model is not asked to write over the top of it.
                     return prepared.isAnswered()
@@ -151,7 +151,7 @@ public class ChatStreamService {
                             : ToolResult.of(retrieved.sources());
                 },
                 token -> {
-                    sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null);
+                    sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null, null);
                     send(emitter, "delta", new DeltaEvent(token));
                 });
 
@@ -165,7 +165,7 @@ public class ChatStreamService {
             chatService.completeTurn(prepared, answer);
         }
 
-        sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null);
+        sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null, null);
         send(emitter, "done", new DoneEvent(context.conversationId()));
         emitter.complete();
     }
@@ -185,9 +185,11 @@ public class ChatStreamService {
 
     // meta is sent exactly once per turn, by whichever of the two moments comes first.
     private void sendMetaOnce(SseEmitter emitter, AtomicBoolean sent, UUID conversationId,
-                              List<Citation> citations, UUID questionEventId, AskedBefore askedBefore) {
+                              List<Citation> citations, UUID questionEventId, UUID answerEventId,
+                              AskedBefore askedBefore) {
         if (sent.compareAndSet(false, true)) {
-            send(emitter, "meta", new MetaEvent(conversationId, citations, questionEventId, askedBefore));
+            send(emitter, "meta", new MetaEvent(conversationId, citations, questionEventId,
+                    answerEventId, askedBefore));
         }
     }
 
@@ -217,11 +219,17 @@ public class ChatStreamService {
     public record StageEvent(String stage) { }
 
     // questionEventId is non-null only when the gate refused — it is the client's handle for
-    // escalating that refusal, to the forum (9.2) or to general knowledge (20.2). askedBefore is
-    // non-null only on a repeat (20.3). Both ride the meta event, which is sent before the first
-    // token, so the header is on screen while the answer is still arriving.
+    // escalating that refusal, to the forum (9.2) or to general knowledge (20.2). answerEventId is
+    // non-null on every logged turn and is what a verdict on the answer attaches to (28.3).
+    // askedBefore is non-null only on a repeat (20.3). All three ride the meta event, which is sent
+    // before the first token, so the header is on screen while the answer is still arriving.
+    //
+    // On the streaming-with-tool path the meta event can be sent by the *token* callback, before
+    // the search has settled, and it then carries nulls for all three — which is correct rather
+    // than lossy: that branch is the one where the model answered without retrieving, so there is
+    // no citation list, no refusal and no logged question for a verdict to be about.
     public record MetaEvent(UUID conversationId, List<Citation> citations, UUID questionEventId,
-                            AskedBefore askedBefore) { }
+                            UUID answerEventId, AskedBefore askedBefore) { }
 
     public record DeltaEvent(String text) { }
 

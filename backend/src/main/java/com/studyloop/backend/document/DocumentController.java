@@ -3,6 +3,7 @@ package com.studyloop.backend.document;
 import com.studyloop.backend.document.DocumentImpactRepository.DocumentImpact;
 import com.studyloop.backend.document.DocumentService.DocumentContent;
 import com.studyloop.backend.document.DocumentService.UploadOutcome;
+import com.studyloop.backend.document.dto.CourseOutline;
 import com.studyloop.backend.document.dto.DocumentResponse;
 import com.studyloop.backend.document.dto.DocumentSummaryResponse;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,7 @@ public class DocumentController {
     private final DocumentService documentService;
     private final DocumentSummaryService summaryService;
     private final DocumentLifecycleService lifecycleService;
+    private final CourseOutlineService courseOutlineService;
 
     // Upload a course document for ingestion. A new file → 202 Accepted (the pipeline runs
     // asynchronously); an already-ingested identical file → 200 OK with the existing record.
@@ -113,6 +115,16 @@ public class DocumentController {
     @GetMapping
     public List<DocumentResponse> list(Authentication authentication, @PathVariable UUID courseId) {
         return documentService.list(UUID.fromString(authentication.getName()), courseId);
+    }
+
+    // Phase 28.4 — the same corpus as a table of contents: every document's sections, their page
+    // spans and their glossary terms, and how many questions each document has ever answered.
+    //
+    // Under /documents rather than at a path of its own because it is a second view of exactly
+    // what `list` returns, scoped by the same membership and the same visibility rule.
+    @GetMapping("/outline")
+    public CourseOutline outline(Authentication authentication, @PathVariable UUID courseId) {
+        return courseOutlineService.outline(UUID.fromString(authentication.getName()), courseId);
     }
 
     @GetMapping("/{documentId}")

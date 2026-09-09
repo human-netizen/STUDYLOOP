@@ -54,6 +54,7 @@ public class ConfusionAnalyticsService {
     private final AnalyticsProperties properties;
     private final QuestionEventRepository repository;
     private final QuestionClusteringService clusteringService;
+    private final AnswerFeedbackService answerFeedbackService;
     private final Clock clock;
 
     // Instructors and owners only, via requireManager — the same guard that gates uploading
@@ -97,6 +98,11 @@ public class ConfusionAnalyticsService {
                         .map(ConfusionAnalyticsService::toUngrounded)
                         .toList();
 
+        // Phase 28.3 — reported answers, over the same window as everything else on the page. It
+        // is two plain selects against a table nothing else reads, so unlike the clustering above
+        // there is nothing here worth swallowing a failure for.
+        AnswerFeedbackService.Reported reported = answerFeedbackService.reported(courseId, since);
+
         return new ConfusionReport(
                 windowDays,
                 ConfusionTotals.of(totals.asked(), totals.ungrounded(), totals.escalated(),
@@ -104,6 +110,9 @@ public class ConfusionAnalyticsService {
                 lectures,
                 topics,
                 ungrounded,
+                reported.complaints(),
+                reported.helpful(),
+                reported.unhelpful(),
                 repository.clustersComputedAt(courseId).orElse(null));
     }
 

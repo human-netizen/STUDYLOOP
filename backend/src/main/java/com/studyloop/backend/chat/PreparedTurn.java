@@ -27,6 +27,16 @@ public record PreparedTurn(
         CacheWrite cacheWrite,
         // Non-null only on a refusal, and only while question logging is switched on.
         UUID questionEventId,
+        // Phase 28.3 — the logged question this answer belongs to, on **every** outcome that was
+        // logged at all: grounded, refused, and served from the cache.
+        //
+        // **A second id rather than widening the one above, and the reason is that the first one
+        // means something narrower than its name.** `questionEventId` is the refusal handle: the
+        // client tests it for null to decide whether to offer "ask the class" and "answer from
+        // general knowledge", so setting it on a grounded answer would put an escalation button
+        // under every correct answer in the product. What 28.3 needs is a different question —
+        // which answer is this verdict about — and it has a different answer on every turn.
+        UUID answerEventId,
         // Non-null when this student has asked this course the same thing before (20.3). It rides
         // along on all three outcomes, because a repeat is a repeat whether the answer came from
         // the model, the cache or the gate — and the refused one is the most worth saying out loud.
@@ -38,21 +48,24 @@ public record PreparedTurn(
     }
 
     static PreparedTurn answered(UUID conversationId, List<Citation> citations, String answer,
-                                 AskedBefore askedBefore) {
-        return new PreparedTurn(conversationId, citations, List.of(), answer, null, null, askedBefore);
+                                 AskedBefore askedBefore, UUID answerEventId) {
+        return new PreparedTurn(conversationId, citations, List.of(), answer, null, null,
+                answerEventId, askedBefore);
     }
 
     static PreparedTurn refused(UUID conversationId, String answer, UUID questionEventId,
                                 AskedBefore askedBefore) {
+        // The refusal handle and the feedback handle are the same row here, and that is the one
+        // outcome where they coincide: the refusal *is* the logged event.
         return new PreparedTurn(conversationId, List.of(), List.of(), answer, null, questionEventId,
-                askedBefore);
+                questionEventId, askedBefore);
     }
 
     static PreparedTurn answerable(UUID conversationId, List<Citation> citations,
                                    List<LlmMessage> messages, CacheWrite cacheWrite,
-                                   AskedBefore askedBefore) {
+                                   AskedBefore askedBefore, UUID answerEventId) {
         return new PreparedTurn(conversationId, citations, messages, null, cacheWrite, null,
-                askedBefore);
+                answerEventId, askedBefore);
     }
 
     // Carries the question's embedding forward from prepare() to completeTurn(), which is the

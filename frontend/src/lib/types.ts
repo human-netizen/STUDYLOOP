@@ -244,7 +244,68 @@ export interface ChatResponse {
   answer: string
   citations: Citation[]
   questionEventId: string | null
+  // Phase 28.3 — the handle a verdict on this answer attaches to, set on every logged turn.
+  // Distinct from `questionEventId` above, which is set only on a refusal and is what the UI
+  // tests to decide whether to offer the escalation buttons.
+  answerEventId: string | null
   askedBefore: AskedBefore | null
+}
+
+// --- Chat history (Phase 28.1) ---
+
+// One row of the thread sidebar. `title` is the first question, truncated on the server — not a
+// generated one, which would cost a model call on the first turn of every conversation forever.
+export interface ConversationSummary {
+  id: string
+  title: string | null
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
+// Who authored a stored turn. GENERAL is an answer given from general knowledge after the course
+// could not answer (Phase 20.2) — rendered differently, because it is the one turn in a transcript
+// that was never grounded in the materials.
+export type ChatRole = 'USER' | 'ASSISTANT' | 'GENERAL'
+
+export interface TranscriptMessage {
+  id: string
+  role: ChatRole
+  content: string
+  createdAt: string
+  // Empty on every USER and GENERAL turn, and on any answer stored before the citations column
+  // existed — in which case the [n] markers render as plain text, which is the honest reading of
+  // a turn whose sources were never kept.
+  citations: Citation[]
+}
+
+export interface ConversationTranscript {
+  id: string
+  title: string | null
+  createdAt: string
+  updatedAt: string
+  messages: TranscriptMessage[]
+}
+
+// --- Answer feedback (Phase 28.3) ---
+
+// The citations are sent back exactly as they were displayed. Re-deriving them on the server would
+// answer a different question — today's corpus, today's thresholds — and would quietly explain away
+// the failures this is collected to find.
+export interface AnswerFeedbackRequest {
+  answerEventId: string | null
+  helpful: boolean
+  reason: string | null
+  question: string
+  citations: Citation[]
+}
+
+export interface AnswerComplaint {
+  questionEventId: string | null
+  question: string
+  reason: string | null
+  reportedAt: string
+  citations: Citation[]
 }
 
 // "You've asked about this before" (Phase 20.3). Set only when this student has asked this course
@@ -272,6 +333,7 @@ export interface ChatMetaEvent {
   conversationId: string
   citations: Citation[]
   questionEventId: string | null
+  answerEventId: string | null
   askedBefore: AskedBefore | null
 }
 
@@ -346,6 +408,40 @@ export interface GenerateQuizRequest {
   multipleChoiceCount?: number
   shortAnswerCount?: number
   title?: string
+}
+
+// Phase 28.5 — the caller's own missed questions, shaped as a quiz. No id, because it is not a
+// `Quiz`: the original question rows are re-served rather than copied, so that missing one again
+// finds the review card it already has instead of minting a second one.
+export interface PracticeSet {
+  title: string
+  questions: QuizQuestionView[]
+}
+
+// --- Course outline (Phase 28.4) ---
+
+export interface SectionOutline {
+  sectionPath: string
+  firstPage: number | null
+  lastPage: number | null
+  chunkCount: number
+  terms: string[]
+}
+
+export interface DocumentOutline {
+  documentId: string
+  filename: string
+  pageCount: number
+  chunkCount: number
+  // All-time, not windowed: the claim is "nobody has ever asked about this", and a 30-day window
+  // would make every document look untouched in a quiet week.
+  questionCount: number
+  sections: SectionOutline[]
+}
+
+export interface CourseOutline {
+  documents: DocumentOutline[]
+  neverAsked: number
 }
 
 // One submitted answer: set selectedOptionIndex for multiple-choice, answerText for short-answer.
@@ -551,6 +647,12 @@ export interface ConfusionReport {
   lectures: LectureHeat[]
   topics: TopicCluster[]
   ungrounded: UngroundedQuestion[]
+  // Phase 28.3 — answers a reader reported as wrong. A different signal from `ungrounded`: that
+  // list is the corpus saying "I don't cover this", this one is a reader saying "you do and you
+  // got it wrong".
+  reportedAnswers: AnswerComplaint[]
+  helpfulVotes: number
+  unhelpfulVotes: number
   clustersComputedAt: string | null
 }
 

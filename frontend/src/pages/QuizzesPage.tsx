@@ -85,9 +85,34 @@ export function QuizzesPage() {
             />
           </section>
 
+          {/* Phase 28.5 — built from the caller's own record, which has been written on every
+              attempt since Phase 7.2 and read until now only by the review queue. Zero provider
+              calls: the questions already exist and are re-served rather than regenerated. */}
+          <section className="mb-14">
+            <SectionHead
+              index="02 · Practice"
+              title="Quiz me on what I keep getting wrong"
+              description="Your own missed questions, most recently missed first."
+            />
+            <Panel className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+              <p className="m-0 max-w-[60ch] text-[13px] text-ink-2">
+                Every question you have answered wrongly in this course, and every card you have
+                lapsed on, served again. Nothing is generated — these are the same questions, so
+                missing one again does not mint a second review card.
+              </p>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => navigate(`/courses/${id}/quizzes/wrong-answers`)}
+              >
+                Practise
+              </Button>
+            </Panel>
+          </section>
+
           <section>
             <SectionHead
-              index="02 · Saved"
+              index="03 · Saved"
               title="This course's quizzes"
               description={quizzes.length > 0 ? `${quizzes.length} available` : undefined}
             />

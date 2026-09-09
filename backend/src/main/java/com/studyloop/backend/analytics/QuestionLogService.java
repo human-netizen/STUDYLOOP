@@ -37,17 +37,23 @@ public class QuestionLogService {
 
     // The question was answered from the materials. documentIds are the distinct documents behind
     // the chunks that grounded it — the per-lecture heat.
-    public void recordGrounded(UUID courseId, UUID askedBy, String question, float[] questionVector,
+    //
+    // Returns the row's id — null when logging is off — for the reason `recordRefused` does, one
+    // phase later: Phase 28.3 lets a reader say an answer was bad, and a verdict has to attach to
+    // the *answer* rather than to a copy of the question's text. The two record methods now have
+    // the same contract, which is one fewer thing to remember about them.
+    public UUID recordGrounded(UUID courseId, UUID askedBy, String question, float[] questionVector,
                                Double topSimilarity, Collection<UUID> documentIds) {
         UUID eventId = insert(courseId, askedBy, question, questionVector, true, topSimilarity);
         if (eventId == null) {
-            return;
+            return null;
         }
         // Deduped and order-preserving: six chunks routinely come from two or three documents,
         // and the composite primary key would reject the repeats anyway.
         Set<UUID> distinct = new LinkedHashSet<>(documentIds);
         distinct.remove(null);
         repository.insertEventDocuments(eventId, distinct);
+        return eventId;
     }
 
     // The confidence gate refused. topSimilarity is kept even so: "closest match was 0.24" and

@@ -41,6 +41,16 @@ public class TrigramStage {
     // when the stage is off and when the query has no term long enough to match on — both are the
     // same answer to the caller: one fewer list to fuse.
     public List<ChunkHit> search(UUID courseId, UUID actorId, String query) {
+        return search(courseId, actorId, query, DocumentScope.WHOLE_COURSE);
+    }
+
+    // Phase 28.2 — the same list, drawn only from the documents the reader chose.
+    //
+    // **A conditional stage that ignores the scope is how "ask this lecture" quietly stops being
+    // true.** This one and HyDE are both off by default, which is exactly why the scope has to be
+    // threaded through them rather than relied upon not to matter: the day either is switched on,
+    // the failure is a scoped answer citing a chapter the reader excluded, with nothing throwing.
+    public List<ChunkHit> search(UUID courseId, UUID actorId, String query, DocumentScope scope) {
         if (!enabled()) {
             return List.of();
         }
@@ -48,6 +58,6 @@ public class TrigramStage {
         if (terms.isEmpty()) {
             return List.of();
         }
-        return searchRepository.trigramSearch(courseId, actorId, terms, CANDIDATES);
+        return searchRepository.trigramSearch(courseId, actorId, terms, CANDIDATES, scope);
     }
 }

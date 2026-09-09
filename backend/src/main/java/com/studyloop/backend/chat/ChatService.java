@@ -1,5 +1,6 @@
 package com.studyloop.backend.chat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.analytics.QuestionLogService;
 import com.studyloop.backend.chat.PreparedTurn.CacheWrite;
 import com.studyloop.backend.chat.RetrievedTurn.Outcome;
@@ -16,6 +17,7 @@ import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
 import com.studyloop.backend.document.Language;
 import com.studyloop.backend.document.LanguageDetector;
+import com.studyloop.backend.retrieval.DocumentScope;
 import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievalService;
 import com.studyloop.backend.retrieval.RetrievedChunk;
@@ -23,6 +25,8 @@ import com.studyloop.backend.retrieval.SectionExpander;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -115,6 +119,13 @@ public class ChatService {
             "What to look for, in the student's own words where possible. A question or a phrase, "
             + "not keywords.");
 
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
+    // One turn's citations on the way into `chat_messages.citations` (Phase 28.1). Our own, for the
+    // reason given in SemanticCacheService: Boot 4.1's modular web starter publishes no
+    // ObjectMapper bean.
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     private final CourseAccess courseAccess;
     private final RetrievalService retrievalService;
     private final ChatClient chatClient;
@@ -140,13 +151,14 @@ public class ChatService {
         PreparedTurn prepared = prepare(actorId, courseId, request);
         if (prepared.isAnswered()) {
             return new ChatResponse(prepared.conversationId(), prepared.finalAnswer(),
-                    prepared.citations(), prepared.questionEventId(), prepared.askedBefore());
+                    prepared.citations(), prepared.questionEventId(), prepared.answerEventId(),
+                    prepared.askedBefore());
         }
 
         String answer = chatClient.complete(prepared.messages());
         completeTurn(prepared, answer);
         return new ChatResponse(prepared.conversationId(), answer, prepared.citations(), null,
-                prepared.askedBefore());
+                prepared.answerEventId(), prepared.askedBefore());
     }
 
     // The three phases composed, for callers that want a turn prepared in one call: the
@@ -224,7 +236,8 @@ public class ChatService {
         // flush: with the write last, Hibernate has no reason to synchronise the session in the
         // middle of a query it is about to run.
         saveMessage(conversation, ChatRole.USER, question);
-        return TurnContext.of(member, conversation.getId(), question, language, opensThread, history);
+        return TurnContext.of(member, conversation.getId(), question, language, opensThread, history,
+                DocumentScope.of(request.documentIds()));
     }
 
     // ------------------------------------------------------------------------------------------
@@ -249,7 +262,17 @@ public class ChatService {
     public RetrievedTurn retrieve(TurnContext context, String searchQuery) {
         boolean askedAsTyped = searchQuery.equals(context.question());
 
-        CacheProbe probe = context.opensThread()
+        // **A scoped turn neither reads the cache nor writes to it (Phase 28.2), and that is not
+        // caution — it is what the cache's key can and cannot say.** `chat_cache_entries` is keyed
+        // on the course and the question's embedding, with no room for *where the reader was
+        // looking*. Probing it from a scoped turn would answer "what is a rotation?" aimed at
+        // chapter 6 with an answer built from chapter 12, citing pages the reader deliberately
+        // excluded; storing one would do the same damage in the other direction, to the next
+        // person who asks the question of the whole course. Widening the key is the alternative and
+        // it is the wrong trade: it would fragment the cache by subset — one entry per question per
+        // combination of documents — which is a cache that never hits.
+        boolean cacheable = context.opensThread() && context.scope().isWholeCourse();
+        CacheProbe probe = cacheable
                 ? semanticCache.probe(context.courseId(), context.question())
                 : CacheProbe.unavailable();
         if (probe.isHit()) {
@@ -277,7 +300,7 @@ public class ChatService {
         // something else would make the tool's argument decorative.
         RetrievalResult retrieval = retrievalService.searchAsMember(
                 context.member(), searchQuery, askedAsTyped ? probe.questionVector() : null,
-                RETRIEVAL_K);
+                RETRIEVAL_K, context.scope());
         List<RetrievedChunk> chunks = retrieval.chunks();
 
         // Whichever half of the turn embedded the question, analytics reuses that vector rather
@@ -315,10 +338,13 @@ public class ChatService {
         messages.addAll(context.history());
         messages.add(LlmMessage.user(context.question()));
 
-        // Cache only what the cache could ever serve: an opening question, answered from the
-        // materials, whose embedding we actually have. Refusals are excluded deliberately —
-        // "I don't have that" is the one answer most likely to be wrong tomorrow.
-        CacheWrite cacheWrite = context.opensThread() && probe.questionVector() != null
+        // Cache only what the cache could ever serve: an opening question, over the whole course
+        // (28.2), answered from the materials, whose embedding we actually have. Refusals are
+        // excluded deliberately — "I don't have that" is the one answer most likely to be wrong
+        // tomorrow. `cacheable` is the same flag the probe was gated on, so a turn that could not
+        // read the cache cannot write to it either; on a scoped turn `probe.questionVector()` is
+        // null anyway, and the flag is here to make the rule visible rather than incidental.
+        CacheWrite cacheWrite = cacheable && probe.questionVector() != null
                 ? new CacheWrite(context.courseId(), context.question(), probe.questionVector())
                 : null;
         TurnProgress.report(TurnProgress.WRITING);
@@ -343,13 +369,17 @@ public class ChatService {
     public PreparedTurn recordTurn(TurnContext context, RetrievedTurn retrieved) {
         return switch (retrieved.outcome()) {
             case CACHED -> {
-                saveMessage(reference(context), ChatRole.ASSISTANT, retrieved.settledAnswer());
+                // The cached answer's own citations, not a fresh retrieval's: what is being stored
+                // is what this reader was shown (Phase 28.1).
+                saveMessage(reference(context), ChatRole.ASSISTANT, retrieved.settledAnswer(),
+                        retrieved.citations());
                 // Still a question the class asked, so it still counts toward confusion analytics.
                 // Who paid for the answer is a cost concern, not a teaching one.
-                questionLog.recordGrounded(context.courseId(), context.actorId(), context.question(),
-                        retrieved.questionVector(), null, retrieved.documentIds());
+                UUID cachedEventId = questionLog.recordGrounded(context.courseId(),
+                        context.actorId(), context.question(), retrieved.questionVector(), null,
+                        retrieved.documentIds());
                 yield PreparedTurn.answered(context.conversationId(), retrieved.citations(),
-                        retrieved.settledAnswer(), retrieved.askedBefore());
+                        retrieved.settledAnswer(), retrieved.askedBefore(), cachedEventId);
             }
             case REFUSED -> {
                 saveMessage(reference(context), ChatRole.ASSISTANT, retrieved.settledAnswer());
@@ -363,11 +393,12 @@ public class ChatService {
                         questionEventId, retrieved.askedBefore());
             }
             case GROUNDED -> {
-                questionLog.recordGrounded(context.courseId(), context.actorId(), context.question(),
-                        retrieved.questionVector(), retrieved.topSimilarity(),
-                        retrieved.documentIds());
+                UUID answerEventId = questionLog.recordGrounded(context.courseId(),
+                        context.actorId(), context.question(), retrieved.questionVector(),
+                        retrieved.topSimilarity(), retrieved.documentIds());
                 yield PreparedTurn.answerable(context.conversationId(), retrieved.citations(),
-                        retrieved.messages(), retrieved.cacheWrite(), retrieved.askedBefore());
+                        retrieved.messages(), retrieved.cacheWrite(), retrieved.askedBefore(),
+                        answerEventId);
             }
         };
     }
@@ -376,7 +407,7 @@ public class ChatService {
     @Transactional
     public void completeTurn(PreparedTurn prepared, String answer) {
         ChatConversation conversation = conversationRepository.getReferenceById(prepared.conversationId());
-        saveMessage(conversation, ChatRole.ASSISTANT, answer);
+        saveMessage(conversation, ChatRole.ASSISTANT, answer, prepared.citations());
 
         CacheWrite write = prepared.cacheWrite();
         if (write != null) {
@@ -519,12 +550,41 @@ public class ChatService {
         return history;
     }
 
+    // A turn with no sources: every USER turn, every refusal, and every GENERAL answer. The empty
+    // list is written rather than left null because the column is `not null` and because "this turn
+    // had no sources" is a fact worth being able to read back, not an absence of data.
     private void saveMessage(ChatConversation conversation, ChatRole role, String content) {
+        saveMessage(conversation, role, content, List.of());
+    }
+
+    // Phase 28.1 — the same write, keeping the sources the answer was shown with.
+    //
+    // Serialised here rather than mapped as a relationship: a citation names a chunk that may later
+    // be deleted (27.3), and a foreign key would make the transcript's survival depend on the
+    // corpus not changing. What is stored is the snapshot the reader saw.
+    private void saveMessage(ChatConversation conversation, ChatRole role, String content,
+                             List<Citation> citations) {
         ChatMessage message = new ChatMessage();
         message.setConversation(conversation);
         message.setRole(role);
         message.setContent(content);
+        message.setCitations(citationsJson(citations));
         messageRepository.save(message);
+    }
+
+    // Never throws: a turn that cannot serialise its sources is still a turn, and losing the
+    // markers is survivable in a way that losing the answer is not — the same trade
+    // `SemanticCacheService` makes on the way back out.
+    private String citationsJson(List<Citation> citations) {
+        if (citations == null || citations.isEmpty()) {
+            return "[]";
+        }
+        try {
+            return objectMapper.writeValueAsString(citations);
+        } catch (Exception e) {
+            log.warn("Citations could not be stored with the turn: {}", e.getMessage());
+            return "[]";
+        }
     }
 
     // The header, or null when this is not a repeat — which it is not on the overwhelming

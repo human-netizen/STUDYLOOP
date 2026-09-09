@@ -4,14 +4,25 @@ import { ApiError, quizzesApi } from '../lib/api'
 import type { AnswerInput, AttemptResponse, GradedAnswer, Quiz, QuizQuestionView } from '../lib/types'
 import { AppShell, BackLink } from '../components/AppShell'
 import { Markdown } from '../components/Markdown'
-import { Button, ErrorText, Eyebrow, Loading, Pill, TextArea } from '../components/ui'
+import { Button, Empty, ErrorText, Eyebrow, Loading, Pill, TextArea } from '../components/ui'
 import { cx } from '../lib/style'
 
 // Take one quiz and see it graded. While taking, answers are held locally; on submit the server
 // grades them (revealing the answer key + explanations), and the page switches to a review of the
 // attempt. "Retake" clears the answers and starts over.
+//
+// Phase 28.5 — the practice set is served at a literal path under /quizzes, so the existing
+// `/courses/:id/quizzes/:quizId` route already matches it and no second route is needed.
+//
+// **It renders through this page rather than through a copy of it**, because everything below the
+// fetch is identical: the same take view, the same grading review, the same answer key. What
+// differs is which two endpoints are called and that the result carries no attempt id — see
+// `PracticeSetResponse` on the server for why there is no quiz row to have one.
+const PRACTICE = 'wrong-answers'
+
 export function QuizPage() {
   const { id = '', quizId = '' } = useParams()
+  const practice = quizId === PRACTICE
 
   const [quiz, setQuiz] = useState<Quiz | null>(null)
   const [loading, setLoading] = useState(true)
@@ -24,8 +35,14 @@ export function QuizPage() {
 
   useEffect(() => {
     let active = true
-    quizzesApi
-      .get(id, quizId)
+    const load = practice
+      ? quizzesApi
+          .wrongAnswers(id)
+          // A practice set has no id and no createdAt. Both are filled with values this page never
+          // renders rather than making every consumer below handle a second shape.
+          .then((set) => ({ id: PRACTICE, title: set.title, createdAt: '', questions: set.questions }))
+      : quizzesApi.get(id, quizId)
+    load
       .then((data) => {
         if (active) setQuiz(data)
       })
@@ -38,7 +55,7 @@ export function QuizPage() {
     return () => {
       active = false
     }
-  }, [id, quizId])
+  }, [id, quizId, practice])
 
   function setOption(questionId: string, optionIndex: number) {
     setAnswers((current) => ({ ...current, [questionId]: { questionId, selectedOptionIndex: optionIndex } }))
@@ -53,7 +70,10 @@ export function QuizPage() {
     setSubmitError(null)
     setSubmitting(true)
     try {
-      const graded = await quizzesApi.submit(id, quizId, { answers: Object.values(answers) })
+      const body = { answers: Object.values(answers) }
+      const graded = practice
+        ? await quizzesApi.submitWrongAnswers(id, body)
+        : await quizzesApi.submit(id, quizId, body)
       setResult(graded)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err) {
@@ -78,13 +98,22 @@ export function QuizPage() {
       {loading && <Loading />}
       {error && <ErrorText>{error}</ErrorText>}
 
-      {quiz && (
+      {/* An empty practice set is the good outcome, and it says so rather than rendering a quiz
+          with nothing in it. */}
+      {quiz && practice && quiz.questions.length === 0 && (
+        <Empty>
+          Nothing to practise — you have not missed a question in this course yet.
+        </Empty>
+      )}
+
+      {quiz && quiz.questions.length > 0 && (
         <>
           <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
             <div className="min-w-0">
               <Eyebrow className="mb-2">
                 {quiz.questions.length} question{quiz.questions.length === 1 ? '' : 's'}
                 {!result && ` · ${answered} answered`}
+                {practice && ' · from your own attempts'}
               </Eyebrow>
               <h1 className="m-0 text-[clamp(30px,3.8vw,46px)] leading-[1] tracking-[-0.035em]">
                 {quiz.title}

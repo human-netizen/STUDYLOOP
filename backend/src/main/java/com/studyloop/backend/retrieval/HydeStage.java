@@ -95,6 +95,18 @@ public class HydeStage {
     // alone, which is the pipeline Phase 17 shipped.
     public Result apply(UUID courseId, UUID actorId, String query, float[] queryVector,
                         OptionalDouble topSimilarity) {
+        return apply(courseId, actorId, query, queryVector, topSimilarity,
+                DocumentScope.WHOLE_COURSE);
+    }
+
+    // Phase 28.2 — the same second pass, confined to the documents the reader chose.
+    //
+    // Every list this stage produces is fused with the first pass's, so an unscoped one here would
+    // put chunks from outside the scope into a scoped answer — including through the *hypothetical*
+    // document, which is invented text and would go looking for its own words anywhere in the
+    // course. The scope rides all four searches below for that reason.
+    public Result apply(UUID courseId, UUID actorId, String query, float[] queryVector,
+                        OptionalDouble topSimilarity, DocumentScope scope) {
         if (!triggers(query, topSimilarity)) {
             return Result.notRun();
         }
@@ -111,7 +123,7 @@ public class HydeStage {
                 float[] hypothetical = embeddingClient.embedPseudoDocument(expansion.hypothetical());
                 List<ChunkHit> hits = searchRepository.vectorSearch(courseId, actorId,
                         VectorSupport.toLiteral(hypothetical), VectorSupport.toLiteral(queryVector),
-                        CANDIDATES);
+                        CANDIDATES, scope);
                 if (!hits.isEmpty()) {
                     rankings.add(hits);
                     gateSimilarity = bestGateSimilarity(hits);
@@ -132,15 +144,15 @@ public class HydeStage {
             // semantics from the question would make the two lists incomparable, and RRF is
             // fusing them.
             List<ChunkHit> lexical = searchRepository.fullTextSearch(
-                    courseId, actorId, rewrite, CANDIDATES, properties.stages().lexicalOr());
+                    courseId, actorId, rewrite, CANDIDATES, properties.stages().lexicalOr(), scope);
             if (!lexical.isEmpty()) {
                 rankings.add(lexical);
             }
             if (properties.stages().trigram()) {
                 List<String> terms = QueryTerms.of(rewrite, properties.trigram().maxTerms());
                 if (!terms.isEmpty()) {
-                    List<ChunkHit> fuzzy =
-                            searchRepository.trigramSearch(courseId, actorId, terms, CANDIDATES);
+                    List<ChunkHit> fuzzy = searchRepository.trigramSearch(
+                            courseId, actorId, terms, CANDIDATES, scope);
                     if (!fuzzy.isEmpty()) {
                         rankings.add(fuzzy);
                     }

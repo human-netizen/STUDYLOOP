@@ -3,6 +3,7 @@ package com.studyloop.backend.quiz;
 import com.studyloop.backend.quiz.dto.AttemptResponse;
 import com.studyloop.backend.quiz.dto.AttemptSummaryResponse;
 import com.studyloop.backend.quiz.dto.GenerateQuizRequest;
+import com.studyloop.backend.quiz.dto.PracticeSetResponse;
 import com.studyloop.backend.quiz.dto.QuizResponse;
 import com.studyloop.backend.quiz.dto.QuizSummaryResponse;
 import com.studyloop.backend.quiz.dto.SubmitAttemptRequest;
@@ -33,6 +34,7 @@ public class QuizController {
 
     private final QuizService quizService;
     private final QuizGradingService gradingService;
+    private final WrongAnswerQuizService wrongAnswerQuizService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -45,6 +47,28 @@ public class QuizController {
     @GetMapping
     public List<QuizSummaryResponse> list(Authentication authentication, @PathVariable UUID courseId) {
         return quizService.list(UUID.fromString(authentication.getName()), courseId);
+    }
+
+    // Phase 28.5 — the caller's own missed questions, shaped as a quiz. Zero provider calls: it is
+    // a read of `quiz_attempt_answers` and `review_states`, both written on every attempt since
+    // Phase 7.2 and read until now only by the review queue.
+    //
+    // Declared before `/{quizId}` so the literal path is not read as a quiz id.
+    @GetMapping("/wrong-answers")
+    public PracticeSetResponse wrongAnswers(Authentication authentication,
+                                            @PathVariable UUID courseId) {
+        return wrongAnswerQuizService.practiceSet(UUID.fromString(authentication.getName()), courseId);
+    }
+
+    // Grading for that set. Not `/{quizId}/attempts`, because there is no quiz and no attempt row —
+    // see WrongAnswerQuizService for why the original question rows are re-served rather than
+    // copied. 200 rather than 201: nothing was created.
+    @PostMapping("/wrong-answers/attempts")
+    public AttemptResponse submitWrongAnswers(Authentication authentication,
+                                              @PathVariable UUID courseId,
+                                              @Valid @RequestBody SubmitAttemptRequest request) {
+        return gradingService.submitPractice(UUID.fromString(authentication.getName()), courseId,
+                request);
     }
 
     @GetMapping("/{quizId}")

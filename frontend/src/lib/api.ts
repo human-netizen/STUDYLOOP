@@ -1,10 +1,14 @@
 import type {
+  AnswerFeedbackRequest,
   AttemptResponse,
   AttemptSummary,
   ChatDoneEvent,
   ChatMetaEvent,
   ConfusionReport,
+  ConversationSummary,
+  ConversationTranscript,
   CostSummary,
+  CourseOutline,
   CourseResponse,
   CreateCourseRequest,
   DocumentImpact,
@@ -25,6 +29,7 @@ import type {
   NoteBlock,
   NoteResponse,
   PageResponse,
+  PracticeSet,
   Quiz,
   QuizSummary,
   RegisterRequest,
@@ -232,6 +237,10 @@ export const documentsApi = {
     request<DocumentResponse[]>(`/courses/${courseId}/documents`, { auth: true }),
   get: (courseId: string, documentId: string) =>
     request<DocumentResponse>(`/courses/${courseId}/documents/${documentId}`, { auth: true }),
+  // Phase 28.4 — the same corpus as a table of contents: sections, page spans, glossary terms and
+  // how many questions each document has ever answered.
+  outline: (courseId: string) =>
+    request<CourseOutline>(`/courses/${courseId}/documents/outline`, { auth: true }),
   // `range` is Phase 25.1's page cut, sent as query params rather than as extra form parts: the
   // body is already multipart for the file, and the backend reads them as plain @RequestParams
   // either way. Omitted entirely when the whole document is wanted, so the request is byte-for-byte
@@ -372,6 +381,16 @@ export const quizzesApi = {
     }),
   attempts: (courseId: string, quizId: string) =>
     request<AttemptSummary[]>(`/courses/${courseId}/quizzes/${quizId}/attempts`, { auth: true }),
+  // Phase 28.5 — the caller's own missed questions, and grading for them. The grading endpoint
+  // records no attempt row: there is no quiz for one to belong to.
+  wrongAnswers: (courseId: string) =>
+    request<PracticeSet>(`/courses/${courseId}/quizzes/wrong-answers`, { auth: true }),
+  submitWrongAnswers: (courseId: string, body: SubmitAttemptRequest) =>
+    request<AttemptResponse>(`/courses/${courseId}/quizzes/wrong-answers/attempts`, {
+      method: 'POST',
+      body,
+      auth: true,
+    }),
   // Phase 27.4 — author or manager. Every attempt on the quiz goes with it, which is why the
   // confirmation says so.
   remove: (courseId: string, quizId: string) =>
@@ -573,7 +592,9 @@ export const chatApi = {
   // live response to consumeSse. `signal` lets the caller abort an in-flight stream.
   async stream(
     courseId: string,
-    body: { question: string; conversationId: string | null },
+    // `documentIds` is Phase 28.2's scope. Absent or empty means the whole course, which is what
+    // every caller sent before the field existed.
+    body: { question: string; conversationId: string | null; documentIds?: string[] },
     handlers: ChatStreamHandlers,
     signal?: AbortSignal,
   ): Promise<void> {
@@ -609,4 +630,26 @@ export const chatApi = {
       body,
       auth: true,
     }),
+
+  // Phase 28.1 — the read path. Three endpoints that did not exist until this phase, which is why
+  // a reload used to start a new thread while the model was still being handed the old one.
+  conversations: (courseId: string) =>
+    request<ConversationSummary[]>(`/courses/${courseId}/chat/conversations`, { auth: true }),
+
+  transcript: (courseId: string, conversationId: string) =>
+    request<ConversationTranscript>(
+      `/courses/${courseId}/chat/conversations/${conversationId}`,
+      { auth: true },
+    ),
+
+  // Phase 27.4's delete, which waited for this list to be reached from. The author only.
+  removeConversation: (courseId: string, conversationId: string) =>
+    request<void>(`/courses/${courseId}/chat/conversations/${conversationId}`, {
+      method: 'DELETE',
+      auth: true,
+    }),
+
+  // Phase 28.3 — a verdict on one answer, with the passages it was shown with.
+  feedback: (courseId: string, body: AnswerFeedbackRequest) =>
+    request<void>(`/courses/${courseId}/chat/feedback`, { method: 'POST', body, auth: true }),
 }

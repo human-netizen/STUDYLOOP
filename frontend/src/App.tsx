@@ -4,6 +4,7 @@ import { RegisterPage } from './pages/RegisterPage'
 import { CoursesPage } from './pages/CoursesPage'
 import { CourseDetailPage } from './pages/CourseDetailPage'
 import { ChatPage } from './pages/ChatPage'
+import { CourseOutlinePage } from './pages/CourseOutlinePage'
 import { CourseSearchPage } from './pages/CourseSearchPage'
 import { CourseForumPage } from './pages/CourseForumPage'
 import { ForumThreadPage } from './pages/ForumThreadPage'
@@ -62,6 +63,15 @@ function App() {
         element={
           <ProtectedRoute>
             <ForumThreadPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Phase 28.4 — the corpus as a table of contents rather than a folder listing. */}
+      <Route
+        path="/courses/:id/contents"
+        element={
+          <ProtectedRoute>
+            <CourseOutlinePage />
           </ProtectedRoute>
         }
       />

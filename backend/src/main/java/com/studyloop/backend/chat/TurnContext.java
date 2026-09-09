@@ -2,6 +2,7 @@ package com.studyloop.backend.chat;
 
 import com.studyloop.backend.course.Membership;
 import com.studyloop.backend.document.Language;
+import com.studyloop.backend.retrieval.DocumentScope;
 
 import java.util.List;
 import java.util.UUID;
@@ -36,12 +37,22 @@ public record TurnContext(
         // Prior turns, oldest first, already capped and already translated into provider messages.
         // Does **not** include the question this turn is about: the reads happen before the write
         // that saves it, so the caller appends it. That ordering is what removed a flush.
-        List<LlmMessage> history
+        List<LlmMessage> history,
+
+        // Phase 28.2 — the documents this turn may be answered from, or `WHOLE_COURSE`.
+        //
+        // It rides on the context rather than being passed alongside it because the streaming path
+        // hands this object between three calls, and a scope that travelled separately would be a
+        // scope one of those calls could forget. The tool-calling path (26.3) inherits it for the
+        // same reason: the model chooses *what to search for*, and the reader has already chosen
+        // *where*.
+        DocumentScope scope
 ) {
 
     public static TurnContext of(Membership member, UUID conversationId, String question,
-                                 Language language, boolean opensThread, List<LlmMessage> history) {
+                                 Language language, boolean opensThread, List<LlmMessage> history,
+                                 DocumentScope scope) {
         return new TurnContext(member, member.getCourseSpace().getId(), member.getUser().getId(),
-                conversationId, question, language, opensThread, history);
+                conversationId, question, language, opensThread, history, scope);
     }
 }

@@ -71,30 +71,34 @@ function Rail({ courseName }: { courseName?: string }) {
               <Eyebrow className="truncate px-1.5">{courseName ?? 'Course'}</Eyebrow>
             </div>
             <RailLink to={`/courses/${courseId}`} index="03" label="Overview" end badge={ingested} />
-            <RailLink to={`/courses/${courseId}/chat`} index="04" label="Ask" />
+            {/* Phase 28.4. Directly under Overview, because it answers the question Overview
+                raises: that page lists the files, this one says what is in them and what nobody
+                has ever asked about. */}
+            <RailLink to={`/courses/${courseId}/contents`} index="04" label="Contents" end />
+            <RailLink to={`/courses/${courseId}/chat`} index="05" label="Ask" />
             {/* Directly under Ask, because that is where threads come from: the forum is what a
                 refusal turns into. */}
-            <RailLink to={`/courses/${courseId}/forum`} index="05" label="Forum" />
+            <RailLink to={`/courses/${courseId}/forum`} index="06" label="Forum" />
             {/* The same retrieval as Ask, returned as passages. Kept a separate destination
                 rather than a box on the chat page: you arrive wanting one or the other. */}
-            <RailLink to={`/courses/${courseId}/search`} index="06" label="Search" />
-            <RailLink to={`/courses/${courseId}/quizzes`} index="07" label="Quizzes" />
-            <RailLink to={`/courses/${courseId}/flashcards`} index="08" label="Flashcards" />
+            <RailLink to={`/courses/${courseId}/search`} index="07" label="Search" />
+            <RailLink to={`/courses/${courseId}/quizzes`} index="08" label="Quizzes" />
+            <RailLink to={`/courses/${courseId}/flashcards`} index="09" label="Flashcards" />
             {/* Phase 21. Absent rather than disabled where the renderer is not installed: an
                 optional service that advertises itself and then fails is worse than one nobody
                 was told about. Same rule as Confusion and Spend, for a different reason — those
                 are hidden by role, this one by whether the machine can do it at all. */}
             {videos && (
-              <RailLink to={`/courses/${courseId}/videos`} index="09" label="Video" badge={rendered} />
+              <RailLink to={`/courses/${courseId}/videos`} index="10" label="Video" badge={rendered} />
             )}
             {/* Phase 16.3. Every member has one, and what is in it is theirs until a manager
                 promotes it — so this is not gated the way Confusion and Spend are. */}
-            <RailLink to={`/courses/${courseId}/notes`} index="10" label="Your notes" end />
-            <RailLink to={`/courses/${courseId}/review`} index="11" label="Review this course" end />
+            <RailLink to={`/courses/${courseId}/notes`} index="11" label="Your notes" end />
+            <RailLink to={`/courses/${courseId}/review`} index="12" label="Review this course" end />
             {/* Same rule as the Spend link: hidden for a plain MEMBER rather than offered and
                 refused. The page still handles a 403 for anyone who pastes the URL. */}
             {teaches && (
-              <RailLink to={`/courses/${courseId}/confusion`} index="12" label="Confusion" end />
+              <RailLink to={`/courses/${courseId}/confusion`} index="13" label="Confusion" end />
             )}
           </>
         )}

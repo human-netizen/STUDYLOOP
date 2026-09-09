@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -55,6 +56,7 @@ public class QuizGradingService {
     private final QuizAttemptAnswerRepository answerRepository;
     private final ChatClient chatClient;
     private final FlashcardService flashcardService;
+    private final WrongAnswerQuizService wrongAnswerQuizService;
 
     @Transactional
     public AttemptResponse submit(UUID actorId, UUID courseId, UUID quizId, SubmitAttemptRequest request) {
@@ -101,6 +103,63 @@ public class QuizGradingService {
 
         return new AttemptResponse(attempt.getId(), quiz.getId(), score, questions.size(),
                 attempt.getCreatedAt(), graded, enrolled);
+    }
+
+    // Phase 28.5 — the same grading over a practice set, which belongs to no quiz.
+    //
+    // **Everything above the attempt row is shared, and everything at or below it is absent.** The
+    // verdicts, the short-answer judging, the answer key and the flashcard enrolment are the same
+    // code paths; what is missing is `quiz_attempts` and `quiz_attempt_answers`, because an attempt
+    // is a record of taking a particular quiz and this set is not one. Writing a row anyway would
+    // mean either inventing a quiz to point at or leaving `quiz_id` null on a `not null` column.
+    //
+    // **The questions come from the service that chose them, not from the request.** A client
+    // sending an arbitrary question id gets it ignored: only questions this caller has actually
+    // missed are graded, which is the same rule as "you may only be shown your own mistakes",
+    // enforced once rather than at two endpoints.
+    //
+    // Enrolment stays on, and it cannot double-enrol: `uq_flashcards_owner_quiz_question` is a
+    // partial unique index over `(created_by, source_quiz_question_id)`, and these are the original
+    // question rows, so missing one again finds the card that already exists.
+    @Transactional
+    public AttemptResponse submitPractice(UUID actorId, UUID courseId, SubmitAttemptRequest request) {
+        Membership member = courseAccess.requireMember(actorId, courseId);
+        List<QuizQuestion> questions = wrongAnswerQuizService.missedQuestions(actorId, courseId);
+        if (questions.isEmpty()) {
+            throw new NoQuizMaterialException(
+                    "There is nothing to practise — you have not missed a question in this course.");
+        }
+
+        Map<UUID, AnswerInput> submitted = indexByQuestion(request.answers());
+        Map<UUID, List<String>> optionsByQuestion = loadOptions(questions);
+        Map<UUID, Boolean> shortAnswerVerdicts = judgeShortAnswers(questions, submitted);
+
+        List<Verdict> verdicts = new ArrayList<>(questions.size());
+        int score = 0;
+        for (QuizQuestion question : questions) {
+            AnswerInput answer = submitted.get(question.getId());
+            Integer selected = answer != null ? answer.selectedOptionIndex() : null;
+            String text = answer != null ? answer.answerText() : null;
+            boolean correct = isCorrect(question, selected, text, shortAnswerVerdicts);
+            if (correct) {
+                score++;
+            }
+            verdicts.add(new Verdict(question, selected, text, correct));
+        }
+
+        List<GradedAnswer> graded = new ArrayList<>(verdicts.size());
+        for (Verdict verdict : verdicts) {
+            graded.add(toGradedAnswer(verdict, optionsByQuestion));
+        }
+
+        int enrolled = flashcardService
+                .enrollMissedQuestions(member, missedQuestions(verdicts, optionsByQuestion))
+                .size();
+
+        // Null attempt and quiz ids, which is what the client renders against: the review is the
+        // same shape as a graded quiz, and there is no attempt to link back to.
+        return new AttemptResponse(null, null, score, questions.size(),
+                Instant.now(), graded, enrolled);
     }
 
     // Turns each wrong verdict into card shape: the question on the front, the right answer (plus

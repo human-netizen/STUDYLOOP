@@ -93,6 +93,19 @@ class ChunkSearchRepository {
     // this phase and every call with the stage off — the value is bit-for-bit what it always was.
     List<ChunkHit> vectorSearch(UUID courseId, UUID actorId, String searchVectorLiteral,
                                 String gateVectorLiteral, int limit) {
+        return vectorSearch(courseId, actorId, searchVectorLiteral, gateVectorLiteral, limit,
+                DocumentScope.WHOLE_COURSE);
+    }
+
+    List<ChunkHit> vectorSearch(UUID courseId, UUID actorId, String searchVectorLiteral,
+                                String gateVectorLiteral, int limit, DocumentScope scope) {
+        List<Object> args = new ArrayList<>();
+        args.add(gateVectorLiteral);
+        args.add(courseId);
+        args.add(actorId);
+        args.addAll(scope.documentIds());
+        args.add(searchVectorLiteral);
+        args.add(limit);
         return jdbc.query("""
                 select c.id, c.document_id, d.filename, d.source, c.page_number, c.page_end,
                        c.section_path, c.content, c.token_count, c.modality,
@@ -101,12 +114,12 @@ class ChunkSearchRepository {
                 join documents d on d.id = c.document_id
                 where d.course_space_id = ?
                   and d.status = 'READY'
-                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)
+                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)%s
                   and c.modality = 'TEXT'
                   and c.embedding is not null
                 order by c.embedding <=> cast(? as vector)
                 limit ?
-                """, VECTOR_MAPPER, gateVectorLiteral, courseId, actorId, searchVectorLiteral, limit);
+                """.formatted(scopeClause(scope)), VECTOR_MAPPER, args.toArray());
     }
 
     // Every chunk of one section of one document, in document order — the raw material for
@@ -221,6 +234,11 @@ class ChunkSearchRepository {
     // `ts_rank` makes and the reason this list is fused with the lexical one rather than replacing
     // it. Both read `coalesce(embed_text, content)`, the expression `content_tsv` is generated from.
     List<ChunkHit> trigramSearch(UUID courseId, UUID actorId, List<String> terms, int limit) {
+        return trigramSearch(courseId, actorId, terms, limit, DocumentScope.WHOLE_COURSE);
+    }
+
+    List<ChunkHit> trigramSearch(UUID courseId, UUID actorId, List<String> terms, int limit,
+                                 DocumentScope scope) {
         if (terms.isEmpty()) {
             return List.of();
         }
@@ -233,28 +251,31 @@ class ChunkSearchRepository {
                 .collect(Collectors.joining(" or "));
 
         // Terms twice — once for the score expression, once for the filter — then the scope, then
-        // the limit. Positional parameters, so the order here is the order below.
-        List<Object> args = new ArrayList<>(terms.size() * 2 + 3);
+        // the limit. Positional parameters, so the order here is the order below. 28.2's document
+        // scope binds between the actor and the filter's copy of the terms, which is where the
+        // clause sits in every branch in this class.
+        List<Object> args = new ArrayList<>(terms.size() * 2 + scope.size() + 3);
         args.addAll(terms);
         args.add(courseId);
         args.add(actorId);
+        args.addAll(scope.documentIds());
         args.addAll(terms);
         args.add(limit);
 
         return jdbc.query("""
                 select c.id, c.document_id, d.filename, d.source, c.page_number, c.page_end,
                        c.section_path, c.content, c.token_count, c.modality,
-                       %s as trigram_score
+                       %1$s as trigram_score
                 from document_chunks c
                 join documents d on d.id = c.document_id
                 where d.course_space_id = ?
                   and d.status = 'READY'
-                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)
+                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)%3$s
                   and c.modality = 'TEXT'
-                  and (%s)
+                  and (%2$s)
                 order by trigram_score desc
                 limit ?
-                """.formatted(score, filter), TEXT_MAPPER, args.toArray());
+                """.formatted(score, filter, scopeClause(scope)), TEXT_MAPPER, args.toArray());
     }
 
     // Every content word the question has, OR-ed instead of AND-ed (Phase 19.2).
@@ -299,11 +320,23 @@ class ChunkSearchRepository {
     // configuration — it is asked for a ranked list and says how one is obtained.
     List<ChunkHit> fullTextSearch(UUID courseId, UUID actorId, String query, int limit,
                                   boolean anyTerm) {
+        return fullTextSearch(courseId, actorId, query, limit, anyTerm, DocumentScope.WHOLE_COURSE);
+    }
+
+    List<ChunkHit> fullTextSearch(UUID courseId, UUID actorId, String query, int limit,
+                                  boolean anyTerm, DocumentScope scope) {
         String tsquery = anyTerm ? ANY_TERM_TSQUERY : "plainto_tsquery('english', ?)";
         // %1$s twice, one bound parameter each: the filter and the ranking function have to be
         // given the same query, and writing it once is what makes that structural rather than a
         // thing to remember. An empty tsquery — a question of nothing but stopwords — matches no
         // row under either form, which is the correct answer and not an error.
+        List<Object> args = new ArrayList<>();
+        args.add(courseId);
+        args.add(actorId);
+        args.addAll(scope.documentIds());
+        args.add(query);
+        args.add(query);
+        args.add(limit);
         return jdbc.query("""
                 select c.id, c.document_id, d.filename, d.source, c.page_number, c.page_end,
                        c.section_path, c.content, c.token_count, c.modality
@@ -311,12 +344,33 @@ class ChunkSearchRepository {
                 join documents d on d.id = c.document_id
                 where d.course_space_id = ?
                   and d.status = 'READY'
-                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)
+                  and (d.visibility = 'COURSE' or d.uploaded_by = ?)%2$s
                   and c.modality = 'TEXT'
                   and c.content_tsv @@ %1$s
                 order by ts_rank(c.content_tsv, %1$s) desc
                 limit ?
-                """.formatted(tsquery), TEXT_MAPPER, courseId, actorId, query, query, limit);
+                """.formatted(tsquery, scopeClause(scope)), TEXT_MAPPER, args.toArray());
+    }
+
+    // Phase 28.2 — the one predicate that narrows a search to documents the reader chose.
+    //
+    // **It is absent from the SQL entirely when the scope is the whole course**, which is what
+    // makes the feature free for every caller that does not use it: no predicate, no plan change,
+    // no eval number that moves. The parameters are bound positionally and this clause sits
+    // immediately after the visibility clause in every branch, so the argument order is the same
+    // everywhere — course, actor, scope, then whatever that branch searches with.
+    //
+    // Written as a row-wise `in` over placeholders rather than an array parameter, which is the
+    // technique 26.2 used for `sectionChunks`: one plan per distinct id count, all of them
+    // index-usable, and no dependence on the driver's array support.
+    private static String scopeClause(DocumentScope scope) {
+        if (scope.isWholeCourse()) {
+            return "";
+        }
+        String placeholders = scope.documentIds().stream()
+                .map(id -> "cast(? as uuid)")
+                .collect(Collectors.joining(", "));
+        return "\n                  and c.document_id in (" + placeholders + ")";
     }
 
     // Phase 26.2 - the three candidate lists in one round trip instead of three.
@@ -341,29 +395,48 @@ class ChunkSearchRepository {
     // how a switched-off stage starts costing money.
     Candidates candidateSearch(UUID courseId, UUID actorId, String queryVectorLiteral, String query,
                                int limit, boolean anyTerm, boolean includeVisual) {
+        return candidateSearch(courseId, actorId, queryVectorLiteral, query, limit, anyTerm,
+                includeVisual, DocumentScope.WHOLE_COURSE);
+    }
+
+    // Phase 28.2 — the same union, narrowed to the documents the reader chose.
+    //
+    // **One predicate in the two branch templates, and the shape of the statement does not
+    // change.** Each branch keeps its own `order by` and its own `limit`, the `union all` is the
+    // same `union all`, and the fusion above is handed the same three lists it was handed before —
+    // shorter, and drawn from fewer documents. Narrowing what a ranked list is drawn from is not
+    // the same kind of change as merging two of them, which is why this one is free and 26.2 had
+    // to argue for itself.
+    Candidates candidateSearch(UUID courseId, UUID actorId, String queryVectorLiteral, String query,
+                               int limit, boolean anyTerm, boolean includeVisual,
+                               DocumentScope scope) {
         String tsquery = anyTerm ? ANY_TERM_TSQUERY : "plainto_tsquery('english', ?)";
+        String scoped = scopeClause(scope);
         List<String> branches = new ArrayList<>(3);
         List<Object> args = new ArrayList<>();
 
         if (queryVectorLiteral != null) {
-            branches.add(denseBranch("VECTOR", "TEXT"));
+            branches.add(denseBranch("VECTOR", "TEXT", scoped));
             args.add(queryVectorLiteral);
             args.add(courseId);
             args.add(actorId);
+            args.addAll(scope.documentIds());
             args.add(queryVectorLiteral);
             args.add(limit);
         }
-        branches.add(LEXICAL_BRANCH.formatted(tsquery, tsquery));
+        branches.add(LEXICAL_BRANCH.formatted(tsquery, tsquery, scoped));
         args.add(courseId);
         args.add(actorId);
+        args.addAll(scope.documentIds());
         args.add(query);
         args.add(query);
         args.add(limit);
         if (includeVisual && queryVectorLiteral != null) {
-            branches.add(denseBranch("VISUAL", "VISUAL"));
+            branches.add(denseBranch("VISUAL", "VISUAL", scoped));
             args.add(queryVectorLiteral);
             args.add(courseId);
             args.add(actorId);
+            args.addAll(scope.documentIds());
             args.add(queryVectorLiteral);
             args.add(limit);
         }
@@ -390,9 +463,9 @@ class ChunkSearchRepository {
     // One dense branch: the same query for text chunks and for page images, differing in the
     // modality predicate and in nothing else - the same column, the same HNSW index, the same
     // course scope, the same READY filter, the same visibility clause, the same citation fields.
-    private static String denseBranch(String list, String modality) {
+    private static String denseBranch(String list, String modality, String scoped) {
         return """
-                select cast('%s' as text) as list, row_number() over () as rn, d.*
+                select cast('%1$s' as text) as list, row_number() over () as rn, d.*
                 from (
                   select c.id, c.document_id, doc.filename, doc.source, c.page_number, c.page_end,
                          c.section_path, c.content, c.token_count, c.modality,
@@ -401,12 +474,12 @@ class ChunkSearchRepository {
                   join documents doc on doc.id = c.document_id
                   where doc.course_space_id = ?
                     and doc.status = 'READY'
-                    and (doc.visibility = 'COURSE' or doc.uploaded_by = ?)
-                    and c.modality = '%s'
+                    and (doc.visibility = 'COURSE' or doc.uploaded_by = ?)%3$s
+                    and c.modality = '%2$s'
                     and c.embedding is not null
                   order by c.embedding <=> cast(? as vector)
                   limit ?
-                ) d""".formatted(list, modality);
+                ) d""".formatted(list, modality, scoped);
     }
 
     // The lexical branch, with no similarity of its own to report - `cast(null as double
@@ -422,7 +495,7 @@ class ChunkSearchRepository {
               join documents doc on doc.id = c.document_id
               where doc.course_space_id = ?
                 and doc.status = 'READY'
-                and (doc.visibility = 'COURSE' or doc.uploaded_by = ?)
+                and (doc.visibility = 'COURSE' or doc.uploaded_by = ?)%3$s
                 and c.modality = 'TEXT'
                 and c.content_tsv @@ %1$s
               order by ts_rank(c.content_tsv, %2$s) desc
