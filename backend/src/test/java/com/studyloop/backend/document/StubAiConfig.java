@@ -2,12 +2,19 @@ package com.studyloop.backend.document;
 
 import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
+import com.studyloop.backend.chat.ToolCall;
+import com.studyloop.backend.chat.ToolInvoker;
+import com.studyloop.backend.chat.ToolResult;
+import com.studyloop.backend.chat.ToolSpec;
 import com.studyloop.backend.retrieval.RerankClient;
 import com.studyloop.backend.retrieval.RerankException;
 import com.studyloop.backend.video.RecordingVideoWorker;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+
+import javax.sql.DataSource;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -41,6 +48,28 @@ public class StubAiConfig {
     @Primary
     RecordingChatClient recordingChatClient() {
         return new RecordingChatClient();
+    }
+
+    // Phase 26.4 - the statement counter, wrapped around whatever DataSource the context built.
+    //
+    // Here rather than in a configuration of its own for the reason this whole class exists: a
+    // second @TestConfiguration is a second cached context and a second Hikari pool, and the cap
+    // is fifteen clients. It counts nothing until a test calls CountingDataSource.start(), so
+    // every other test in the suite sees a pass-through.
+    //
+    // Static, because a BeanPostProcessor that is not static is created too late to see the
+    // DataSource being built.
+    @Bean
+    static BeanPostProcessor countingDataSourceWrapper() {
+        return new BeanPostProcessor() {
+            @Override
+            public Object postProcessAfterInitialization(Object bean, String beanName) {
+                if (bean instanceof DataSource dataSource && !(bean instanceof CountingDataSource)) {
+                    return new CountingDataSource(dataSource);
+                }
+                return bean;
+            }
+        };
     }
 
     @Bean
@@ -348,6 +377,8 @@ public class StubAiConfig {
             jsonQueue.clear();
             answerQueue.clear();
             prompts.clear();
+            nextToolQuery = null;
+            toolInvocations.set(0);
         }
 
         // Every system prompt this client has been given, oldest first. `lastSystemPrompt` answers
@@ -386,6 +417,40 @@ public class StubAiConfig {
 
         @Override
         public String streamComplete(List<LlmMessage> messages, Consumer<String> onDelta) {
+            countCall(messages);
+            onDelta.accept(nextAnswer);
+            return nextAnswer;
+        }
+
+        // Phase 26.3. What the next tool-calling turn does is scripted by `nextToolQuery`: null
+        // means the model answers from what it knows, anything else means it asks to search for
+        // that string.
+        //
+        // **The one-round cap is not imitated here, it is tested where it lives.** This stub is
+        // how the *application* is tested - does a searched turn come back cited, does an
+        // unsearched one become GENERAL - and the loop that bounds the rounds is a property of the
+        // real client's request building, checked against a canned wire stream in
+        // CohereToolStreamTest.
+        public volatile String nextToolQuery = null;
+        public final AtomicInteger toolInvocations = new AtomicInteger();
+
+        @Override
+        public String streamWithTools(List<LlmMessage> messages, List<ToolSpec> tools,
+                                      ToolInvoker invoker, Consumer<String> onDelta) {
+            countCall(messages);
+            if (nextToolQuery == null) {
+                onDelta.accept(nextAnswer);
+                return nextAnswer;
+            }
+            toolInvocations.incrementAndGet();
+            ToolResult result = invoker.invoke(ToolCall.function(
+                    "call-1", tools.get(0).name(), "{\"query\":\"" + nextToolQuery + "\"}"));
+            if (result.isSettled()) {
+                onDelta.accept(result.finalAnswer());
+                return result.finalAnswer();
+            }
+            // The second round: the same messages plus the tool result, which for a stub means one
+            // more counted call and the scripted answer.
             countCall(messages);
             onDelta.accept(nextAnswer);
             return nextAnswer;

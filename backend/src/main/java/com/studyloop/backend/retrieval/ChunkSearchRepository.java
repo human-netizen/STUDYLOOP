@@ -127,6 +127,49 @@ class ChunkSearchRepository {
 
     record SectionChunk(UUID id, String content) { }
 
+    // The same read for several sections at once (Phase 26.2).
+    //
+    // **Six retrieved chunks in four sections was four round trips, and on a WAN that is the whole
+    // cost.** Each query was already indexed and already fast; what made it slow was that there
+    // were four of them, one after another, each paying the same ~40ms to Tokyo and back. One
+    // row-wise `in` returns all four sections in one trip, and the grouping the caller needs is
+    // the grouping it was already doing in a HashMap.
+    //
+    // Ordered by the same `chunk_index` as the single-section form, with the two key columns ahead
+    // of it so a section's chunks arrive contiguously and in document order - which is what
+    // small-to-big expansion walks outward through.
+    List<SectionRow> sectionChunks(List<SectionKey> keys) {
+        if (keys.isEmpty()) {
+            return List.of();
+        }
+        String pairs = keys.stream()
+                .map(key -> "(cast(? as uuid), cast(? as text))")
+                .collect(Collectors.joining(", "));
+        List<Object> args = new ArrayList<>(keys.size() * 2);
+        for (SectionKey key : keys) {
+            args.add(key.documentId());
+            args.add(key.sectionPath());
+        }
+        return jdbc.query("""
+                select document_id, section_path, id, content
+                from document_chunks
+                where (document_id, section_path) in (%s)
+                order by document_id, section_path, chunk_index
+                """.formatted(pairs), SECTION_ROW_MAPPER, args.toArray());
+    }
+
+    private static final RowMapper<SectionRow> SECTION_ROW_MAPPER = (rs, row) -> new SectionRow(
+            UUID.fromString(rs.getString("document_id")),
+            rs.getString("section_path"),
+            UUID.fromString(rs.getString("id")),
+            rs.getString("content"));
+
+    // Which section: one document, one path. A record rather than a concatenated string key so the
+    // pair that goes into the SQL and the pair that groups the results are the same object.
+    record SectionKey(UUID documentId, String sectionPath) { }
+
+    record SectionRow(UUID documentId, String sectionPath, UUID id, String content) { }
+
     // Phase 17.3 — the third ranked list: pages whose *picture* is near the query.
     //
     // The query vector is the same one the dense half searched with, embedded from the same typed
@@ -275,4 +318,124 @@ class ChunkSearchRepository {
                 limit ?
                 """.formatted(tsquery), TEXT_MAPPER, courseId, actorId, query, query, limit);
     }
+
+    // Phase 26.2 - the three candidate lists in one round trip instead of three.
+    //
+    // **This is a transport change, not a fusion change, and the distinction is the whole point.**
+    // Reciprocal Rank Fusion reads a chunk's *position within its own list*; three lists merged
+    // into one ranking is a different algorithm with the same name, and it would move every
+    // Recall@6, MRR and nDCG this project has published without failing anything. So each branch
+    // keeps its own `order by` and its own `limit`, numbers its own rows, and the service splits
+    // them back apart by the `list` column. What is saved is two network round trips to Tokyo;
+    // what is returned is byte-for-byte the three lists the three queries returned, which is what
+    // the equivalence test in the suite exists to keep true.
+    //
+    // `row_number() over ()` is deliberately given no ordering of its own. Each branch is already
+    // an `order by ... limit` subquery - a barrier Postgres materialises in order - so numbering
+    // the rows in input order is what preserves the database's own tie-breaking. A window with its
+    // own `order by` would re-sort ties and could hand back a different order from the one the
+    // limit selected.
+    //
+    // The trigram and HyDE lists stay out of it, and that is not an oversight: both are
+    // conditional and both are off, and folding a conditional query into a mandatory statement is
+    // how a switched-off stage starts costing money.
+    Candidates candidateSearch(UUID courseId, UUID actorId, String queryVectorLiteral, String query,
+                               int limit, boolean anyTerm, boolean includeVisual) {
+        String tsquery = anyTerm ? ANY_TERM_TSQUERY : "plainto_tsquery('english', ?)";
+        List<String> branches = new ArrayList<>(3);
+        List<Object> args = new ArrayList<>();
+
+        if (queryVectorLiteral != null) {
+            branches.add(denseBranch("VECTOR", "TEXT"));
+            args.add(queryVectorLiteral);
+            args.add(courseId);
+            args.add(actorId);
+            args.add(queryVectorLiteral);
+            args.add(limit);
+        }
+        branches.add(LEXICAL_BRANCH.formatted(tsquery, tsquery));
+        args.add(courseId);
+        args.add(actorId);
+        args.add(query);
+        args.add(query);
+        args.add(limit);
+        if (includeVisual && queryVectorLiteral != null) {
+            branches.add(denseBranch("VISUAL", "VISUAL"));
+            args.add(queryVectorLiteral);
+            args.add(courseId);
+            args.add(actorId);
+            args.add(queryVectorLiteral);
+            args.add(limit);
+        }
+
+        // Ordered by (list, rank) so the rows arrive grouped and in each list's own order, which
+        // makes the split below an append rather than a sort.
+        String sql = String.join("\nunion all\n", branches) + "\norder by 1, 2";
+        List<Listed> rows = jdbc.query(sql, LISTED_MAPPER, args.toArray());
+
+        List<ChunkHit> vector = new ArrayList<>();
+        List<ChunkHit> text = new ArrayList<>();
+        List<ChunkHit> visual = new ArrayList<>();
+        for (Listed row : rows) {
+            switch (row.list()) {
+                case "VECTOR" -> vector.add(row.hit());
+                case "TEXT" -> text.add(row.hit());
+                case "VISUAL" -> visual.add(row.hit());
+                default -> { }
+            }
+        }
+        return new Candidates(vector, text, visual);
+    }
+
+    // One dense branch: the same query for text chunks and for page images, differing in the
+    // modality predicate and in nothing else - the same column, the same HNSW index, the same
+    // course scope, the same READY filter, the same visibility clause, the same citation fields.
+    private static String denseBranch(String list, String modality) {
+        return """
+                select cast('%s' as text) as list, row_number() over () as rn, d.*
+                from (
+                  select c.id, c.document_id, doc.filename, doc.source, c.page_number, c.page_end,
+                         c.section_path, c.content, c.token_count, c.modality,
+                         1 - (c.embedding <=> cast(? as vector)) as cosine_similarity
+                  from document_chunks c
+                  join documents doc on doc.id = c.document_id
+                  where doc.course_space_id = ?
+                    and doc.status = 'READY'
+                    and (doc.visibility = 'COURSE' or doc.uploaded_by = ?)
+                    and c.modality = '%s'
+                    and c.embedding is not null
+                  order by c.embedding <=> cast(? as vector)
+                  limit ?
+                ) d""".formatted(list, modality);
+    }
+
+    // The lexical branch, with no similarity of its own to report - `cast(null as double
+    // precision)` is what keeps the three branches union-compatible, and it says the same thing
+    // the separate query said by leaving the field null.
+    private static final String LEXICAL_BRANCH = """
+            select cast('TEXT' as text) as list, row_number() over () as rn, d.*
+            from (
+              select c.id, c.document_id, doc.filename, doc.source, c.page_number, c.page_end,
+                     c.section_path, c.content, c.token_count, c.modality,
+                     cast(null as double precision) as cosine_similarity
+              from document_chunks c
+              join documents doc on doc.id = c.document_id
+              where doc.course_space_id = ?
+                and doc.status = 'READY'
+                and (doc.visibility = 'COURSE' or doc.uploaded_by = ?)
+                and c.modality = 'TEXT'
+                and c.content_tsv @@ %1$s
+              order by ts_rank(c.content_tsv, %2$s) desc
+              limit ?
+            ) d""";
+
+    private static final RowMapper<Listed> LISTED_MAPPER = (rs, row) -> new Listed(
+            rs.getString("list"), VECTOR_MAPPER.mapRow(rs, row));
+
+    private record Listed(String list, ChunkHit hit) { }
+
+    // The three rankings, still three. Named rather than returned as a list of lists so a caller
+    // cannot mix up which is which - the confidence gate reads the vector list's head and the
+    // lexical list's size, and those two are not interchangeable.
+    record Candidates(List<ChunkHit> vector, List<ChunkHit> text, List<ChunkHit> visual) { }
 }

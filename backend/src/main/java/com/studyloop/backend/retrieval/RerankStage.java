@@ -1,5 +1,6 @@
 package com.studyloop.backend.retrieval;
 
+import com.studyloop.backend.chat.TurnProgress;
 import com.studyloop.backend.config.RetrievalProperties;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -54,6 +55,10 @@ public class RerankStage {
         if (!enabled() || candidates.size() <= 1) {
             return truncate(candidates, topN);
         }
+        // 26.1. The count is the honest one - what the cross-encoder is about to read - and it is
+        // reported here rather than by the caller because here is the only place that knows the
+        // stage actually ran. A no-op when nothing opened a scope, which is every caller but chat.
+        TurnProgress.report(TurnProgress.ranking(candidates.size()));
 
         List<RerankClient.Ranked> ranked;
         try {

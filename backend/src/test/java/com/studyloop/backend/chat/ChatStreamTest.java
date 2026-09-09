@@ -107,6 +107,49 @@ class ChatStreamTest {
         assertTrue(body.contains("event:done"), () -> "expected a done event, got: " + body);
     }
 
+    // Phase 26.1 - the wire protocol grew a fourth event, and its whole value is that it arrives
+    // early. Before this, nothing reached the browser until the read-retrieve-gate pipeline had
+    // finished: measured against the development database that was a blank bubble for about four
+    // seconds, and then an answer.
+    @Test
+    void stagesArriveBeforeTheAnswerAndStopWhenItStarts() throws Exception {
+        String body = ask("What is dynamic programming?").body();
+
+        int firstStage = body.indexOf("event:stage");
+        int meta = body.indexOf("event:meta");
+        int firstDelta = body.indexOf("event:delta");
+
+        assertTrue(firstStage >= 0, () -> "expected a stage event, got: " + body);
+        assertTrue(firstStage < meta, () -> "a stage has to precede meta, got: " + body);
+        assertTrue(meta < firstDelta, () -> "meta still precedes the answer, got: " + body);
+        // Once text is arriving, the text is the progress report.
+        assertTrue(body.lastIndexOf("event:stage") < firstDelta,
+                () -> "no stage should follow the first token, got: " + body);
+    }
+
+    // The sentence, not a percentage. A chat turn has no denominator - 25.2 gives ingestion a bar
+    // because ingestion is counting pages and knows how many there are - so a client that found a
+    // number here would be reading one nobody measured.
+    @Test
+    void aStageEventCarriesASentenceAndNothingElse() throws Exception {
+        String body = ask("What is dynamic programming?").body();
+
+        String block = null;
+        for (String candidate : body.split("\n\n")) {
+            if (candidate.contains("event:stage")) {
+                block = candidate;
+                break;
+            }
+        }
+        assertTrue(block != null, () -> "expected a stage event, got: " + body);
+
+        String json = block.substring(block.indexOf("data:") + "data:".length()).trim();
+        JsonNode stage = objectMapper.readTree(json);
+        assertEquals(1, stage.size(), () -> "a stage event carries one field, got: " + json);
+        assertTrue(stage.get("stage").asText().startsWith("Looking for this"),
+                () -> "the first stage names the first step, got: " + json);
+    }
+
     // The same request twice: proves the async dispatch leaves nothing behind that breaks the next
     // stream on the same connection (the client reuses it by default).
     @Test

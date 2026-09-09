@@ -2,6 +2,8 @@ package com.studyloop.backend.document;
 
 import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
+import com.studyloop.backend.chat.ToolInvoker;
+import com.studyloop.backend.chat.ToolSpec;
 import com.studyloop.backend.config.ChunkingProperties;
 import com.studyloop.backend.config.ChunkingProperties.SyntheticQueries;
 import com.studyloop.backend.config.RetrievalProperties;
@@ -387,6 +389,16 @@ class SyntheticQueryTest {
         @Override
         public String streamComplete(List<LlmMessage> messages, Consumer<String> onDelta) {
             throw new UnsupportedOperationException();
+        }
+
+        // Phase 26.3 added tool calling to the interface. This stub belongs to the ingest-time
+        // synthetic query generator, which will never be offered a tool: it refuses rather than
+        // quietly returning nothing, because a silent no-op here would be a feature that stopped
+        // working without anything saying so.
+        @Override
+        public String streamWithTools(List<LlmMessage> messages, List<ToolSpec> tools,
+                                      ToolInvoker invoker, Consumer<String> onDelta) {
+            throw new UnsupportedOperationException("this stub is not a tool-calling client");
         }
     }
 }

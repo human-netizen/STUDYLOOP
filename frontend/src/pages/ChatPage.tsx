@@ -24,6 +24,10 @@ interface Turn {
   text: string
   citations: Citation[]
   streaming: boolean
+  // What the server is doing right now (Phase 26.1). Shown in place of the empty bubble while the
+  // answer is still being worked out, and replaced by the first token — at which point the text is
+  // the progress report and a status line beside it would only compete with it.
+  stage: string | null
   questionEventId: string | null
   askedBefore: AskedBefore | null
   general: boolean
@@ -81,6 +85,7 @@ export function ChatPage() {
         id,
         { question, conversationId },
         {
+          onStage: (stage) => updateLast((turn) => ({ ...turn, stage })),
           onMeta: (meta) => {
             setConversationId(meta.conversationId)
             updateLast((turn) => ({
@@ -90,13 +95,14 @@ export function ChatPage() {
               askedBefore: meta.askedBefore,
             }))
           },
-          onDelta: (text) => updateLast((turn) => ({ ...turn, text: turn.text + text })),
-          onDone: () => updateLast((turn) => ({ ...turn, streaming: false })),
+          onDelta: (text) => updateLast((turn) => ({ ...turn, text: turn.text + text, stage: null })),
+          onDone: () => updateLast((turn) => ({ ...turn, streaming: false, stage: null })),
           onError: (message) => {
             setError(message)
             updateLast((turn) => ({
               ...turn,
               streaming: false,
+              stage: null,
               text: turn.text || 'Sorry — something went wrong.',
             }))
           },
@@ -110,6 +116,7 @@ export function ChatPage() {
       updateLast((turn) => ({
         ...turn,
         streaming: false,
+        stage: null,
         text: turn.text || 'Sorry — something went wrong.',
       }))
     } finally {
@@ -222,6 +229,7 @@ const blank: Turn = {
   text: '',
   citations: [],
   streaming: false,
+  stage: null,
   questionEventId: null,
   askedBefore: null,
   general: false,
@@ -268,6 +276,16 @@ function AssistantBubble({
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-card rounded-bl-[2px] border border-line bg-surface px-4 py-3 text-sm text-ink-2">
         {turn.askedBefore && <AskedBeforeNote askedBefore={turn.askedBefore} />}
+        {/* The wait, narrated (26.1). A sentence and no bar: a chat turn has no denominator, and a
+            progress bar moving at an unpredictable rate from an unknown total invites the reader
+            to work out an arrival time from a number nobody measured. It occupies the bubble only
+            while it is the only thing there is to say. */}
+        {turn.streaming && turn.text.length === 0 && turn.stage && (
+          <p className="m-0 flex items-center gap-2 text-[13px] text-ink-muted">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ink-muted" />
+            {turn.stage}
+          </p>
+        )}
         <Markdown
           text={turn.text}
           citations={turn.citations}

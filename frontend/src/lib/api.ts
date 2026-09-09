@@ -431,10 +431,16 @@ export const invitesApi = {
 
 // --- Chat streaming -------------------------------------------------------------------------
 
-// Callbacks the caller supplies to receive the stream as it unfolds. onMeta fires once up front
-// (conversation id + citations), onDelta once per token, onDone at a clean finish, onError on
-// any failure (network, auth, or a server-side `error` event).
+// Callbacks the caller supplies to receive the stream as it unfolds. onStage fires zero or more
+// times before the answer starts, onMeta once up front (conversation id + citations), onDelta once
+// per token, onDone at a clean finish, onError on any failure (network, auth, or a server-side
+// `error` event).
+//
+// onStage is optional because it is new (Phase 26.1) and because a caller that ignores it sees
+// exactly the stream it saw before: stage events carry no state the rest of the protocol depends
+// on, and they stop of their own accord at the first token.
 export interface ChatStreamHandlers {
+  onStage?: (stage: string) => void
   onMeta: (event: ChatMetaEvent) => void
   onDelta: (text: string) => void
   onDone: (event: ChatDoneEvent) => void
@@ -457,7 +463,8 @@ async function consumeSse(response: Response, handlers: ChatStreamHandlers): Pro
     }
     if (dataLines.length === 0) return
     const data = JSON.parse(dataLines.join('\n'))
-    if (name === 'meta') handlers.onMeta(data as ChatMetaEvent)
+    if (name === 'stage') handlers.onStage?.((data as { stage: string }).stage)
+    else if (name === 'meta') handlers.onMeta(data as ChatMetaEvent)
     else if (name === 'delta') handlers.onDelta((data as { text: string }).text)
     else if (name === 'done') handlers.onDone(data as ChatDoneEvent)
     else if (name === 'error') handlers.onError((data as { message: string }).message)

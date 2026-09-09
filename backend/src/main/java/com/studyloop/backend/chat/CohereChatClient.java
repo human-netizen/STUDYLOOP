@@ -10,6 +10,7 @@ import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpServerErrorException;
@@ -21,7 +22,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 
 // Generates answers with Cohere's chat API (Command R). It's the only ChatClient, so it's a
@@ -49,13 +53,28 @@ public class CohereChatClient implements ChatClient {
     private final AiUsageRecorder usageRecorder;
     private final String apiKey;
     private final String model;
+    private final String chatUrl;
 
+    // @Autowired names the one Spring is to use. Without it a second constructor makes this
+    // class uninstantiable - the container stops guessing the moment there is a choice, and the
+    // failure is at context startup rather than at compile time.
+    @Autowired
     public CohereChatClient(ChatProperties properties, AiUsageRecorder usageRecorder) {
+        this(properties, usageRecorder, CHAT_URL);
+    }
+
+    // The same client pointed somewhere else, which exists for one reason: Phase 26.3 added a
+    // *wire protocol* to this class - four streamed event types accumulating a tool call across
+    // several fragments - and a protocol that is only exercised against the live provider is a
+    // protocol nothing checks. The suite serves canned SSE from a local socket and reads what this
+    // parses out of it.
+    CohereChatClient(ChatProperties properties, AiUsageRecorder usageRecorder, String chatUrl) {
         this.usageRecorder = usageRecorder;
         ChatProperties.Cohere cohere = properties.cohere();
         this.apiKey = cohere != null ? cohere.apiKey() : null;
         String configuredModel = cohere != null ? cohere.model() : null;
         this.model = (configuredModel == null || configuredModel.isBlank()) ? DEFAULT_MODEL : configuredModel;
+        this.chatUrl = chatUrl;
     }
 
     @Override
@@ -145,7 +164,7 @@ public class CohereChatClient implements ChatClient {
         ChatCompletion response;
         try {
             response = restClient.post()
-                    .uri(CHAT_URL)
+                    .uri(chatUrl)
                     .header("Authorization", "Bearer " + apiKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
@@ -174,13 +193,74 @@ public class CohereChatClient implements ChatClient {
             throw new ChatException("Cohere chat API key is not configured.");
         }
 
-        ChatRequest request = new ChatRequest(model, messages, true, null);
+        return text(stream(new ChatRequest(model, messages, true, null), onDelta,
+                AiOperation.CHAT_STREAM));
+    }
+
+    // Phase 26.3 - the model is offered one tool and decides whether to use it.
+    //
+    // **Two rounds at most, and the cap is structural.** The first request carries the tools; if
+    // the model answers straight away, that answer is the turn and no second call is made. If it
+    // asks for the tool, the result is appended and the conversation is re-sent **without the
+    // tools** - so the second response cannot be another tool call, and there is no runaway loop
+    // to bound with a counter that somebody has to keep correct.
+    //
+    // The two rounds bill separately on purpose: the first as CHAT_ROUTE, so /admin/costs can
+    // answer "how often did the model decide to search", and the second as CHAT_STREAM, so a
+    // grounded answer costs the same row it always did.
+    @Override
+    public String streamWithTools(List<LlmMessage> messages, List<ToolSpec> tools,
+                                  ToolInvoker invoker, Consumer<String> onDelta) {
+        if (!isConfigured()) {
+            throw new ChatException("Cohere chat API key is not configured.");
+        }
+
+        List<Tool> offered = tools.stream().map(Tool::from).toList();
+        StreamResult routed = stream(new ChatRequest(model, messages, true, null, offered), onDelta,
+                AiOperation.CHAT_ROUTE);
+        if (routed.toolCalls().isEmpty()) {
+            // The model answered from what it already knows. Its text has been streamed as it
+            // arrived, exactly like an ordinary turn - the caller is the one that knows this means
+            // the answer did not come from the course.
+            return text(routed);
+        }
+
+        List<LlmMessage> conversation = new ArrayList<>(messages);
+        conversation.add(LlmMessage.toolRequest(routed.toolCalls(), routed.toolPlan()));
+
+        ToolCall first = routed.toolCalls().get(0);
+        ToolResult outcome = invoker.invoke(first);
+        if (outcome.isSettled()) {
+            // The tool answered the question by itself - a cache hit, or the confidence gate
+            // refusing. Emitted as one fragment so the caller sees the same event sequence it sees
+            // for a generated answer, and returned without a second provider call.
+            onDelta.accept(outcome.finalAnswer());
+            return outcome.finalAnswer();
+        }
+        conversation.add(LlmMessage.toolResult(first.id(), outcome.content()));
+
+        // Anything the model asked for beyond the first is answered rather than run. A provider
+        // message is required for every call in the assistant turn - leaving one unanswered is a
+        // malformed conversation - so the refusal is the answer, and the model writes from the one
+        // result set it did get.
+        for (ToolCall extra : routed.toolCalls().subList(1, routed.toolCalls().size())) {
+            conversation.add(LlmMessage.toolResult(extra.id(), SECOND_CALL_REFUSED));
+        }
+
+        return text(stream(new ChatRequest(model, conversation, true, null), onDelta,
+                AiOperation.CHAT_STREAM));
+    }
+
+    private static final String SECOND_CALL_REFUSED =
+            "Only one search is allowed per question. Answer from the result already returned.";
+
+    // The shared streaming POST. exchange() gives us the live response stream (no buffering), so
+    // we can read Cohere's server-sent events line by line and forward each token as it lands.
+    private StreamResult stream(ChatRequest request, Consumer<String> onDelta, AiOperation operation) {
         StreamResult result;
         try {
-            // exchange() gives us the live response stream (no buffering), so we can read
-            // Cohere's server-sent events line by line and forward each token as it lands.
             result = restClient.post()
-                    .uri(CHAT_URL)
+                    .uri(chatUrl)
                     .header("Authorization", "Bearer " + apiKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.TEXT_EVENT_STREAM)
@@ -195,20 +275,38 @@ public class CohereChatClient implements ChatClient {
         } catch (RestClientException e) {
             throw new ChatException("Cohere chat request failed: " + e.getMessage(), e);
         }
-
-        if (result == null || result.text().isBlank()) {
+        if (result == null) {
             throw new ChatException("Cohere chat returned an empty response.");
         }
-        usageRecorder.record(PROVIDER, model, AiOperation.CHAT_STREAM,
-                result.inputTokens(), result.outputTokens());
+        usageRecorder.record(PROVIDER, model, operation, result.inputTokens(), result.outputTokens());
+        return result;
+    }
+
+    // A stream that produced no text produced nothing the caller can deliver.
+    private static String text(StreamResult result) {
+        if (result.text().isBlank()) {
+            throw new ChatException("Cohere chat returned an empty response.");
+        }
         return result.text().trim();
     }
 
     // Reads the SSE body: each event is a "data: {json}" line. "content-delta" events carry the
     // tokens; the closing "message-end" event carries the billed token counts, which is the only
     // place a streamed call reports what it cost.
+    //
+    // Phase 26.3 added the tool events. `tool-call-start` brings the id and the name,
+    // `tool-call-delta` brings the argument object a fragment at a time, and `tool-plan-delta`
+    // carries the model's prose about what it intends to look up.
+    //
+    // **The tool plan is accumulated and never forwarded to onDelta.** It reads like an answer and
+    // is not one - it is reasoning about what to search for, written before anything has been
+    // searched - so showing it would put an uncited paragraph on a student's screen. It is kept
+    // only because the provider wants the assistant message handed back whole. What reaches the UI
+    // in that moment is 26.1's stage sentence instead.
     private StreamResult readStream(java.io.InputStream body, Consumer<String> onDelta) {
         StringBuilder full = new StringBuilder();
+        StringBuilder plan = new StringBuilder();
+        Map<Integer, PartialCall> calls = new TreeMap<>();
         int inputTokens = 0;
         int outputTokens = 0;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
@@ -225,23 +323,53 @@ public class CohereChatClient implements ChatClient {
                 if (event == null) {
                     continue;
                 }
-                String type = event.path("type").asText();
-                if ("content-delta".equals(type)) {
-                    JsonNode text = event.path("delta").path("message").path("content").path("text");
-                    if (!text.isMissingNode() && !text.asText().isEmpty()) {
-                        full.append(text.asText());
-                        onDelta.accept(text.asText());
+                JsonNode message = event.path("delta").path("message");
+                switch (event.path("type").asText()) {
+                    case "content-delta" -> {
+                        JsonNode text = message.path("content").path("text");
+                        if (!text.isMissingNode() && !text.asText().isEmpty()) {
+                            full.append(text.asText());
+                            onDelta.accept(text.asText());
+                        }
                     }
-                } else if ("message-end".equals(type)) {
-                    JsonNode billed = event.path("delta").path("usage").path("billed_units");
-                    inputTokens = billed.path("input_tokens").asInt(0);
-                    outputTokens = billed.path("output_tokens").asInt(0);
+                    case "tool-plan-delta" -> plan.append(message.path("tool_plan").asText(""));
+                    case "tool-call-start" -> {
+                        JsonNode call = message.path("tool_calls");
+                        PartialCall partial = calls.computeIfAbsent(
+                                event.path("index").asInt(0), index -> new PartialCall());
+                        partial.id = call.path("id").asText(null);
+                        partial.name = call.path("function").path("name").asText(null);
+                        partial.arguments.append(call.path("function").path("arguments").asText(""));
+                    }
+                    case "tool-call-delta" -> {
+                        PartialCall partial = calls.computeIfAbsent(
+                                event.path("index").asInt(0), index -> new PartialCall());
+                        partial.arguments.append(
+                                message.path("tool_calls").path("function").path("arguments").asText(""));
+                    }
+                    case "message-end" -> {
+                        JsonNode billed = event.path("delta").path("usage").path("billed_units");
+                        inputTokens = billed.path("input_tokens").asInt(0);
+                        outputTokens = billed.path("output_tokens").asInt(0);
+                    }
+                    default -> {
+                        // Cohere emits lifecycle events we have no use for - message-start,
+                        // content-start, content-end, tool-call-end. Ignoring them in a default
+                        // branch rather than listing them keeps a new one from being a crash.
+                    }
                 }
             }
         } catch (IOException e) {
             throw new ChatException("Cohere chat stream read failed: " + e.getMessage(), e);
         }
-        return new StreamResult(full.toString(), inputTokens, outputTokens);
+        // A call with no name is the tail of an event whose start we never saw - dropped rather
+        // than dispatched, because invoking a tool whose name is null is a NullPointerException
+        // dressed up as a model decision.
+        List<ToolCall> toolCalls = calls.values().stream()
+                .filter(partial -> partial.name != null)
+                .map(PartialCall::build)
+                .toList();
+        return new StreamResult(full.toString(), plan.toString(), toolCalls, inputTokens, outputTokens);
     }
 
     private JsonNode parse(String json) {
@@ -279,7 +407,29 @@ public class CohereChatClient implements ChatClient {
     // switches the reply to a bare JSON object for completeJson.
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record ChatRequest(String model, List<LlmMessage> messages, boolean stream,
-                               @JsonProperty("response_format") ResponseFormat responseFormat) { }
+                               @JsonProperty("response_format") ResponseFormat responseFormat,
+                               List<Tool> tools) {
+
+        // Every call written before Phase 26.3, which offers no tools. Omitted from the JSON
+        // rather than sent empty: a `tools: []` field is a different request from no field at all,
+        // and the whole point of the tool-calling flag is that with it off the provider sees
+        // byte-for-byte the request it saw before.
+        ChatRequest(String model, List<LlmMessage> messages, boolean stream,
+                    ResponseFormat responseFormat) {
+            this(model, messages, stream, responseFormat, null);
+        }
+    }
+
+    // A tool as Cohere's request wants it: a type discriminator wrapping the name, the description
+    // the model actually reads, and the JSON Schema for its arguments.
+    private record Tool(String type, Function function) {
+
+        static Tool from(ToolSpec spec) {
+            return new Tool("function", new Function(spec.name(), spec.description(), spec.parameters()));
+        }
+
+        record Function(String name, String description, Map<String, Object> parameters) { }
+    }
 
     // Cohere's structured-output selector; type "json_object" forces a single JSON object reply.
     private record ResponseFormat(String type) {
@@ -311,6 +461,23 @@ public class CohereChatClient implements ChatClient {
         }
     }
 
-    // A finished stream: the concatenated answer plus what Cohere said it billed for.
-    private record StreamResult(String text, int inputTokens, int outputTokens) { }
+    // A finished stream: whichever of the two things the model produced — text, or a request to
+    // call a tool — plus what Cohere said it billed for. Never both: the model either answers or
+    // asks, and `toolCalls` being empty is how the caller tells which happened.
+    private record StreamResult(String text, String toolPlan, List<ToolCall> toolCalls,
+                                int inputTokens, int outputTokens) { }
+
+    // A tool call while it is still arriving. The id and the name land in one event and the
+    // arguments accumulate across several, so this is a builder rather than a record: the JSON
+    // argument object is only a document once the last fragment has been appended.
+    private static final class PartialCall {
+
+        private String id;
+        private String name;
+        private final StringBuilder arguments = new StringBuilder();
+
+        private ToolCall build() {
+            return ToolCall.function(id, name, arguments.toString());
+        }
+    }
 }

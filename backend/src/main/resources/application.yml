@@ -174,6 +174,22 @@ studyloop:
     # ~0.010 of margin either side; the number rejected in Phase 12 had one thousandth.
     # 0 disables. Override with CHAT_MIN_RELEVANCE.
     min-relevance: ${CHAT_MIN_RELEVANCE:0.32}
+    # Phase 26.3 — retrieval becomes a tool the model may call, instead of a step every question
+    # pays for whether or not it needs one.
+    #
+    # **Off, and 11.3's rule is why.** With it on, "what is the time complexity of binary search"
+    # is one provider call that starts streaming immediately instead of fifteen database round
+    # trips and two provider calls ending in a refusal — but a question the course *does* own pays
+    # one extra call, the router turn, before retrieval even begins, and that is the common kind.
+    # The flag and the measured run that justifies turning it on are two separate events; until
+    # that run says the router call costs less than 26.2 saved, this stays off and the pipeline is
+    # exactly the one every published number was measured on.
+    #
+    # What it does not change: the confidence gate still runs on the searched path, refusals still
+    # write their question_events row, the semantic cache is still probed (inside the tool now) and
+    # still holds grounded answers only. What it does change: a turn that never searched is stored
+    # as ChatRole.GENERAL and labelled on screen as not coming from the course materials.
+    tool-calling: ${CHAT_TOOL_CALLING:false}
     # Phase 18.3 — the same gate, split by what the question was asking for. Read only when
     # `studyloop.retrieval.stages.intent` is on; any bucket left at 0 falls back to min-relevance
     # above, so a half-filled block is a half-applied policy rather than an open gate.
@@ -739,3 +755,13 @@ management:
       # the instance's free disk space to them. The aggregate status still runs the db indicator,
       # so a health ping still counts as database activity; only the internals stop being shown.
       show-details: ${HEALTH_SHOW_DETAILS:always}
+
+# Phase 26.1 — where the seconds of a chat turn actually go.
+#
+# TurnProgress logs every stage transition with the milliseconds elapsed since the turn opened, so
+# one line per step answers a question this project could previously only estimate by counting call
+# sites in the source. At INFO it says nothing; set CHAT_TIMING_LOG=DEBUG for a run and read the
+# breakdown off the log.
+logging:
+  level:
+    com.studyloop.backend.chat.TurnProgress: ${CHAT_TIMING_LOG:INFO}

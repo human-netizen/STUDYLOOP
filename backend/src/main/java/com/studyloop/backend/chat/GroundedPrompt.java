@@ -40,6 +40,14 @@ final class GroundedPrompt {
     // them says. The two conditional lines are conditional for the same reason.
     static String system(List<RetrievedChunk> chunks, List<String> sources, Language language,
                          int timesAskedBefore) {
+        return instructionsFor(language, timesAskedBefore) + sourcesBlock(chunks, sources);
+    }
+
+    // The instructions half, byte-identical to what it was when it and the sources were one
+    // method. Split out in 26.3 because the tool-calling path needs the two halves at different
+    // moments: the instructions go in the system prompt before the model has decided anything, and
+    // the sources are what the tool hands back after it has.
+    static String instructionsFor(Language language, int timesAskedBefore) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("""
                 You are StudyLoop's study assistant. Answer the student's question using ONLY the \
@@ -64,6 +72,18 @@ final class GroundedPrompt {
                     .append(". Explain it a different way this time — a worked example, or the ")
                     .append("idea it is usually confused with — rather than restating it.\n");
         }
+        return prompt.toString();
+    }
+
+    // The numbered passages, exactly as the grounded prompt has always rendered them: the citation
+    // label comes from the chunk retrieval matched, and the text is the section it was expanded to.
+    //
+    // Phase 26.3 hands this same string back as the `tool` message when the model asks to search,
+    // which is the reason it is a method rather than a loop inside the prompt: **a passage must
+    // read identically whether it arrived in the system prompt or as a tool result**, or the two
+    // paths would be two products that cite differently.
+    static String sourcesBlock(List<RetrievedChunk> chunks, List<String> sources) {
+        StringBuilder prompt = new StringBuilder();
         prompt.append("""
 
                 Sources:
@@ -85,6 +105,36 @@ final class GroundedPrompt {
                 prompt.append(" · ").append(chunk.sectionPath());
             }
             prompt.append(")\n").append(sources.get(i).strip()).append("\n\n");
+        }
+        return prompt.toString();
+    }
+
+    // Phase 26.3 — the prompt for a turn where retrieval has not happened yet, because whether it
+    // happens is the model's decision.
+    //
+    // **The instruction that matters is not here, it is on the tool.** This says what to do with
+    // each outcome; the description on `search_course_materials` says when to reach for it, and
+    // that is the text the model is reading at the moment it decides. What this prompt is for is
+    // the invariant the product cannot lose either way: an answer built on sources cites them, and
+    // an answer built on nothing carries no [n] to imply that it did.
+    static String router(Language language) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("""
+                You are StudyLoop's study assistant for one university course.
+                - The course's own materials are the only source of truth for anything this course \
+                teaches. Search them whenever the question could plausibly be about them.
+                - Answer without searching only for general knowledge the course does not own \
+                — background a textbook would assume, or a question that is not about the subject.
+                - When you answer from a search result, cite every claim with its source number in \
+                square brackets, e.g. [1] or [2][3].
+                - When you answer without searching, use no citation markers at all: there are no \
+                sources behind that answer.
+                - Be concise and precise.
+                """);
+        if (language != Language.ENGLISH) {
+            prompt.append("- Write your answer in ").append(language.promptName())
+                    .append(", whatever language the sources are written in. Keep technical terms, ")
+                    .append("identifiers and the [n] citation markers exactly as they appear.\n");
         }
         return prompt.toString();
     }

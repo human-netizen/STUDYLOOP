@@ -10,6 +10,13 @@ public enum AiOperation {
     // A grounded chat answer streamed token by token. Kept apart from CHAT because the two go
     // through different provider endpoints and only one of them is on the hot path in the UI.
     CHAT_STREAM,
+    // The turn that decides whether a question needs the course materials at all (Phase 26.3).
+    // Kept apart from CHAT_STREAM for the reason QUERY_EXPANSION is kept apart from the rest of
+    // retrieval: it is a *conditional* call, and the question the dashboard has to answer about a
+    // conditional call is how often the condition fired. The ratio of this row's count to
+    // CHAT_STREAM's is the search rate - what fraction of questions the model decided the corpus
+    // could answer - and it is the number that decides whether the tool-calling flag stays on.
+    CHAT_ROUTE,
     // Per-document summary + glossary (Phase 8.2).
     SUMMARY,
     QUIZ_GENERATION,

@@ -71,7 +71,7 @@ class ConfidenceGateTest {
     void aRelevanceThresholdOfZeroDisablesTheRerankRule() {
         ConfidenceGate disabled = new ConfidenceGate(
                 new ChatProperties("cohere", new ChatProperties.Cohere("key", "command-r"),
-                        THRESHOLD, 0, null),
+                        THRESHOLD, 0, null, false),
                 retrieval(false));
 
         assertThat(disabled.shouldRefuse(reranked(oneChunk(), 0.001, 0))).isFalse();
@@ -135,7 +135,7 @@ class ConfidenceGateTest {
 
     private static ChatProperties chatProperties(double threshold, ChatProperties.Intent buckets) {
         return new ChatProperties("cohere", new ChatProperties.Cohere("key", "command-r"),
-                threshold, RELEVANCE, buckets);
+                threshold, RELEVANCE, buckets, false);
     }
 
     private static RetrievalProperties retrieval(boolean intentStage) {

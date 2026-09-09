@@ -2,11 +2,12 @@ package com.studyloop.backend.retrieval;
 
 import com.studyloop.backend.config.RetrievalProperties;
 import com.studyloop.backend.course.CourseAccess;
+import com.studyloop.backend.course.Membership;
+import com.studyloop.backend.retrieval.ChunkSearchRepository.Candidates;
 import com.studyloop.backend.document.EmbeddingClient;
 import com.studyloop.backend.document.VectorSupport;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,6 +39,13 @@ import java.util.UUID;
 // RRF counts lists, so two sparse retrievers that mostly agree give the sparse side two votes to
 // the dense side's one on every correctly spelled question — the stage's whole justification is
 // the questions where the lexeme list returns nothing at all, and its cost is on all the others.
+// **Phase 26.2 took the transaction off these methods, and it is the union query above that
+// made that safe.** They were `@Transactional(readOnly = true)` to keep three or four candidate
+// queries on one connection; there is now one. What the annotation was still doing was holding a
+// pooled Supabase connection open across the *rerank* call — a cross-encoder round trip to the US
+// with one of five connections pinned for it — which is a capacity bug that never shows up locally
+// because there is never a sixth concurrent question. A read that is a single statement needs no
+// transaction to be consistent, and the provider call now runs with no connection in hand.
 @Service
 @RequiredArgsConstructor
 public class RetrievalService {
@@ -66,7 +74,6 @@ public class RetrievalService {
 
     // Any course member may search the course's materials. Returns the fused top-`limit`
     // chunks, best-first; an empty/blank query or a course with no matching chunks yields [].
-    @Transactional(readOnly = true)
     public List<RetrievedChunk> retrieve(UUID actorId, UUID courseId, String query, int limit) {
         return search(actorId, courseId, query, limit).chunks();
     }
@@ -74,7 +81,6 @@ public class RetrievalService {
     // Like retrieve, but also reports the raw confidence signals (best cosine similarity and
     // lexical hit count) the chat layer's gate needs. Both searches run once; the fused chunks
     // and the signals come from the same candidate lists, so there's no extra query.
-    @Transactional(readOnly = true)
     public RetrievalResult search(UUID actorId, UUID courseId, String query, int limit) {
         return search(actorId, courseId, query, null, limit);
     }
@@ -82,10 +88,26 @@ public class RetrievalService {
     // The same search, reusing a query embedding the caller already has. Chat embeds a question
     // once — to probe the semantic cache — and hands the vector down here, so a cache miss costs
     // one embedding call instead of embedding the identical string twice. Pass null to embed here.
-    @Transactional(readOnly = true)
     public RetrievalResult search(UUID actorId, UUID courseId, String query, float[] queryVector, int limit) {
         courseAccess.requireMember(actorId, courseId);
         return run(actorId, courseId, query, queryVector, limit);
+    }
+
+    // Phase 26.2 — the same search for a caller that has *already* proved membership and is
+    // holding the proof.
+    //
+    // **This is not "skip the check", and the signature is the argument.** It takes the
+    // `Membership` itself rather than a boolean or a flag, so the only way to call it is to have
+    // the object the check produces — and the course and the actor are read off that object rather
+    // than passed alongside it, which means the scope of the search cannot disagree with the scope
+    // of the proof. `search` above still checks, because it is public API reached from a
+    // controller; `searchAsCourse` below still has nobody to check.
+    //
+    // It exists because a chat turn was doing the membership lookup twice, one WAN round trip
+    // apart: `ChatService.prepare` resolved it, held the result, and then handed the same pair to
+    // `search`, whose first line resolved it again.
+    public RetrievalResult searchAsMember(Membership member, String query, float[] queryVector, int limit) {
+        return run(member.getUser().getId(), member.getCourseSpace().getId(), query, queryVector, limit);
     }
 
     // The same search with no member behind it, for work the course itself triggers rather than a
@@ -99,7 +121,6 @@ public class RetrievalService {
     // out of step with these. Membership is not checked because there is nobody to check; what
     // replaces it is that this method is reachable only from server-side triggers and takes no
     // actor to be wrong about.
-    @Transactional(readOnly = true)
     public RetrievalResult searchAsCourse(UUID courseId, String query, int limit) {
         return run(NOBODY, courseId, query, null, limit);
     }
@@ -118,21 +139,25 @@ public class RetrievalService {
         // degrades gracefully to full-text alone rather than failing.
         float[] vector = queryVector != null ? queryVector
                 : embeddingClient.isConfigured() ? embeddingClient.embedQuery(trimmed) : null;
-        List<ChunkHit> vectorHits = vector != null
-                ? searchRepository.vectorSearch(
-                        courseId, actorId, VectorSupport.toLiteral(vector), CANDIDATES_PER_SOURCE)
-                : List.of();
 
-        // Lexical half.
-        // The actor is passed to both halves, not just checked above: membership decides whether
+        // Phase 26.2 — the dense, lexical and visual candidate lists in **one** round trip.
+        //
+        // The actor is passed to all three, not just checked above: membership decides whether
         // this course may be searched at all, and Phase 16.3's visibility decides which of its
         // documents this member may be answered from. A private note is retrievable for the person
         // who photographed it and invisible to everyone else, in one clause inside the SQL.
         // 19.2's switch is here rather than inside the repository: which form the sparse half
         // takes is a pipeline decision, and the eval report's header prints it beside the stages
         // so that two runs can be told apart by what produced them.
-        List<ChunkHit> textHits = searchRepository.fullTextSearch(
-                courseId, actorId, trimmed, CANDIDATES_PER_SOURCE, properties.stages().lexicalOr());
+        //
+        // **The three come back as three lists and are used as three lists.** The union is how
+        // they travel, not how they are ranked — see the repository for why that distinction is
+        // load-bearing for every eval number this project has published.
+        Candidates candidates = searchRepository.candidateSearch(
+                courseId, actorId, vector == null ? null : VectorSupport.toLiteral(vector), trimmed,
+                CANDIDATES_PER_SOURCE, properties.stages().lexicalOr(), visualStage.enabled());
+        List<ChunkHit> vectorHits = candidates.vector();
+        List<ChunkHit> textHits = candidates.text();
 
         // Vector hits come back best-first, so the head is the strongest semantic match. Empty
         // when no embedding provider ran, which the gate reads as "no semantic signal".
@@ -150,8 +175,10 @@ public class RetrievalService {
         // Third list (17.3): pages whose *picture* is near the query, searched with the vector the
         // dense half already embedded. Empty when the stage is off, which is what makes the A/B a
         // property change — `fuse` is list-count agnostic, so turning it on is a caller change and
-        // nothing more.
-        List<ChunkHit> visualHits = visualStage.search(courseId, actorId, vector);
+        // nothing more. Since 26.2 the stage decides whether the branch is in the statement at all
+        // rather than whether a second statement runs, which is the same switch costing one fewer
+        // round trip.
+        List<ChunkHit> visualHits = candidates.visual();
 
         // Fourth list (18.1): chunks holding a near-spelling of one of the question's distinctive
         // words. It exists for the case the lexical half above returns *nothing* — a typo does not

@@ -18,7 +18,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 // usable gap so narrow: see the record below.
 @ConfigurationProperties(prefix = "studyloop.chat")
 public record ChatProperties(String provider, Cohere cohere, double minSimilarity, double minRelevance,
-                             Intent intent) {
+                             Intent intent,
+                             // Phase 26.3 - retrieval becomes a tool the model may call instead of
+                             // a step every question pays for. **Off by default, and 11.3's rule
+                             // is why**: it removes a provider call from a question the course
+                             // does not own and adds one to a question it does, and the second
+                             // kind is the common one. The flag and the measured run that
+                             // justifies turning it on are two separate events.
+                             boolean toolCalling) {
 
     public ChatProperties {
         if (intent == null) {

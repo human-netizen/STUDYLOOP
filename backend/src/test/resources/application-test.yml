@@ -14,6 +14,29 @@ spring:
     url: ${TEST_DB_URL}
     username: ${TEST_DB_USERNAME}
     password: ${TEST_DB_PASSWORD}
+    # Phase 26.4 — **the arithmetic that decides this is contexts × pool, not tests × anything.**
+    #
+    # Spring caches one ApplicationContext per distinct test configuration and never closes them
+    # while the suite runs, so every `@TestConfiguration` and every `properties = ...` override is
+    # another Hikari pool held open until the JVM exits. Main's pool is 5, and Hikari's `minimumIdle`
+    # defaults to `maximumPoolSize` — so each pool *eagerly opens five connections and keeps them*.
+    # Seven contexts fitted inside Supabase's fifteen-client session-pooler cap by luck; the eighth
+    # did not, and the symptom is the least helpful one available: a context that fails to start
+    # with "Connection is not available, request timed out after 30001ms" in a test class that
+    # touched nothing to do with connections.
+    #
+    # Two numbers, and the first is the one that matters. `minimum-idle: 1` means a context that is
+    # not running holds one connection instead of five, which is what makes the count scale with
+    # contexts *in use* rather than contexts that exist. `maximum-pool-size: 3` is enough for the
+    # widest thing the suite does — a real-port test whose request thread, ingestion executor and
+    # chat stream executor can all want a connection at once — and small enough that two such
+    # contexts running back to back cannot reach the cap between them.
+    hikari:
+      minimum-idle: 1
+      maximum-pool-size: 3
+      # Drop back to the minimum quickly once a test class is done, rather than holding three
+      # connections for Hikari's default ten minutes while the next context tries to start.
+      idle-timeout: 30000
 
 # The one exception to "only the datasource is redirected", added in Phase 12.1 for the same
 # reason. The rerank stage ships on, and unlike the embedding and chat clients it is reached by
