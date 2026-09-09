@@ -38,6 +38,14 @@ public record DocumentResponse(
         // Phase 19.1. ENGLISH until extraction has run, and ENGLISH afterwards for everything the
         // detector did not find Bengali script in — so this is never null and never unknown.
         Language language,
+        // Phase 29.2 — the course document this one most resembles, and the share of its sampled
+        // passages that were already there. Both null for almost everything.
+        //
+        // The id without the filename, deliberately: every caller of this DTO is rendering a list
+        // of the same course's documents and already holds the name, so resolving it here would be
+        // a join per row to send back a string the client has in hand.
+        UUID nearDuplicateOfId,
+        Double nearDuplicateScore,
         UUID uploadedById,
         Instant createdAt,
         Instant updatedAt
@@ -62,6 +70,8 @@ public record DocumentResponse(
                 document.getLastPage(),
                 document.getDegradedPages(),
                 document.getLanguage(),
+                document.getNearDuplicateOf(),
+                document.getNearDuplicateScore(),
                 document.getUploadedBy().getId(),
                 document.getCreatedAt(),
                 document.getUpdatedAt()

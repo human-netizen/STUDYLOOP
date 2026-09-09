@@ -147,6 +147,14 @@ export interface DocumentResponse {
   // ENGLISH until extraction has run, and ENGLISH afterwards for everything the detector found no
   // Bengali script in — never null and never unknown.
   language: DocumentLanguage
+  // Phase 29.2 — the course document this one most resembles, and the share of its sampled
+  // passages that were already there. Null for almost everything, and advisory when set: nothing
+  // was refused, and the exact-byte constraint is a separate and certain check.
+  //
+  // The id without a filename on purpose: the page rendering this holds the whole document list
+  // already, so the name is a lookup rather than a round trip.
+  nearDuplicateOfId: string | null
+  nearDuplicateScore: number | null
   uploadedById: string
   createdAt: string
   updatedAt: string

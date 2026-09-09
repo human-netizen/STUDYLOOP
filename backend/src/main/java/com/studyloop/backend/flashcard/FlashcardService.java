@@ -180,6 +180,16 @@ public class FlashcardService {
                 .toList();
     }
 
+    // Phase 29.1. The same deck as `list`, in the format Anki reads. It is the same query and the
+    // same ownership rule on purpose: an export is a view of what the caller can already see, so
+    // there is nothing here for it to leak.
+    @Transactional(readOnly = true)
+    public String exportCsv(UUID actorId, UUID courseId) {
+        courseAccess.requireMember(actorId, courseId);
+        return FlashcardCsv.of(
+                flashcardRepository.findByCourseSpaceIdAndCreatedByIdOrderByCreatedAtDesc(courseId, actorId));
+    }
+
     @Transactional
     public void delete(UUID actorId, UUID courseId, UUID cardId) {
         courseAccess.requireMember(actorId, courseId);

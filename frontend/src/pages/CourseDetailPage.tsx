@@ -31,6 +31,7 @@ import {
   TextArea,
 } from '../components/ui'
 import { PdfFilmstrip } from '../components/PdfFilmstrip'
+import { useJobWatch } from '../lib/jobs'
 import { estimateFor, pageCountOf } from '../lib/pdf'
 import { cx, linkButton } from '../lib/style'
 
@@ -48,6 +49,7 @@ export function CourseDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [managing, setManaging] = useState(false)
+  const { watch } = useJobWatch()
 
   useEffect(() => {
     let active = true
@@ -86,15 +88,25 @@ export function CourseDetailPage() {
 
   // Merge an uploaded/updated document into the list: replace an existing row (re-upload of
   // an identical file returns the same id) or prepend a new one.
-  const mergeDocument = useCallback((doc: DocumentResponse) => {
-    setDocuments((current) => {
-      const index = current.findIndex((existing) => existing.id === doc.id)
-      if (index === -1) return [doc, ...current]
-      const next = current.slice()
-      next[index] = doc
-      return next
-    })
-  }, [])
+  const mergeDocument = useCallback(
+    (doc: DocumentResponse) => {
+      setDocuments((current) => {
+        const index = current.findIndex((existing) => existing.id === doc.id)
+        if (index === -1) return [doc, ...current]
+        const next = current.slice()
+        next[index] = doc
+        return next
+      })
+      // Phase 29.4. Every ingest starts here — an upload and a re-ingest both land in this one
+      // function — so this is the only place that has to know a long job began. The page's own
+      // poll above keeps the row moving while you are looking at it; the watch is what carries on
+      // when you are not.
+      if (IN_FLIGHT.includes(doc.status)) {
+        watch({ kind: 'document', courseId: id, id: doc.id, label: doc.filename })
+      }
+    },
+    [id, watch],
+  )
 
   // Phase 27.3. Dropped from the list rather than re-fetched: the row is gone, and a poll to
   // confirm it would be a request whose only possible answer is the one we already have.
@@ -170,6 +182,13 @@ export function CourseDetailPage() {
                     courseId={id}
                     document={doc}
                     canManage={canManage}
+                    /* Phase 29.2. The name is resolved here rather than sent with the row: this
+                       list already holds every document in the course, so asking the server to
+                       join for a filename we have would be a query per row for nothing. Null when
+                       the match points at a document this member cannot see. */
+                    resembles={
+                      documents.find((other) => other.id === doc.nearDuplicateOfId)?.filename ?? null
+                    }
                     onChanged={mergeDocument}
                     onDeleted={dropDocument}
                   />
@@ -407,12 +426,14 @@ function DocumentRow({
   courseId,
   document,
   canManage,
+  resembles,
   onChanged,
   onDeleted,
 }: {
   courseId: string
   document: DocumentResponse
   canManage: boolean
+  resembles: string | null
   onChanged: (doc: DocumentResponse) => void
   onDeleted: (documentId: string) => void
 }) {
@@ -497,6 +518,18 @@ function DocumentRow({
           )}
           {document.status === 'FAILED' && document.errorMessage && (
             <p className="m-0 mt-1 text-[12px] text-bad">{document.errorMessage}</p>
+          )}
+          {/* Phase 29.2 — said, never acted on. The upload was accepted, the document answers
+              questions, and this is a remark a person can act on or ignore. Worded as an
+              observation rather than a warning for that reason: two similar lectures are a
+              legitimate thing for a course to have, and the reader is the one who knows which
+              this is. */}
+          {resembles && document.nearDuplicateScore != null && (
+            <p className="m-0 mt-1 text-[12px] text-ink-2">
+              Looks like <span className="font-mono">{resembles}</span> —{' '}
+              {Math.round(document.nearDuplicateScore * 100)}% of the passages sampled here are
+              already in it.
+            </p>
           )}
         </div>
       </div>

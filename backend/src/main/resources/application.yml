@@ -548,6 +548,22 @@ studyloop:
     # fixture chapters contain zero image XObjects across all 306 pages, because a LaTeX book draws
     # its diagrams. A rule under a heading is one or two segments; a tree diagram is hundreds.
     min-vector-segments: ${VISUAL_MIN_VECTOR_SEGMENTS:150}
+  # Phase 29.2 — "you already have this lecture". After a document is embedded, its chunks are
+  # compared against the rest of the course's and the closest existing document is *reported* on
+  # the row. Never enforced: a course's corpus is curated by a person, and two similar lectures are
+  # a legitimate thing to have. Exact-byte duplicates are still refused by the unique constraint on
+  # (course, sha256) — that is a different claim and a certain one.
+  duplicates:
+    enabled: ${DUPLICATES_ENABLED:true}
+    # Cosine similarity two passages must reach before one counts as already present. Provisional:
+    # the run that sets it is NearDuplicateThresholdTest, which needs a real embedder.
+    chunk-floor: ${DUPLICATES_CHUNK_FLOOR:0.93}
+    # Share of the sampled passages that must clear the floor before anything is said. This is the
+    # number that separates a re-export of one lecture from two chapters sharing an example.
+    report-threshold: ${DUPLICATES_REPORT_THRESHOLD:0.60}
+    # Chunks probed per document, spread evenly through it. One nearest-neighbour lookup each, on
+    # the HNSW index the retriever already maintains.
+    sample-chunks: ${DUPLICATES_SAMPLE_CHUNKS:120}
   summary:
     # Phase 8.2: after a document reaches READY, generate its summary + glossary once and cache
     # them. Costs one chat call per document, never repeated. Set false (SUMMARY_AUTO_GENERATE)

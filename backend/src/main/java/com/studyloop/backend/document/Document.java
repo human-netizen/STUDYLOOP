@@ -114,6 +114,20 @@ public class Document {
     @Column(name = "degraded_pages", nullable = false)
     private int degradedPages;
 
+    // Phase 29.2. The existing course document this one most resembles, and how much of it was
+    // already there. Advisory: nothing reads these to make a decision, and no upload is ever
+    // refused on their strength — a course's corpus is curated by a person, and two similar
+    // lectures are a legitimate thing to have.
+    //
+    // A plain column rather than a mapped relationship, for the reason `sourceDocumentId` on
+    // Flashcard is one: reading a document's row must not drag another document in behind it, and
+    // the database nulls this on delete without needing a fetch to do it.
+    @Column(name = "near_duplicate_of")
+    private UUID nearDuplicateOf;
+
+    @Column(name = "near_duplicate_score")
+    private Double nearDuplicateScore;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DocumentStatus status;

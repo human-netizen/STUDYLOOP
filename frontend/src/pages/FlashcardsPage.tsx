@@ -18,6 +18,7 @@ import {
   SectionHead,
   Select,
 } from '../components/ui'
+import { filenameSafe, saveBlob } from '../lib/download'
 import { cx } from '../lib/style'
 
 // A member's personal flashcards for a course: generate a deck from one ready document, add a
@@ -30,6 +31,8 @@ export function FlashcardsPage() {
   const [cards, setCards] = useState<Flashcard[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -66,6 +69,23 @@ export function FlashcardsPage() {
     }
   }
 
+  // Phase 29.1. The deck leaves as a file. Saved under the course's name rather than the server's
+  // own filename, which is a UUID — this is the name the reader has to find again in a downloads
+  // folder six weeks from now.
+  async function exportDeck() {
+    setExporting(true)
+    setExportError(null)
+    try {
+      const blob = await flashcardsApi.exportCsv(id)
+      const stem = course ? `${filenameSafe(course.name, 'course')} flashcards` : 'flashcards'
+      saveBlob(blob, `${stem}.csv`)
+    } catch (err) {
+      setExportError(err instanceof ApiError ? err.message : 'Could not export the deck.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <AppShell courseName={course?.name}>
       <PageTitle
@@ -92,7 +112,20 @@ export function FlashcardsPage() {
               index="02 · Deck"
               title="Your cards"
               description={cards.length > 0 ? `${cards.length} saved` : undefined}
+              action={
+                cards.length > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={exporting}
+                    onClick={() => void exportDeck()}
+                  >
+                    {exporting ? 'Exporting…' : 'Export for Anki'}
+                  </Button>
+                ) : undefined
+              }
             />
+            {exportError && <ErrorText>{exportError}</ErrorText>}
             {cards.length === 0 ? (
               <Empty>No cards yet — generate a deck, add one by hand, or save an answer from chat.</Empty>
             ) : (

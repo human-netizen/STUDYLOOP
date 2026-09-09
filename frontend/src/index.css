@@ -335,3 +335,75 @@ select {
   inset: 0;
   transform: rotateY(180deg);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Print (Phase 29.1) — a quiz, and an attempt at it, on paper.
+
+   22.3 chose a print stylesheet over a server-side PDF renderer, and this is that
+   choice honoured: no dependency, no font packaging, no second layout engine that
+   would have to be kept in step with this one. The browser already has one.
+
+   Everything here is structural. Per-element decisions — which controls disappear
+   — are `print:hidden` at the call site, where the reason is visible.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* The app is a single dark theme (see the token block at the top), so printing it
+     unchanged would be light text on a white page: nothing at all. Every colour in
+     the app resolves through these names and `@theme inline` keeps the utilities
+     pointing at the variables, so re-pointing them here repaints the whole document
+     for paper without touching a component. */
+  :root {
+    --ground: #ffffff;
+    --ground-2: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #ffffff;
+
+    --ink: #000000;
+    --ink-2: #1f2937;
+    --ink-muted: #4b5563;
+
+    --line: rgb(0 0 0 / 0.28);
+    --line-soft: rgb(0 0 0 / 0.15);
+    --line-strong: rgb(0 0 0 / 0.55);
+
+    /* Marking is the one thing that must survive a black-and-white printer, so
+       correct and incorrect stop relying on hue alone being visible. */
+    --ok: #14653c;
+    --ok-bg: #ffffff;
+    --bad: #9b1c1c;
+    --bad-bg: #ffffff;
+    --warn: #92400e;
+    --warn-bg: #ffffff;
+
+    --accent: #000000;
+    --accent-deep: #000000;
+    --on-accent: #ffffff;
+    --elev: none;
+
+    color-scheme: light;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  /* The shell is a 232px rail beside a column. On paper there is no rail, so the
+     column is the page. */
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* A question split across a page break is a question that gets misread. */
+  li,
+  figure,
+  pre {
+    break-inside: avoid;
+  }
+
+  /* Internal links only; a printed URL beside each one is noise. */
+  a[href]::after {
+    content: none !important;
+  }
+}

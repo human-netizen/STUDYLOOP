@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useParams } from 'react-router-dom'
 import { coursesApi, reviewApi, videosApi } from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { useJobBadge } from '../lib/jobs'
 import { Button, Eyebrow } from './ui'
 import { cx } from '../lib/style'
 import type { MembershipRole } from '../lib/types'
@@ -45,9 +46,13 @@ function Rail({ courseName }: { courseName?: string }) {
   const courseRole = useCourseRole(courseId)
   const teaches = courseRole === 'OWNER' || courseRole === 'INSTRUCTOR'
   const videos = useVideoEnabled(courseId)
+  // Phase 29.4 — a long job that finished while you were on another page. Cleared by arriving at
+  // the page it belongs to, which is what makes it a signal rather than a counter.
+  const ingested = useJobBadge(courseId, 'document')
+  const rendered = useJobBadge(courseId, 'video')
 
   return (
-    <aside className="flex flex-col gap-6 border-b border-line bg-ground-2 px-5 py-6 sm:px-8 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:py-8 lg:pr-5 lg:pl-7">
+    <aside className="flex flex-col gap-6 border-b border-line bg-ground-2 px-5 py-6 print:hidden sm:px-8 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:py-8 lg:pr-5 lg:pl-7">
       <Link to="/" className="no-underline">
         <span className="block font-display text-[19px] leading-[1.05] font-bold tracking-[-0.03em] text-ink">
           Study
@@ -65,7 +70,7 @@ function Rail({ courseName }: { courseName?: string }) {
             <div className="hidden pt-4 pb-1 lg:block">
               <Eyebrow className="truncate px-1.5">{courseName ?? 'Course'}</Eyebrow>
             </div>
-            <RailLink to={`/courses/${courseId}`} index="03" label="Overview" end />
+            <RailLink to={`/courses/${courseId}`} index="03" label="Overview" end badge={ingested} />
             <RailLink to={`/courses/${courseId}/chat`} index="04" label="Ask" />
             {/* Directly under Ask, because that is where threads come from: the forum is what a
                 refusal turns into. */}
@@ -80,7 +85,7 @@ function Rail({ courseName }: { courseName?: string }) {
                 was told about. Same rule as Confusion and Spend, for a different reason — those
                 are hidden by role, this one by whether the machine can do it at all. */}
             {videos && (
-              <RailLink to={`/courses/${courseId}/videos`} index="09" label="Video" />
+              <RailLink to={`/courses/${courseId}/videos`} index="09" label="Video" badge={rendered} />
             )}
             {/* Phase 16.3. Every member has one, and what is in it is theirs until a manager
                 promotes it — so this is not gated the way Confusion and Spend are. */}

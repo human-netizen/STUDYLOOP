@@ -33,6 +33,7 @@ public class DocumentIngestionService {
     private final DocumentChunkService chunkService;
     private final DocumentEmbeddingService embeddingService;
     private final DocumentSummaryService summaryService;
+    private final NearDuplicateDetector nearDuplicateDetector;
     private final SummaryProperties summaryProperties;
     private final SemanticCacheService semanticCache;
     private final ForumWatchService forumWatch;
@@ -137,6 +138,12 @@ public class DocumentIngestionService {
         // asked and were told no. Same trigger, same reasoning, and the only difference is whether
         // anybody has to come back and ask again to find out.
         forumWatch.sweep(courseId, documentId);
+        // Phase 29.2, and here rather than earlier because it is the first moment the question can
+        // be asked: the comparison is between this document's vectors and the course's, and the
+        // vectors were written by the step above. Reported on the row, never enforced — and it
+        // swallows its own failure, like the summary, because a document that is already answering
+        // questions must not be marked FAILED by a remark about it.
+        nearDuplicateDetector.report(courseId, documentId);
         summarizeQuietly(courseId, documentId);
     }
 

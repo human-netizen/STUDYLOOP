@@ -5,6 +5,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import type { Citation } from '../lib/types'
+import { CitationPreview } from './CitationPreview'
 import { rehypeHighlight } from '../lib/highlight'
 import { cx } from '../lib/style'
 import 'katex/dist/katex.min.css'
@@ -205,17 +206,19 @@ function splitMarkers(
       return <Fragment key={index}>{part}</Fragment>
     }
     return (
-      <button
-        key={index}
-        type="button"
-        onClick={() => onCite(citation)}
-        className={cx(
-          'tnum mx-0.5 cursor-pointer rounded-[3px] border border-accent-deep bg-surface-2 px-1 align-baseline',
-          'font-mono text-[10.5px] text-ink transition duration-150 hover:bg-accent hover:text-on-accent',
-        )}
-      >
-        {part}
-      </button>
+      // Phase 29.5 — the passage on hover, the page on click.
+      <CitationPreview key={index} citation={citation}>
+        <button
+          type="button"
+          onClick={() => onCite(citation)}
+          className={cx(
+            'tnum mx-0.5 cursor-pointer rounded-[3px] border border-accent-deep bg-surface-2 px-1 align-baseline',
+            'font-mono text-[10.5px] text-ink transition duration-150 hover:bg-accent hover:text-on-accent',
+          )}
+        >
+          {part}
+        </button>
+      </CitationPreview>
     )
   })
 }

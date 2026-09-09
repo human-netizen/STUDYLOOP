@@ -80,14 +80,23 @@ export function QuizPage() {
 
       {quiz && (
         <>
-          <div className="mb-8">
-            <Eyebrow className="mb-2">
-              {quiz.questions.length} question{quiz.questions.length === 1 ? '' : 's'}
-              {!result && ` · ${answered} answered`}
-            </Eyebrow>
-            <h1 className="m-0 text-[clamp(30px,3.8vw,46px)] leading-[1] tracking-[-0.035em]">
-              {quiz.title}
-            </h1>
+          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
+              <Eyebrow className="mb-2">
+                {quiz.questions.length} question{quiz.questions.length === 1 ? '' : 's'}
+                {!result && ` · ${answered} answered`}
+              </Eyebrow>
+              <h1 className="m-0 text-[clamp(30px,3.8vw,46px)] leading-[1] tracking-[-0.035em]">
+                {quiz.title}
+              </h1>
+            </div>
+            {/* Phase 29.1 — the two things worth printing are a blank quiz to sit an exam on
+                paper and a marked attempt to revise from, and they are the same page before and
+                after grading. No endpoint and no renderer: `@media print` in index.css repaints
+                the dark theme for paper, and the controls hide themselves. */}
+            <Button variant="ghost" size="sm" className="print:hidden" onClick={() => window.print()}>
+              Print
+            </Button>
           </div>
 
           {result && (
@@ -119,7 +128,7 @@ export function QuizPage() {
           </ol>
 
           {!result && (
-            <div className="mt-8 border-t border-line pt-6">
+            <div className="mt-8 border-t border-line pt-6 print:hidden">
               <Button variant="primary" onClick={() => void submit()} disabled={submitting}>
                 {submitting ? 'Grading…' : 'Submit answers'}
               </Button>
@@ -158,7 +167,7 @@ function ScoreBanner({
         </div>
         <div className="flex items-center gap-4">
           <span className="tnum font-mono text-[13px] text-ink-2">{pct}%</span>
-          <Button onClick={onRetake}>Retake</Button>
+          <Button className="print:hidden" onClick={onRetake}>Retake</Button>
         </div>
       </div>
       {/* One thin accent bar — the only place a percentage gets drawn. */}

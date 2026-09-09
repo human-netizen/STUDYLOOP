@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, chatApi, coursesApi, errorMessage, flashcardsApi, forumApi } from '../lib/api'
 import type { AskedBefore, Citation, CourseResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
+import { CitationPreview } from '../components/CitationPreview'
 import { Markdown } from '../components/Markdown'
 import { PdfViewer, pdfTargetOf, type PdfTarget } from '../components/PdfViewer'
 import { Button, ErrorText, Eyebrow } from '../components/ui'
@@ -339,21 +340,27 @@ function AssistantBubble({
 function SourceLink({ citation, onCite }: { citation: Citation; onCite: (c: Citation) => void }) {
   if (citation.documentSource === 'FORUM') {
     return (
-      <span className="tnum block font-mono text-[11.5px] text-ink-muted">
-        [{citation.index}] {citation.filename} · answered by the class
-      </span>
+      // A forum source has no page to open, which makes the preview the only way to read it at
+      // all — the one place where hovering is not a shortcut but the whole affordance.
+      <CitationPreview citation={citation}>
+        <span className="tnum block font-mono text-[11.5px] text-ink-muted">
+          [{citation.index}] {citation.filename} · answered by the class
+        </span>
+      </CitationPreview>
     )
   }
   return (
-    <button
-      type="button"
-      onClick={() => onCite(citation)}
-      className="tnum cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-[11.5px] text-ink-muted underline decoration-transparent underline-offset-2 transition duration-150 hover:text-ink hover:decoration-accent"
-    >
-      [{citation.index}] {citation.filename}
-      {citation.pageNumber != null && ` · p.${citation.pageNumber}`}
-      {citation.visual && ' · figure'}
-    </button>
+    <CitationPreview citation={citation}>
+      <button
+        type="button"
+        onClick={() => onCite(citation)}
+        className="tnum cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-[11.5px] text-ink-muted underline decoration-transparent underline-offset-2 transition duration-150 hover:text-ink hover:decoration-accent"
+      >
+        [{citation.index}] {citation.filename}
+        {citation.pageNumber != null && ` · p.${citation.pageNumber}`}
+        {citation.visual && ' · figure'}
+      </button>
+    </CitationPreview>
   )
 }
 

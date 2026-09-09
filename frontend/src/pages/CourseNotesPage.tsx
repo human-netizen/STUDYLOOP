@@ -17,6 +17,7 @@ import {
   Rows,
   SectionHead,
 } from '../components/ui'
+import { saveBlob } from '../lib/download'
 import { cx } from '../lib/style'
 
 // Phase 16.3 — photograph a page of your notes, have it read, and decide what happens to it.
@@ -137,9 +138,13 @@ function NoteDropzone({
   onUploaded: () => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A phone, a tablet, or anything else driven by a finger. Read once: it cannot change without
+  // a reload, and `matchMedia` is absent in a test renderer.
+  const [canCapture] = useState(() => window.matchMedia?.('(pointer: coarse)').matches === true)
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
@@ -192,10 +197,35 @@ function NoteDropzone({
         </p>
         <Meta>or click to browse · PNG or JPEG</Meta>
       </div>
+
+      {/* Phase 29.3 — the note is on paper and the camera is in the same hand as the browser.
+          A second input rather than `capture` on the one above: on Android, `capture` opens the
+          camera *instead of* the picker, so putting it on the only input would take away the path
+          for a photo already taken. Shown on coarse-pointer devices only, since a desktop browser
+          ignores the attribute and would get a button that does what the dropzone does. */}
+      {canCapture && (
+        <div className="mt-3 flex justify-center">
+          <Button variant="ghost" size="sm" disabled={uploading} onClick={() => cameraRef.current?.click()}>
+            Take a photo
+          </Button>
+        </div>
+      )}
+
       <input
         ref={inputRef}
         type="file"
         accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+        className="hidden"
+        onChange={(event) => {
+          void handleFiles(event.target.files)
+          event.target.value = ''
+        }}
+      />
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+        capture="environment"
         className="hidden"
         onChange={(event) => {
           void handleFiles(event.target.files)
@@ -267,19 +297,14 @@ function NoteRow({
     }
   }
 
-  // The browser cannot fetch this with a bearer token from a plain link, so the bytes come back
-  // as a Blob and are handed to a temporary object URL — the same trick the PDF viewer uses.
+  // The bytes come back as a Blob because a bearer-authenticated route cannot be a plain link;
+  // `saveBlob` is where that and the anchor it needs live (Phase 29.1).
   async function downloadLatex() {
     setBusy(true)
     setError(null)
     try {
       const blob = await notesApi.latex(courseId, note.id)
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = `${note.filename.replace(/\.[^.]+$/, '')}.tex`
-      anchor.click()
-      URL.revokeObjectURL(url)
+      saveBlob(blob, `${note.filename.replace(/\.[^.]+$/, '')}.tex`)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not export this note.')
     } finally {

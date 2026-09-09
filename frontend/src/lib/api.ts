@@ -391,6 +391,9 @@ export const flashcardsApi = {
     request<Flashcard>(`/courses/${courseId}/flashcards`, { method: 'POST', body, auth: true }),
   remove: (courseId: string, cardId: string) =>
     request<void>(`/courses/${courseId}/flashcards/${cardId}`, { method: 'DELETE', auth: true }),
+  // Phase 29.1 — the deck as a CSV Anki imports. Bytes rather than JSON, so it comes back as a
+  // Blob and never touches the JSON parser.
+  exportCsv: (courseId: string) => fetchBlob(`/courses/${courseId}/flashcards/export`),
 }
 
 // The review queue spans every course, so these hang off /review rather than /courses/{id}.

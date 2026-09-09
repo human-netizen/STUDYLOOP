@@ -17,6 +17,7 @@ import {
   Pill,
   SectionHead,
 } from '../components/ui'
+import { useJobWatch } from '../lib/jobs'
 import { cx } from '../lib/style'
 
 // Phase 21.5 — asking for a video, watching it being made, and watching it.
@@ -47,6 +48,7 @@ export function CourseVideosPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [citation, setCitation] = useState<PdfTarget | null>(null)
+  const { watch } = useJobWatch()
 
   useEffect(() => {
     let active = true
@@ -106,6 +108,8 @@ export function CourseVideosPage() {
       setTopic('')
       setSelected(job)
       refreshLibrary()
+      // Phase 29.4 — a render takes minutes and nobody sits on this page for them.
+      watch({ kind: 'video', courseId: id, id: job.id, label: asked })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not start the render.')
     } finally {
