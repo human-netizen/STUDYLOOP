@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ApiError, coursesApi, quizzesApi } from '../lib/api'
+import { ApiError, coursesApi, errorMessage, quizzesApi } from '../lib/api'
 import type { CourseResponse, QuizSummary } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import {
   Button,
+  Confirm,
   Empty,
   ErrorText,
   Loading,
@@ -27,6 +28,22 @@ export function QuizzesPage() {
   const [quizzes, setQuizzes] = useState<QuizSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  // Phase 27.4 — author or manager; the server decides which, and a 403 arrives here as the
+  // sentence it wrote rather than as a button that was never shown.
+  async function removeQuiz(quizId: string) {
+    setError(null)
+    setDeleting(quizId)
+    try {
+      await quizzesApi.remove(id, quizId)
+      setQuizzes((current) => current.filter((quiz) => quiz.id !== quizId))
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete that quiz.'))
+    } finally {
+      setDeleting(null)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -79,12 +96,12 @@ export function QuizzesPage() {
             ) : (
               <Rows>
                 {quizzes.map((quiz) => (
-                  <Row key={quiz.id} interactive>
-                    <Link
-                      to={`/courses/${id}/quizzes/${quiz.id}`}
-                      className="group flex items-center justify-between gap-4 px-5 py-4 no-underline"
-                    >
-                      <div className="min-w-0">
+                  <Row key={quiz.id}>
+                    <div className="flex items-center justify-between gap-4 px-5 py-4">
+                      <Link
+                        to={`/courses/${id}/quizzes/${quiz.id}`}
+                        className="group min-w-0 flex-1 no-underline"
+                      >
                         <p className="m-0 truncate font-display text-[17px] font-bold tracking-[-0.015em] text-ink">
                           {quiz.title}
                         </p>
@@ -92,11 +109,25 @@ export function QuizzesPage() {
                           {quiz.questionCount} question{quiz.questionCount === 1 ? '' : 's'} ·{' '}
                           {new Date(quiz.createdAt).toLocaleDateString()}
                         </Meta>
-                      </div>
-                      <span className="shrink-0 font-mono text-[11px] tracking-[0.08em] text-ink-muted uppercase transition duration-150 group-hover:text-ink">
+                      </Link>
+                      {/* Phase 27.4. The confirmation names what goes with it, because every
+                          attempt on this quiz cascades: a score out of ten on questions nobody
+                          can read is not a record worth keeping, but it is not a thing to
+                          destroy without saying so either. */}
+                      <Confirm
+                        label="Delete"
+                        question={`Delete "${quiz.title}"?`}
+                        detail="Every attempt on this quiz goes with it, including other people's."
+                        busy={deleting === quiz.id}
+                        onConfirm={() => void removeQuiz(quiz.id)}
+                      />
+                      <Link
+                        to={`/courses/${id}/quizzes/${quiz.id}`}
+                        className="shrink-0 font-mono text-[11px] tracking-[0.08em] text-ink-muted uppercase no-underline transition duration-150 hover:text-ink"
+                      >
                         Take →
-                      </span>
-                    </Link>
+                      </Link>
+                    </div>
                   </Row>
                 ))}
               </Rows>

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { useParams } from 'react-router-dom'
-import { ApiError, coursesApi, notesApi } from '../lib/api'
+import { ApiError, coursesApi, errorMessage, notesApi } from '../lib/api'
 import type { CourseResponse, DocumentStatus, NoteBlock, NoteResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import { Markdown } from '../components/Markdown'
 import {
   Button,
+  Confirm,
   Empty,
   ErrorText,
   Loading,
@@ -236,6 +237,21 @@ function NoteRow({
       )
   }, [open, courseId, note.id, note.status])
 
+  // Phase 27.4. A note is a document, so this is the document delete — the row, the blocks,
+  // the chunks and the photograph itself. The server applies the document's own rule: yours
+  // while it is private, a manager's once it has been promoted to course material.
+  async function remove() {
+    setBusy(true)
+    setError(null)
+    try {
+      await notesApi.remove(courseId, note.id)
+      onChanged()
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete this note.'))
+      setBusy(false)
+    }
+  }
+
   async function act(action: 'promote' | 'demote') {
     setBusy(true)
     setError(null)
@@ -286,6 +302,17 @@ function NoteRow({
         <Pill tone={statusTone(note.status)}>{note.status.toLowerCase()}</Pill>
         {/* Whose it is and who can be answered from it — the two facts a note has that a
             document does not. */}
+        <Confirm
+          label="Delete"
+          question={`Delete ${note.filename}?`}
+          detail={
+            note.visibility === 'COURSE'
+              ? 'This note is part of the course corpus — answers grounded on it will stop citing it.'
+              : 'The photograph and everything read from it go with it.'
+          }
+          busy={busy}
+          onConfirm={() => void remove()}
+        />
         <Pill tone={note.visibility === 'COURSE' ? 'accent' : 'neutral'}>
           {note.visibility === 'COURSE' ? 'course' : 'private'}
         </Pill>

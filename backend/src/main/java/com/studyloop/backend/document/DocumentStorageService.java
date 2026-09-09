@@ -34,4 +34,14 @@ public interface DocumentStorageService {
     // Reads previously-stored bytes back. A missing or unreadable object throws, which the
     // ingestion pipeline turns into a FAILED document rather than a crash.
     byte[] read(String relativePath);
+
+    // Removes the stored object (Phase 27.3). The third method, and the one that fails halfway.
+    //
+    // **A missing object is not an error.** Deleting a document is two writes that cannot be one
+    // transaction — the row in Postgres and the object in a bucket reached over HTTP — so a
+    // delete that is retried after a partial failure must be able to finish. The row goes first
+    // and the bytes second, because an orphaned object costs disk while an orphaned row is a 500
+    // in the citation viewer; that ordering only works if arriving at an object that is already
+    // gone succeeds.
+    void delete(String relativePath);
 }

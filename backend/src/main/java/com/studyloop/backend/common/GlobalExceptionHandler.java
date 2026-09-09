@@ -6,13 +6,17 @@ import com.studyloop.backend.auth.InvalidTokenException;
 import com.studyloop.backend.auth.UserNotFoundException;
 import com.studyloop.backend.course.CourseNotFoundException;
 import com.studyloop.backend.course.InsufficientCourseRoleException;
+import com.studyloop.backend.course.InvalidCourseUpdateException;
+import com.studyloop.backend.course.LastOwnerException;
 import com.studyloop.backend.course.InviteEmailMismatchException;
 import com.studyloop.backend.course.InviteExpiredException;
 import com.studyloop.backend.course.InviteNotFoundException;
 import com.studyloop.backend.course.NotACourseMemberException;
 import com.studyloop.backend.chat.ChatConversationNotFoundException;
 import com.studyloop.backend.chat.ChatException;
+import com.studyloop.backend.document.DocumentBusyException;
 import com.studyloop.backend.document.DocumentNotFoundException;
+import com.studyloop.backend.document.DocumentNotRetirableException;
 import com.studyloop.backend.document.DocumentStorageException;
 import com.studyloop.backend.document.DuplicateDocumentException;
 import com.studyloop.backend.document.EmptyDocumentException;
@@ -150,6 +154,25 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    // Phase 27.4. 409 rather than 403: the caller has every permission the action needs, and
+    // the refusal is about what the course would be left as. A 403 would send them looking for a
+    // role they already have.
+    @ExceptionHandler(LastOwnerException.class)
+    ProblemDetail handleLastOwner(LastOwnerException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Last owner");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidCourseUpdateException.class)
+    ProblemDetail handleInvalidCourseUpdate(InvalidCourseUpdateException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Invalid update");
+        return problem;
+    }
+
     @ExceptionHandler(DocumentNotFoundException.class)
     ProblemDetail handleDocumentNotFound(DocumentNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
@@ -180,6 +203,25 @@ public class GlobalExceptionHandler {
 
     // Promoting or exporting a note the pipeline has not finished reading → 409. Not a failure;
     // the same request works once the note reaches READY.
+    // Phase 27. Both are 409 rather than 400: the request is well formed and would have been
+    // legal a moment earlier or a moment later, which is exactly what "conflict with the current
+    // state of the resource" means.
+    @ExceptionHandler(DocumentNotRetirableException.class)
+    ProblemDetail handleDocumentNotRetirable(DocumentNotRetirableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Document cannot be retired");
+        return problem;
+    }
+
+    @ExceptionHandler(DocumentBusyException.class)
+    ProblemDetail handleDocumentBusy(DocumentBusyException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Document still ingesting");
+        return problem;
+    }
+
     @ExceptionHandler(NoteNotReadyException.class)
     ProblemDetail handleNoteNotReady(NoteNotReadyException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(

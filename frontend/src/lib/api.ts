@@ -7,6 +7,7 @@ import type {
   CostSummary,
   CourseResponse,
   CreateCourseRequest,
+  DocumentImpact,
   CreateFlashcardRequest,
   CreateThreadRequest,
   DocumentResponse,
@@ -20,6 +21,7 @@ import type {
   GenerateQuizRequest,
   InvitePreviewResponse,
   LoginRequest,
+  MemberResponse,
   NoteBlock,
   NoteResponse,
   PageResponse,
@@ -30,7 +32,9 @@ import type {
   ReviewResult,
   SearchResponse,
   SubmitAttemptRequest,
+  ThreadDeletion,
   TokenResponse,
+  UpdateCourseRequest,
   UserResponse,
   VideoJob,
   VideoLibrary,
@@ -189,14 +193,38 @@ export const authApi = {
   login: (body: LoginRequest) =>
     request<TokenResponse>('/auth/login', { method: 'POST', body }),
   me: () => request<UserResponse>('/users/me', { auth: true }),
+  // Phase 27.4. On /me and nowhere else. Refused with 409 while the caller is the last owner of
+  // any course, and the message names them — the fix is an action, not a retry.
+  deleteAccount: () => request<void>('/users/me', { method: 'DELETE', auth: true }),
 }
 
 export const coursesApi = {
-  list: (page = 0, size = 20) =>
-    request<PageResponse<CourseResponse>>(`/courses?page=${page}&size=${size}`, { auth: true }),
+  // `archived` is Phase 27.4's second list: archived courses are out by default, which is the
+  // point of archiving one, and this is how they are found again.
+  list: (page = 0, size = 20, archived = false) =>
+    request<PageResponse<CourseResponse>>(
+      `/courses?page=${page}&size=${size}&archived=${archived}`,
+      { auth: true },
+    ),
   create: (body: CreateCourseRequest) =>
     request<CourseResponse>('/courses', { method: 'POST', body, auth: true }),
   get: (id: string) => request<CourseResponse>(`/courses/${id}`, { auth: true }),
+  // The first PATCH this client sends (Phase 27.4). Only the fields being changed go in the
+  // body — an omitted one is left alone, which is what makes a rename one field rather than a
+  // whole course the caller has to round-trip correctly.
+  update: (id: string, body: UpdateCourseRequest) =>
+    request<CourseResponse>(`/courses/${id}`, { method: 'PATCH', body, auth: true }),
+  archive: (id: string) =>
+    request<CourseResponse>(`/courses/${id}/archive`, { method: 'POST', auth: true }),
+  unarchive: (id: string) =>
+    request<CourseResponse>(`/courses/${id}/unarchive`, { method: 'POST', auth: true }),
+  members: (id: string) =>
+    request<MemberResponse[]>(`/courses/${id}/members`, { auth: true }),
+  // Leaving names no user in the path: the only membership this can touch is the caller's.
+  leave: (id: string) =>
+    request<void>(`/courses/${id}/membership`, { method: 'DELETE', auth: true }),
+  removeMember: (id: string, memberId: string) =>
+    request<void>(`/courses/${id}/members/${memberId}`, { method: 'DELETE', auth: true }),
 }
 
 export const documentsApi = {
@@ -237,6 +265,41 @@ export const documentsApi = {
   // turns it into an object URL.
   fileBlob: (courseId: string, documentId: string) =>
     fetchBlob(`/courses/${courseId}/documents/${documentId}/file`),
+  // Phase 27.2 — read the stored bytes again, optionally over a different range. No file goes
+  // over the wire: the whole document was stored at upload precisely so this is possible.
+  reingest: (courseId: string, documentId: string, range?: { firstPage?: number; lastPage?: number }) => {
+    const params = new URLSearchParams()
+    if (range?.firstPage != null) params.set('firstPage', String(range.firstPage))
+    if (range?.lastPage != null) params.set('lastPage', String(range.lastPage))
+    const query = params.toString()
+    return request<DocumentResponse>(
+      `/courses/${courseId}/documents/${documentId}/reingest${query ? `?${query}` : ''}`,
+      { method: 'POST', auth: true },
+    )
+  },
+  // Phase 27.3 — out of every answer, still in the library. Reversible by the line below it.
+  retire: (courseId: string, documentId: string) =>
+    request<DocumentResponse>(`/courses/${courseId}/documents/${documentId}/retire`, {
+      method: 'POST',
+      auth: true,
+    }),
+  unretire: (courseId: string, documentId: string) =>
+    request<DocumentResponse>(`/courses/${courseId}/documents/${documentId}/unretire`, {
+      method: 'POST',
+      auth: true,
+    }),
+  // What a delete would destroy. Read when the confirmation opens, never with the list.
+  impact: (courseId: string, documentId: string) =>
+    request<DocumentImpact>(`/courses/${courseId}/documents/${documentId}/impact`, {
+      auth: true,
+    }),
+  // Answers with the counts rather than 204: they are what the page says afterwards, and
+  // re-reading them after the delete is impossible by construction.
+  remove: (courseId: string, documentId: string) =>
+    request<DocumentImpact>(`/courses/${courseId}/documents/${documentId}`, {
+      method: 'DELETE',
+      auth: true,
+    }),
 }
 
 // Any authenticated endpoint that answers with bytes rather than JSON — a PDF, a LaTeX export, an
@@ -285,6 +348,13 @@ export const notesApi = {
   // PDF viewer fetches a document's bytes — a plain <a href> would arrive unauthenticated.
   latex: (courseId: string, noteId: string) =>
     fetchBlob(`/courses/${courseId}/notes/${noteId}/latex`),
+  // Phase 27.4. A note is a document, so this is the document delete with the document's own
+  // rule: yours while it is private, a manager's once it has been promoted.
+  remove: (courseId: string, noteId: string) =>
+    request<DocumentImpact>(`/courses/${courseId}/notes/${noteId}`, {
+      method: 'DELETE',
+      auth: true,
+    }),
 }
 
 export const quizzesApi = {
@@ -302,6 +372,10 @@ export const quizzesApi = {
     }),
   attempts: (courseId: string, quizId: string) =>
     request<AttemptSummary[]>(`/courses/${courseId}/quizzes/${quizId}/attempts`, { auth: true }),
+  // Phase 27.4 — author or manager. Every attempt on the quiz goes with it, which is why the
+  // confirmation says so.
+  remove: (courseId: string, quizId: string) =>
+    request<void>(`/courses/${courseId}/quizzes/${quizId}`, { method: 'DELETE', auth: true }),
 }
 
 export const flashcardsApi = {
@@ -362,6 +436,14 @@ export const forumApi = {
       `/courses/${courseId}/forum/threads/${threadId}/answers/${answerId}/accept`,
       { method: 'POST', auth: true },
     ),
+  // Phase 27.4 — author or manager. Answers with what survived: an accepted answer that became
+  // course material is deliberately left in the corpus, and a caller told nothing would assume it
+  // went with the thread.
+  remove: (courseId: string, threadId: string) =>
+    request<ThreadDeletion>(`/courses/${courseId}/forum/threads/${threadId}`, {
+      method: 'DELETE',
+      auth: true,
+    }),
 }
 
 // Search a course's materials. The same retrieval the assistant runs, returned as passages

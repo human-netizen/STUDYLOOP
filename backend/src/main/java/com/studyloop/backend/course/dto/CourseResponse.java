@@ -13,6 +13,9 @@ public record CourseResponse(
         UUID ownerId,
         // The calling user's role in this course — lets the UI show/hide actions.
         MembershipRole myRole,
+        // Phase 27.4. Null for an active course. Sent on every response rather than only on
+        // archived ones, so a client reads one field instead of guarding an absent one.
+        Instant archivedAt,
         Instant createdAt
 ) {
 
@@ -23,6 +26,7 @@ public record CourseResponse(
                 course.getDescription(),
                 course.getOwner().getId(),
                 myRole,
+                course.getArchivedAt(),
                 course.getCreatedAt()
         );
     }

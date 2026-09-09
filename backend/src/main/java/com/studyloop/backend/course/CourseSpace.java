@@ -41,6 +41,13 @@ public class CourseSpace {
     @JoinColumn(name = "owner_id", nullable = false)
     private User owner;
 
+    // Phase 27.4 — when this course was archived; null means active. A nullable timestamp rather
+    // than a boolean because *when* is free to store and answers the question a boolean raises
+    // next. Archiving hides the course from the list and changes nothing else: every document,
+    // thread, quiz and answer is untouched, and un-archiving is one update.
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

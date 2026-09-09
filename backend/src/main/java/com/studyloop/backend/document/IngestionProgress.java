@@ -83,6 +83,10 @@ public final class IngestionProgress {
             // the most useful thing a failed row can say. Present so the switch is exhaustive
             // without a default that would swallow a status added later.
             case FAILED -> 0;
+            // Phase 27.3, and also never used here — retiring is one field written directly, not a
+            // pipeline transition. A retired document has finished ingesting, so its bar is full;
+            // saying anything else would suggest the retirement undid the work.
+            case RETIRED -> DONE;
         };
     }
 
@@ -95,6 +99,7 @@ public final class IngestionProgress {
             case EMBEDDING -> "Indexing the passages for search.";
             case READY -> "Ready to answer questions.";
             case FAILED -> null;
+            case RETIRED -> "Retired - kept in the library, left out of answers.";
         };
     }
 

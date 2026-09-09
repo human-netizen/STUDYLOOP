@@ -79,4 +79,27 @@ public class SupabaseDocumentStorage implements DocumentStorageService {
             throw new DocumentStorageException("Could not read stored document bytes.", e);
         }
     }
+
+    // Supabase answers a delete of a key that is not there with 400 and a "not_found" body rather
+    // than 404, so the swallow is by status class and not by parsing the message. Either way it
+    // is the same decision the filesystem implementation makes with deleteIfExists: an object that
+    // is already gone is the state this call was asked to produce.
+    //
+    // The service key needs `delete` on the bucket for this to work in the cloud, which is a
+    // dashboard setting and not a code change — see currentTodo.md.
+    @Override
+    public void delete(String relativePath) {
+        try {
+            restClient.delete()
+                    .uri(objectBaseUrl + relativePath)
+                    .header("Authorization", "Bearer " + serviceKey)
+                    .header("apikey", serviceKey)
+                    .retrieve()
+                    .onStatus(status -> status.value() == 404 || status.value() == 400,
+                            (request, response) -> { })
+                    .toBodilessEntity();
+        } catch (RestClientException e) {
+            throw new DocumentStorageException("Could not delete stored document bytes.", e);
+        }
+    }
 }

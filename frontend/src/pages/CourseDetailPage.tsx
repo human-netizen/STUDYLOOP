@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ApiError, coursesApi, documentsApi } from '../lib/api'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ApiError, coursesApi, documentsApi, errorMessage } from '../lib/api'
 import type {
   CourseResponse,
+  DocumentImpact,
   DocumentResponse,
   DocumentStatus,
   DocumentSummary,
+  MemberResponse,
 } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import { Markdown } from '../components/Markdown'
 import {
   Button,
+  Confirm,
   Empty,
   ErrorText,
   Eyebrow,
+  Field,
+  Input,
   Loading,
   Meta,
   NumberField,
@@ -23,7 +28,9 @@ import {
   Row,
   Rows,
   SectionHead,
+  TextArea,
 } from '../components/ui'
+import { PdfFilmstrip } from '../components/PdfFilmstrip'
 import { estimateFor, pageCountOf } from '../lib/pdf'
 import { cx, linkButton } from '../lib/style'
 
@@ -34,11 +41,13 @@ const POLL_INTERVAL_MS = 2500
 
 export function CourseDetailPage() {
   const { id = '' } = useParams()
+  const navigate = useNavigate()
 
   const [course, setCourse] = useState<CourseResponse | null>(null)
   const [documents, setDocuments] = useState<DocumentResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [managing, setManaging] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -87,7 +96,15 @@ export function CourseDetailPage() {
     })
   }, [])
 
+  // Phase 27.3. Dropped from the list rather than re-fetched: the row is gone, and a poll to
+  // confirm it would be a request whose only possible answer is the one we already have.
+  const dropDocument = useCallback((documentId: string) => {
+    setDocuments((current) => current.filter((doc) => doc.id !== documentId))
+  }, [])
+
+  const canManage = course?.myRole === 'OWNER' || course?.myRole === 'INSTRUCTOR'
   const readyCount = documents.filter((doc) => doc.status === 'READY').length
+  const retiredCount = documents.filter((doc) => doc.status === 'RETIRED').length
 
   return (
     <AppShell courseName={course?.name}>
@@ -97,15 +114,31 @@ export function CourseDetailPage() {
       {course && (
         <>
           <PageTitle
-            eyebrow={course.myRole}
+            eyebrow={course.archivedAt ? `${course.myRole} · archived` : course.myRole}
             title={course.name}
             sub={course.description}
             action={
-              <Link to={`/courses/${id}/chat`} className={cx(linkButton('primary'), 'no-underline')}>
-                Ask this course
-              </Link>
+              <div className="flex items-center gap-2">
+                <Button variant="quiet" size="sm" onClick={() => setManaging((open) => !open)}>
+                  {managing ? 'Done' : 'Manage'}
+                </Button>
+                <Link to={`/courses/${id}/chat`} className={cx(linkButton('primary'), 'no-underline')}>
+                  Ask this course
+                </Link>
+              </div>
             }
           />
+
+          {/* Phase 27.4 — rename, archive, the member list and leaving. Behind a toggle rather
+              than always on the page: they are the verbs somebody reaches for twice a semester,
+              and a course page whose first row is "Delete" reads as a settings screen. */}
+          {managing && (
+            <CoursePanel
+              course={course}
+              onChanged={setCourse}
+              onLeft={() => navigate('/courses')}
+            />
+          )}
 
           <section className="mb-14">
             <SectionHead
@@ -122,7 +155,8 @@ export function CourseDetailPage() {
               title="Documents"
               description={
                 documents.length > 0
-                  ? `${readyCount} of ${documents.length} ready to answer questions`
+                  ? `${readyCount} of ${documents.length} ready to answer questions` +
+                    (retiredCount > 0 ? ` · ${retiredCount} retired` : '')
                   : undefined
               }
             />
@@ -131,7 +165,14 @@ export function CourseDetailPage() {
             ) : (
               <Rows>
                 {documents.map((doc) => (
-                  <DocumentRow key={doc.id} courseId={id} document={doc} />
+                  <DocumentRow
+                    key={doc.id}
+                    courseId={id}
+                    document={doc}
+                    canManage={canManage}
+                    onChanged={mergeDocument}
+                    onDeleted={dropDocument}
+                  />
                 ))}
               </Rows>
             )}
@@ -314,6 +355,18 @@ function PageRangePanel({
         {pages} pages · {estimateFor(selected)}
       </Meta>
 
+      {/* Phase 27.1 — the two pages this is about to read, drawn from the file itself. It is
+          above the fields rather than below them because it is the thing being decided; the
+          numbers are how the decision is expressed. */}
+      <PdfFilmstrip
+        file={file}
+        pages={pages}
+        first={from}
+        last={to}
+        onPickFirst={setFirst}
+        onPickLast={setLast}
+      />
+
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <NumberField label="From page" value={first} min={1} max={pages} disabled={uploading} onChange={setFirst} />
         <NumberField label="To page" value={last} min={1} max={pages} disabled={uploading} onChange={setLast} />
@@ -350,7 +403,19 @@ function PageRangePanel({
 // has already written a summary and glossary, so this is a read of cached text rather than a
 // generation — but it's fetched lazily on first open, so a course with thirty documents doesn't
 // fire thirty requests just to render the list.
-function DocumentRow({ courseId, document }: { courseId: string; document: DocumentResponse }) {
+function DocumentRow({
+  courseId,
+  document,
+  canManage,
+  onChanged,
+  onDeleted,
+}: {
+  courseId: string
+  document: DocumentResponse
+  canManage: boolean
+  onChanged: (doc: DocumentResponse) => void
+  onDeleted: (documentId: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const [summary, setSummary] = useState<DocumentSummary | null>(null)
   const [loading, setLoading] = useState(false)
@@ -463,6 +528,17 @@ function DocumentRow({ courseId, document }: { courseId: string; document: Docum
         </div>
       )}
 
+      {/* Phase 27.2 and 27.3. Hidden while the pipeline is running, because every verb here
+          either restarts it or removes what it is building. */}
+      {canManage && !IN_FLIGHT.includes(document.status) && (
+        <DocumentActions
+          courseId={courseId}
+          document={document}
+          onChanged={onChanged}
+          onDeleted={onDeleted}
+        />
+      )}
+
       {open && (
         <div className="border-t border-line-soft bg-ground-2 px-5 py-5">
           {loading && <Loading>Reading the summary</Loading>}
@@ -541,6 +617,8 @@ function formatWhen(iso: string | null): string {
 }
 
 function StatusBadge({ status }: { status: DocumentStatus }) {
+  // RETIRED falls through to neutral, which is the right weight for it: nothing is wrong, the
+  // document is simply not answering questions. A warn tone would read as a problem to fix.
   const tone =
     status === 'READY' ? 'ok' : status === 'FAILED' ? 'bad' : IN_FLIGHT.includes(status) && status !== 'UPLOADED' ? 'warn' : 'neutral'
   const inFlight = IN_FLIGHT.includes(status)
@@ -557,4 +635,411 @@ function formatBytes(bytes: number): string {
   const kb = bytes / 1024
   if (kb < 1024) return `${kb.toFixed(0)} KB`
   return `${(kb / 1024).toFixed(1)} MB`
+}
+
+// Phase 27.2 and 27.3 — the three things a manager can now do to a document that is already here.
+//
+// They sit together because they are one decision with three answers, in ascending cost: read it
+// again (a different cut, or a retry after a failure), take it out of answers but keep it, or
+// destroy it. Offering them in that order is the point — the cheap ones are what somebody
+// reaching for "delete" usually meant.
+function DocumentActions({
+  courseId,
+  document,
+  onChanged,
+  onDeleted,
+}: {
+  courseId: string
+  document: DocumentResponse
+  onChanged: (doc: DocumentResponse) => void
+  onDeleted: (documentId: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [recutting, setRecutting] = useState(false)
+  // undefined = not fetched yet, which is what the Confirm waits on before it will commit.
+  const [impact, setImpact] = useState<DocumentImpact | undefined>(undefined)
+
+  const retired = document.status === 'RETIRED'
+
+  async function run<T>(action: () => Promise<T>, then: (result: T) => void) {
+    setError(null)
+    setBusy(true)
+    try {
+      then(await action())
+    } catch (err) {
+      setError(errorMessage(err, 'That did not work.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border-t border-line-soft px-5 py-3">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* Re-ingest. Named for what it costs the reader rather than for what it does to the
+            database: "Read it again" is the sentence somebody who picked the wrong pages is
+            already saying. */}
+        {!recutting && (
+          <Button
+            variant="quiet"
+            size="sm"
+            disabled={busy}
+            onClick={() => setRecutting(true)}
+            className="mr-auto"
+          >
+            Read it again
+          </Button>
+        )}
+
+        {retired ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => void run(() => documentsApi.unretire(courseId, document.id), onChanged)}
+          >
+            {busy ? 'Restoring…' : 'Put it back'}
+          </Button>
+        ) : (
+          document.status === 'READY' && (
+            <Button
+              variant="quiet"
+              size="sm"
+              disabled={busy}
+              onClick={() => void run(() => documentsApi.retire(courseId, document.id), onChanged)}
+            >
+              {busy ? 'Retiring…' : 'Retire'}
+            </Button>
+          )
+        )}
+
+        <Confirm
+          label="Delete"
+          question={`Delete ${document.filename}? This cannot be undone.`}
+          detail={impact === undefined ? undefined : describeImpact(impact)}
+          busy={busy}
+          // Fetched when the confirmation opens, never with the list: it is six counts per
+          // document, and nobody is deleting the other twenty-nine.
+          onOpen={() => {
+            setImpact(undefined)
+            documentsApi
+              .impact(courseId, document.id)
+              .then(setImpact)
+              .catch(() => setImpact(null as unknown as DocumentImpact))
+          }}
+          onConfirm={() =>
+            void run(
+              () => documentsApi.remove(courseId, document.id),
+              () => onDeleted(document.id),
+            )
+          }
+        />
+      </div>
+
+      {recutting && (
+        <RecutPanel
+          document={document}
+          busy={busy}
+          onCancel={() => setRecutting(false)}
+          onStart={(range) =>
+            void run(
+              () => documentsApi.reingest(courseId, document.id, range),
+              (doc) => {
+                onChanged(doc)
+                setRecutting(false)
+              },
+            )
+          }
+        />
+      )}
+
+      {/* Retiring is the reversible one, and saying so is what makes it the one people reach for
+          instead of the other. Shown only on a retired row, where it is the answer to "is this
+          gone?". */}
+      {retired && (
+        <Meta className="mt-2 block">
+          Out of every answer, quiz and flashcard. The file, its passages and its vectors are all
+          still here, and citations handed out earlier still open.
+        </Meta>
+      )}
+
+      {error && <ErrorText className="mt-2">{error}</ErrorText>}
+    </div>
+  )
+}
+
+// The page range for a re-ingest. Defaults to the range the document already has, so pressing the
+// button twice is a plain retry — which is what somebody whose ingest failed on a provider outage
+// actually wants — and changing the numbers is what makes it a re-cut.
+//
+// No filmstrip here, deliberately. The bytes are on the server, and drawing thumbnails would mean
+// downloading the whole file back to the browser to preview a decision the reader has already
+// made once. 27.1's argument is about a file that has not been uploaded yet.
+function RecutPanel({
+  document,
+  busy,
+  onStart,
+  onCancel,
+}: {
+  document: DocumentResponse
+  busy: boolean
+  onStart: (range?: { firstPage?: number; lastPage?: number }) => void
+  onCancel: () => void
+}) {
+  // A document whose ingest failed before it was parsed has no page count, so there is no real
+  // upper bound to offer. The cap is deliberately loose rather than invented: PageRange checks the
+  // range against the true count at extraction, which is the only place that knows it, and a first
+  // page past the end fails the document with a sentence rather than being guessed at here.
+  const known = document.pageCount
+  const cap = known ?? 10000
+  const [first, setFirst] = useState(document.firstPage ?? 1)
+  const [last, setLast] = useState(document.lastPage ?? known ?? 1)
+
+  const from = Math.min(first, last)
+  const to = Math.max(first, last)
+  const whole = from === 1 && known != null && to >= known
+
+  return (
+    <div className="mt-3 rounded-card border border-line bg-ground-2 px-4 py-3">
+      <Eyebrow>Read it again</Eyebrow>
+      <Meta className="mt-1 block">
+        The whole file was stored at upload, so this needs no second upload — it re-reads the bytes
+        already here. The passages, summary and glossary are replaced, not added to.
+      </Meta>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <NumberField label="From page" value={first} min={1} max={cap} disabled={busy} onChange={setFirst} />
+        <NumberField label="To page" value={last} min={1} max={cap} disabled={busy} onChange={setLast} />
+        <div className="flex flex-1 items-center justify-end gap-2">
+          <Button variant="quiet" size="sm" onClick={onCancel} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={busy}
+            onClick={() => onStart(whole ? undefined : { firstPage: from, lastPage: to })}
+          >
+            {busy ? 'Starting…' : whole ? 'Re-read all pages' : `Re-read pages ${from}–${to}`}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// "412 indexed passages · 7 flashcards lose their source". Mirrors DocumentImpact.describe on the
+// server; both exist because the sentence is assembled where the numbers are, and the client has
+// them here already from the same response.
+function describeImpact(impact: DocumentImpact | null): string {
+  if (!impact) return 'Could not count what this would affect.'
+  const parts = [`${impact.chunks} indexed passage${impact.chunks === 1 ? '' : 's'}`]
+  if (impact.flashcards > 0) {
+    parts.push(`${impact.flashcards} flashcard${impact.flashcards === 1 ? '' : 's'} lose their source`)
+  }
+  if (impact.questions > 0) {
+    parts.push(
+      `${impact.questions} question${impact.questions === 1 ? '' : 's'} lose their lecture attribution`,
+    )
+  }
+  if (impact.forumAnswers > 0) {
+    parts.push(
+      `${impact.forumAnswers} forum answer${impact.forumAnswers === 1 ? '' : 's'} lose their provenance`,
+    )
+  }
+  if (impact.videos > 0) {
+    parts.push(
+      `${impact.videos} video${impact.videos === 1 ? '' : 's'} lose ${impact.sceneCitations} scene citation${impact.sceneCitations === 1 ? '' : 's'}`,
+    )
+  }
+  return parts.join(' · ')
+}
+
+// Phase 27.4 — rename, archive, who is in here, and the way out.
+//
+// One panel rather than a settings page, because there are four verbs and three of them are one
+// line each. The member list is the exception and earns its space: "remove a member" is not an
+// action anybody can take against a list they cannot see.
+function CoursePanel({
+  course,
+  onChanged,
+  onLeft,
+}: {
+  course: CourseResponse
+  onChanged: (course: CourseResponse) => void
+  onLeft: () => void
+}) {
+  const [name, setName] = useState(course.name)
+  const [description, setDescription] = useState(course.description ?? '')
+  const [members, setMembers] = useState<MemberResponse[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const isOwner = course.myRole === 'OWNER'
+  const canManage = isOwner || course.myRole === 'INSTRUCTOR'
+
+  useEffect(() => {
+    let active = true
+    coursesApi
+      .members(course.id)
+      .then((rows) => {
+        if (active) setMembers(rows)
+      })
+      .catch(() => {
+        if (active) setMembers([])
+      })
+    return () => {
+      active = false
+    }
+  }, [course.id])
+
+  async function run<T>(action: () => Promise<T>, then: (result: T) => void) {
+    setError(null)
+    setBusy(true)
+    try {
+      then(await action())
+    } catch (err) {
+      setError(errorMessage(err, 'That did not work.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Only the fields that changed go in the body — that is what makes it a PATCH. Sending both
+  // every time would work and would also mean a rename silently rewriting a description somebody
+  // else had edited in another tab.
+  function save() {
+    const body: { name?: string; description?: string } = {}
+    if (name !== course.name) body.name = name
+    if (description !== (course.description ?? '')) body.description = description
+    if (Object.keys(body).length === 0) return
+    void run(
+      () => coursesApi.update(course.id, body),
+      (updated) => {
+        onChanged(updated)
+        setSaved(true)
+      },
+    )
+  }
+
+  return (
+    <div className="mb-12 rounded-card border border-line bg-surface px-6 py-5">
+      <Eyebrow>Course settings</Eyebrow>
+
+      {isOwner ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label="Name">
+            <Input
+              value={name}
+              disabled={busy}
+              onChange={(event) => {
+                setName(event.target.value)
+                setSaved(false)
+              }}
+            />
+          </Field>
+          <Field label="Description">
+            <TextArea
+              rows={2}
+              value={description}
+              disabled={busy}
+              onChange={(event) => {
+                setDescription(event.target.value)
+                setSaved(false)
+              }}
+            />
+          </Field>
+        </div>
+      ) : (
+        <Meta className="mt-2 block">Only the owner can rename or archive a course.</Meta>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {isOwner && (
+          <>
+            <Button variant="primary" size="sm" disabled={busy} onClick={save}>
+              {busy ? 'Saving…' : saved ? 'Saved' : 'Save'}
+            </Button>
+            {/* Archiving destroys nothing, so it is a plain button and not a confirmation. That
+                asymmetry is the feature: the reversible verb should be easier to press. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () =>
+                    course.archivedAt
+                      ? coursesApi.unarchive(course.id)
+                      : coursesApi.archive(course.id),
+                  onChanged,
+                )
+              }
+            >
+              {course.archivedAt ? 'Un-archive' : 'Archive'}
+            </Button>
+          </>
+        )}
+        <div className="ml-auto">
+          <Confirm
+            label="Leave this course"
+            question="Leave this course?"
+            detail="Your uploads, answers and questions stay with the course. You will need a new invite to come back."
+            confirmLabel="Leave"
+            busy={busy}
+            onConfirm={() => void run(() => coursesApi.leave(course.id), onLeft)}
+          />
+        </div>
+      </div>
+
+      {course.archivedAt && (
+        <Meta className="mt-3 block">
+          Archived — hidden from your course list. Everything in it is untouched, and it still
+          answers questions.
+        </Meta>
+      )}
+
+      <Eyebrow className="mt-6 mb-2">Members</Eyebrow>
+      {members == null ? (
+        <Loading />
+      ) : (
+        <Rows>
+          {members.map((member) => (
+            <Row key={member.userId}>
+              <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+                <div className="min-w-0">
+                  <p className="m-0 truncate text-[13px] text-ink">{member.displayName}</p>
+                  <Meta>{member.email}</Meta>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Pill tone={member.role === 'MEMBER' ? 'neutral' : 'accent'}>{member.role}</Pill>
+                  {canManage && (
+                    <Confirm
+                      label="Remove"
+                      question={`Remove ${member.displayName} from this course?`}
+                      detail="Everything they contributed stays. They lose access until they are invited again."
+                      confirmLabel="Remove"
+                      busy={busy}
+                      onConfirm={() =>
+                        void run(
+                          () => coursesApi.removeMember(course.id, member.userId),
+                          () =>
+                            setMembers((current) =>
+                              (current ?? []).filter((row) => row.userId !== member.userId),
+                            ),
+                        )
+                      }
+                    />
+                  )}
+                </div>
+              </div>
+            </Row>
+          ))}
+        </Rows>
+      )}
+
+      {error && <ErrorText className="mt-3">{error}</ErrorText>}
+    </div>
+  )
 }

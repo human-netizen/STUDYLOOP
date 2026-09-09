@@ -42,4 +42,17 @@ public class FilesystemDocumentStorage implements DocumentStorageService {
             throw new DocumentStorageException("Could not read stored document bytes.", e);
         }
     }
+
+    // deleteIfExists rather than delete, so removing an object that is already gone succeeds —
+    // see the interface for why the delete path depends on that. The empty course directory left
+    // behind is deliberate: pruning it would race the next upload into the same course, and an
+    // empty directory costs an inode.
+    @Override
+    public void delete(String relativePath) {
+        try {
+            Files.deleteIfExists(root.resolve(relativePath));
+        } catch (IOException e) {
+            throw new DocumentStorageException("Could not delete stored document bytes.", e);
+        }
+    }
 }

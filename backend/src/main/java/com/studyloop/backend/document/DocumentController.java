@@ -1,5 +1,6 @@
 package com.studyloop.backend.document;
 
+import com.studyloop.backend.document.DocumentImpactRepository.DocumentImpact;
 import com.studyloop.backend.document.DocumentService.DocumentContent;
 import com.studyloop.backend.document.DocumentService.UploadOutcome;
 import com.studyloop.backend.document.dto.DocumentResponse;
@@ -11,11 +12,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -29,6 +32,7 @@ public class DocumentController {
 
     private final DocumentService documentService;
     private final DocumentSummaryService summaryService;
+    private final DocumentLifecycleService lifecycleService;
 
     // Upload a course document for ingestion. A new file → 202 Accepted (the pipeline runs
     // asynchronously); an already-ingested identical file → 200 OK with the existing record.
@@ -49,6 +53,60 @@ public class DocumentController {
                 PageRange.of(firstPage, lastPage));
         HttpStatus status = outcome.created() ? HttpStatus.ACCEPTED : HttpStatus.OK;
         return ResponseEntity.status(status).body(outcome.document());
+    }
+
+    // Phase 27.2 — read the stored bytes again, optionally over a different page range. Same two
+    // params as the upload, and manager-only for the same reason: it spends the vision quota
+    // exactly as an upload does.
+    //
+    // 202 rather than 200, and the same shape the upload returns: the pipeline runs asynchronously
+    // and the client polls the row it already knows how to poll.
+    @PostMapping("/{documentId}/reingest")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentResponse reingest(Authentication authentication,
+                                     @PathVariable UUID courseId,
+                                     @PathVariable UUID documentId,
+                                     @RequestParam(required = false) Integer firstPage,
+                                     @RequestParam(required = false) Integer lastPage) {
+        return documentService.reingest(UUID.fromString(authentication.getName()), courseId,
+                documentId, PageRange.of(firstPage, lastPage));
+    }
+
+    // Phase 27.3 — out of every answer, still in the library. POST rather than DELETE because
+    // nothing is destroyed, and named verbs rather than a PATCH on `status` because the set of
+    // legal transitions is two, not six: the notes endpoint already reads this way with
+    // promote/demote.
+    @PostMapping("/{documentId}/retire")
+    public DocumentResponse retire(Authentication authentication,
+                                   @PathVariable UUID courseId,
+                                   @PathVariable UUID documentId) {
+        return lifecycleService.retire(UUID.fromString(authentication.getName()), courseId, documentId);
+    }
+
+    @PostMapping("/{documentId}/unretire")
+    public DocumentResponse unretire(Authentication authentication,
+                                     @PathVariable UUID courseId,
+                                     @PathVariable UUID documentId) {
+        return lifecycleService.unretire(UUID.fromString(authentication.getName()), courseId, documentId);
+    }
+
+    // What deleting this document would destroy, in counts. Fetched when the confirmation opens,
+    // so the question a reader is asked is one they can actually answer.
+    @GetMapping("/{documentId}/impact")
+    public DocumentImpact impact(Authentication authentication,
+                                 @PathVariable UUID courseId,
+                                 @PathVariable UUID documentId) {
+        return lifecycleService.impact(UUID.fromString(authentication.getName()), courseId, documentId);
+    }
+
+    // Gone. Answers with the impact rather than 204, because the counts are what the client puts
+    // on screen afterwards — "deleted Lecture 07: 412 passages, 7 flashcards lost their source" —
+    // and re-reading them after the delete is impossible by construction.
+    @DeleteMapping("/{documentId}")
+    public DocumentImpact delete(Authentication authentication,
+                                 @PathVariable UUID courseId,
+                                 @PathVariable UUID documentId) {
+        return lifecycleService.delete(UUID.fromString(authentication.getName()), courseId, documentId);
     }
 
     // Any course member may see the course's documents and their ingestion status.

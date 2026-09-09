@@ -13,6 +13,7 @@ import java.util.UUID;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final AccountDeletionService accountDeletionService;
 
     @Transactional(readOnly = true)
     public UserResponse getById(UUID id) {
@@ -26,5 +27,12 @@ public class UserService {
         return userRepository.findAll().stream()
                 .map(UserResponse::from)
                 .toList();
+    }
+
+    // Phase 27.4. Thin on purpose: what deleting an account actually means is a page of reasoning
+    // and lives in AccountDeletionService, and putting it here would bury it under two lookups.
+    @Transactional
+    public void deleteAccount(UUID id) {
+        accountDeletionService.delete(id);
     }
 }

@@ -16,7 +16,7 @@ export const CONTROL =
   'w-full rounded-ctl border border-line bg-surface-2 px-3 py-2 text-sm text-ink outline-none ' +
   'transition duration-150 focus:border-accent disabled:opacity-50'
 
-export type ButtonVariant = 'primary' | 'ghost' | 'quiet'
+export type ButtonVariant = 'primary' | 'ghost' | 'quiet' | 'danger'
 export type ButtonSize = 'sm' | 'md'
 
 export const BUTTON_BASE =
@@ -30,6 +30,11 @@ export const BUTTON_VARIANT: Record<ButtonVariant, string> = {
     'bg-accent text-on-accent border border-accent-deep hover:brightness-105 active:translate-y-px',
   ghost: 'border border-line text-ink hover:bg-surface-2 active:translate-y-px',
   quiet: 'border-0 bg-transparent text-ink-muted hover:text-ink underline-offset-4 hover:underline',
+  // Phase 27. The first destructive actions in this application needed a button that does not
+  // look like the others, and `bad` is the token the FAILED pill already uses — so a red here
+  // means the same thing it means everywhere else on the page. Outlined rather than filled: it is
+  // the confirm inside an opened confirmation, not a call to action sitting in a row.
+  danger: 'border border-bad/50 bg-bad-bg text-bad hover:brightness-105 active:translate-y-px',
 }
 
 export function buttonClass(variant: ButtonVariant = 'ghost', size: ButtonSize = 'md'): string {

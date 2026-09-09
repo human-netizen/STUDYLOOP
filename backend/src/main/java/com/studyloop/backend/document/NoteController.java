@@ -11,6 +11,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import com.studyloop.backend.document.DocumentImpactRepository.DocumentImpact;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -91,5 +93,15 @@ public class NoteController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment().filename(noteId + ".tex").build().toString())
                 .body(tex.getBytes(StandardCharsets.UTF_8));
+    }
+
+    // Phase 27.4. A note is a Document, so this is the document delete with the document's own
+    // ownership rule: yours while it is private, a manager's once it has been promoted to course
+    // material. Answers with the impact counts for the same reason the document endpoint does.
+    @DeleteMapping("/{noteId}")
+    public DocumentImpact delete(Authentication authentication,
+                                 @PathVariable UUID courseId,
+                                 @PathVariable UUID noteId) {
+        return noteService.delete(UUID.fromString(authentication.getName()), courseId, noteId);
     }
 }

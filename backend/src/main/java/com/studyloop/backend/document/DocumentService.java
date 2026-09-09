@@ -22,6 +22,13 @@ public class DocumentService {
 
     private static final int MAX_FILENAME_LENGTH = 255;
 
+    // Statuses in which the pipeline is (or is about to be) running over this document. Written
+    // once here rather than as a `!= READY` test, because FAILED and RETIRED are both perfectly
+    // re-ingestable — a failed extraction is the second most common reason to press the button.
+    private static final List<DocumentStatus> IN_FLIGHT = List.of(
+            DocumentStatus.UPLOADED, DocumentStatus.EXTRACTING,
+            DocumentStatus.CHUNKING, DocumentStatus.EMBEDDING);
+
     private final DocumentRepository documentRepository;
     private final DocumentStorageService storageService;
     private final CourseAccess courseAccess;
@@ -115,6 +122,54 @@ public class DocumentService {
                 new DocumentUploadedEvent(document.getId(), actor.getUser().getId()));
 
         return new UploadOutcome(DocumentResponse.from(document, courseId), true);
+    }
+
+    // Phase 27.2 — run the pipeline again over the bytes already stored, optionally with a
+    // different page range.
+    //
+    // **Cheap because 25.1 already paid for it.** The stored object is the whole file — the range
+    // was applied at extraction and never to the bytes — so a re-cut needs no second upload and no
+    // second 25 MB across the wire. It is also the endpoint 25.1 recorded as a known gap: until it
+    // existed, re-uploading with a different range hit the dedupe path in `accept` above and
+    // returned the existing document with the new range silently ignored.
+    //
+    // **Idempotent by construction rather than by a flag.** `replaceChunks` deletes by document id
+    // before inserting, and the summary, glossary, note blocks and visual chunks all rebuild the
+    // same way, so a second run is a replace rather than a duplicate.
+    @Transactional
+    public DocumentResponse reingest(UUID actorId, UUID courseId, UUID documentId, PageRange range) {
+        courseAccess.requireManager(actorId, courseId);
+        Document document = documentRepository.findByIdAndCourseSpaceId(documentId, courseId)
+                .orElseThrow(() -> new DocumentNotFoundException(documentId));
+        if (document.getStoragePath() == null) {
+            // A forum-derived document is text this system wrote, not a file anybody uploaded.
+            // There is nothing to re-read.
+            throw new DocumentNotFoundException(documentId);
+        }
+        if (IN_FLIGHT.contains(document.getStatus())) {
+            throw new DocumentBusyException(document.getStatus());
+        }
+
+        document.setFirstPage(range.first());
+        document.setLastPage(range.last());
+        // **Out of READY before anything is rebuilt, and in this transaction rather than on the
+        // worker.** Between the response to this request and the moment the async listener picks
+        // the event up, the row is whatever it was left as — and if the process restarts in that
+        // window, whatever it was left as is where it stays. READY there would mean a document
+        // answering from the old cut with a re-ingest nobody knows was lost; UPLOADED is visibly
+        // unfinished, which is the state a person can act on. It also takes the document out of
+        // all six retrieval branches for the length of the rebuild, since every one of them
+        // filters `d.status = 'READY'`.
+        document.setStatus(DocumentStatus.UPLOADED);
+        document.setErrorMessage(null);
+        document.setProgress(IngestionProgress.floorOf(DocumentStatus.UPLOADED));
+        document.setStage(range.isAll()
+                ? "Reading the whole document again."
+                : "Reading pages " + range.describe() + " again.");
+        documentRepository.saveAndFlush(document);
+
+        eventPublisher.publishEvent(new DocumentReingestRequestedEvent(documentId, actorId));
+        return DocumentResponse.from(document, courseId);
     }
 
     // Deduping is per course, because `(course_space_id, sha256)` is a database guarantee — and

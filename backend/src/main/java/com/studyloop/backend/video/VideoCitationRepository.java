@@ -32,18 +32,31 @@ public class VideoCitationRepository {
     // Chunk ids in the order the scene lists them. Ignores duplicates within a scene — the model
     // is perfectly capable of grounding two sentences of one scene on the same chunk, and the
     // primary key (scene_id, chunk_id) says that is one citation, not two.
+    //
+    // **The snapshot is written beside the link (Phase 27.3), not derived from it.** A finished
+    // video is an artifact that was correct when it was made, and the promise the gate enforces
+    // before a frame renders — every scene names the passage it was written from — has to survive
+    // the source leaving the corpus. `chunk_id` is now `on delete set null`, so these three
+    // columns are the only thing that would be left. Copying them costs one subselect per
+    // citation, on a path that runs a handful of times per render.
     public void save(UUID sceneId, List<UUID> chunkIds) {
         List<UUID> distinct = chunkIds.stream().distinct().toList();
         List<Object[]> batch = new ArrayList<>(distinct.size());
         for (int i = 0; i < distinct.size(); i++) {
-            batch.add(new Object[]{sceneId, distinct.get(i), i + 1});
+            UUID chunkId = distinct.get(i);
+            batch.add(new Object[]{sceneId, chunkId, i + 1, chunkId, chunkId, chunkId});
         }
         if (batch.isEmpty()) {
             return;
         }
         jdbc.batchUpdate("""
-                insert into video_scene_citations (scene_id, chunk_id, ordinal)
-                values (?, ?, ?)
+                insert into video_scene_citations
+                    (scene_id, chunk_id, ordinal, document_filename, page_number, passage)
+                values (?, ?, ?,
+                        (select d.filename from document_chunks c
+                            join documents d on d.id = c.document_id where c.id = ?),
+                        (select page_number from document_chunks where id = ?),
+                        (select left(content, 240) from document_chunks where id = ?))
                 on conflict do nothing
                 """, batch);
     }
@@ -52,18 +65,29 @@ public class VideoCitationRepository {
     // than one per scene: six scenes is six round trips to Supabase for a page that is polled
     // every two seconds while a render runs.
     //
-    // A chunk whose document was deleted simply is not here — the foreign key removed the row —
-    // which is the behaviour a citation rail wants: a source that no longer exists should vanish,
-    // not render as a dead link.
+    // **Left joins, and the live row preferred over the snapshot wherever there is one (Phase
+    // 27.3).** Before this phase a deleted document took its citations with it, and that was
+    // described here as the behaviour a rail wants — which was true only while nobody could delete
+    // a document except by dropping the whole course. With a delete verb it means a video that
+    // played with four sources on Monday plays with none on Tuesday and says nothing about it.
+    //
+    // So: coalesce. A citation whose chunk still exists reads live, so an edited corpus is never
+    // shown stale text; one whose chunk is gone reads its snapshot, keeps its place in the rail,
+    // and carries a null chunkId and documentId — which is how the client knows not to offer a
+    // click-through to a page that is not there.
     public Map<UUID, List<Citation>> findByJob(UUID jobId) {
         Map<UUID, List<Citation>> bySceneId = new HashMap<>();
         jdbc.query("""
-                select vsc.scene_id, vsc.ordinal, c.id as chunk_id, c.document_id, c.page_number,
-                       c.content, c.modality, d.filename, d.source
+                select vsc.scene_id, vsc.ordinal, c.id as chunk_id, c.document_id,
+                       coalesce(c.page_number, vsc.page_number) as page_number,
+                       coalesce(c.content, vsc.passage)         as content,
+                       c.modality,
+                       coalesce(d.filename, vsc.document_filename, 'a deleted document') as filename,
+                       coalesce(d.source, 'UPLOAD')             as source
                 from video_scene_citations vsc
                 join video_scenes s on s.id = vsc.scene_id
-                join document_chunks c on c.id = vsc.chunk_id
-                join documents d on d.id = c.document_id
+                left join document_chunks c on c.id = vsc.chunk_id
+                left join documents d on d.id = c.document_id
                 where s.job_id = ?
                 order by s.scene_index, vsc.ordinal
                 """, rs -> {
@@ -71,8 +95,8 @@ public class VideoCitationRepository {
             String content = rs.getString("content");
             Citation citation = new Citation(
                     rs.getInt("ordinal"),
-                    UUID.fromString(rs.getString("chunk_id")),
-                    UUID.fromString(rs.getString("document_id")),
+                    uuidOrNull(rs.getString("chunk_id")),
+                    uuidOrNull(rs.getString("document_id")),
                     rs.getString("filename"),
                     DocumentSource.valueOf(rs.getString("source")),
                     (Integer) rs.getObject("page_number"),
@@ -81,6 +105,10 @@ public class VideoCitationRepository {
             bySceneId.computeIfAbsent(sceneId, key -> new ArrayList<>()).add(citation);
         }, jobId);
         return bySceneId;
+    }
+
+    private static UUID uuidOrNull(String value) {
+        return value == null ? null : UUID.fromString(value);
     }
 
     // Citation.from does this for a RetrievedChunk; this row is not one, and duplicating four

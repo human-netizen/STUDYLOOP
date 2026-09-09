@@ -35,6 +35,57 @@ export async function pageCountOf(file: File): Promise<number | null> {
   }
 }
 
+// Phase 27.1 - the same parse, kept open.
+//
+// **pageCountOf destroys the document immediately, which is correct for a counter and wrong for a
+// filmstrip.** Every getDocument call spins up a pdf.js worker and re-parses the file; rendering
+// six thumbnails that way would be six workers and six parses of a 25 MB book. So the picker opens
+// the file once, holds the handle for as long as the panel is on screen, and destroys it on
+// unmount.
+//
+// Returns null on a file pdf.js cannot parse, for the same reason pageCountOf does: an encrypted
+// or malformed PDF should fall through to the ordinary upload and get the extractor's real error
+// message, not be refused by a preview.
+export interface PickedPdf {
+  pages: number
+  render: (pageNumber: number, canvas: HTMLCanvasElement, maxWidth: number) => Promise<void>
+  destroy: () => void
+}
+
+export async function openPdf(file: File): Promise<PickedPdf | null> {
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const doc = await pdfjs.getDocument({ data: bytes }).promise
+    if (doc.numPages < 1) {
+      void doc.destroy()
+      return null
+    }
+    return {
+      pages: doc.numPages,
+      render: async (pageNumber, canvas, maxWidth) => {
+        const page = await doc.getPage(pageNumber)
+        // Scale to the width the thumbnail is drawn at rather than rendering at 1.0 and letting
+        // CSS shrink it: a 300-page textbook page at full scale is a megabyte of canvas per
+        // thumbnail, and the reader is looking at a 150px-wide picture either way.
+        const unscaled = page.getViewport({ scale: 1 })
+        const viewport = page.getViewport({ scale: maxWidth / unscaled.width })
+        const context = canvas.getContext('2d')
+        if (!context) return
+        canvas.width = Math.floor(viewport.width)
+        canvas.height = Math.floor(viewport.height)
+        await page.render({ canvas, canvasContext: context, viewport }).promise
+        // pdf.js keeps the page's operator list cached on the proxy until it is told not to.
+        page.cleanup()
+      },
+      destroy: () => {
+        void doc.destroy()
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
 // The pre-upload estimate, in words.
 //
 // **Mirrors IngestionEstimate.java, and deliberately makes the weaker claim of the two.** The

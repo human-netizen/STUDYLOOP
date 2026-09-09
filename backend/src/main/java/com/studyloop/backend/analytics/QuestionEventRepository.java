@@ -43,16 +43,26 @@ class QuestionEventRepository {
 
     // One statement for the whole citation set; a question grounded on six chunks usually spans
     // two or three documents, so this is a handful of rows at most.
+    //
+    // **The filename is copied in, not joined out (Phase 27.3).** The foreign key is `on delete
+    // set null` now that a document can be deleted, and a null document_id with no name beside it
+    // would turn a question that was answered from Lecture 07 into a question that was answered
+    // from nothing — which is the same class of lie as attributing a refusal to a lecture, and
+    // this table already refuses to do that. The subselect is on the write path rather than the
+    // read path deliberately: it runs a handful of times per question, and the read it replaces
+    // would run per row on a page that renders hundreds.
     void insertEventDocuments(UUID eventId, Collection<UUID> documentIds) {
         if (documentIds.isEmpty()) {
             return;
         }
         List<Object[]> batch = documentIds.stream()
-                .map(documentId -> new Object[] { eventId, documentId })
+                .map(documentId -> new Object[] { eventId, documentId, documentId })
                 .toList();
-        jdbc.batchUpdate(
-                "insert into question_event_documents (question_event_id, document_id) values (?, ?)",
-                batch);
+        jdbc.batchUpdate("""
+                insert into question_event_documents
+                    (question_event_id, document_id, document_filename)
+                values (?, ?, (select filename from documents where id = ?))
+                """, batch);
     }
 
     // ── reads (instructor page) ─────────────────────────────────────────────────────────────
@@ -82,6 +92,37 @@ class QuestionEventRepository {
                 group by d.id, d.filename, d.created_at
                 order by question_count desc, d.filename
                 """, HEAT_MAPPER, Timestamp.from(since), courseId);
+    }
+
+    // Phase 27.3 — the questions whose lecture has since been deleted, grouped by the name it had.
+    //
+    // A second query rather than a branch inside the one above, because there is no id left to
+    // group on — the grouping key is the name the document had. The rows join the same list the
+    // page renders, carrying a null id, which is what keeps the share denominator honest: a
+    // question that landed on a deleted lecture is still a question that landed on a lecture.
+    //
+    // Without this the totals stop reconciling after any delete — `question_events` keeps the
+    // question and `grounded = true`, and the per-lecture heat silently loses it.
+    List<RetiredHeatRow> deletedLectureHeat(UUID courseId, Instant since) {
+        return jdbc.query("""
+                select coalesce(ed.document_filename, 'a deleted document') as filename,
+                       count(distinct e.id)       as question_count,
+                       count(distinct e.asked_by) as distinct_askers,
+                       max(e.created_at)          as last_asked_at
+                from question_event_documents ed
+                join question_events e on e.id = ed.question_event_id
+                where ed.document_id is null
+                  and e.course_space_id = ?
+                  and e.created_at >= ?
+                group by ed.document_filename
+                order by question_count desc, filename
+                """,
+                (rs, row) -> new RetiredHeatRow(
+                        rs.getString("filename"),
+                        rs.getInt("question_count"),
+                        rs.getInt("distinct_askers"),
+                        rs.getTimestamp("last_asked_at").toInstant()),
+                courseId, Timestamp.from(since));
     }
 
     // Phase 20.3 — how many times *this* student has already asked *this* course something that
@@ -205,12 +246,16 @@ class QuestionEventRepository {
 
     // Which documents each of those questions was grounded on, so a cluster can report the
     // lectures behind it without a second round trip per member.
+    // Deleted documents are excluded rather than mapped to null: a cluster reports which lectures
+    // its questions landed on so an instructor can go and read them, and a row that names nothing
+    // openable is not that. The count above it is unaffected — it comes from the events.
     List<EventDocument> documentsFor(UUID courseId, Instant since) {
         return jdbc.query("""
                 select ed.question_event_id, ed.document_id
                 from question_event_documents ed
                 join question_events e on e.id = ed.question_event_id
                 where e.course_space_id = ? and e.created_at >= ?
+                  and ed.document_id is not null
                 """,
                 (rs, row) -> new EventDocument(
                         UUID.fromString(rs.getString("question_event_id")),
@@ -307,6 +352,10 @@ class QuestionEventRepository {
     }
 
     record LectureHeatRow(UUID documentId, String filename, int questionCount, int distinctAskers,
+                          Instant lastAskedAt) { }
+
+    // The same numbers with no id behind them, because there is no row left to link to.
+    record RetiredHeatRow(String filename, int questionCount, int distinctAskers,
                           Instant lastAskedAt) { }
 
     // `escalated` counts refusals a student then asked from general knowledge (20.2). It is a

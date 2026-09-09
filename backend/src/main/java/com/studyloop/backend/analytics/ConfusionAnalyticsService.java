@@ -3,6 +3,7 @@ package com.studyloop.backend.analytics;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.analytics.QuestionEventRepository.LectureHeatRow;
+import com.studyloop.backend.analytics.QuestionEventRepository.RetiredHeatRow;
 import com.studyloop.backend.analytics.QuestionEventRepository.StoredCluster;
 import com.studyloop.backend.analytics.QuestionEventRepository.Totals;
 import com.studyloop.backend.analytics.QuestionEventRepository.UngroundedRow;
@@ -79,7 +80,12 @@ public class ConfusionAnalyticsService {
 
         Totals totals = repository.totals(courseId, since);
         List<LectureHeatRow> heatRows = repository.lectureHeat(courseId, since);
-        List<LectureHeat> lectures = toLectureHeat(heatRows);
+        // Phase 27.3 — questions that landed on a document somebody has since deleted. They are
+        // in the same list with a null id rather than in a section of their own, because the share
+        // each bar shows is a fraction of the attributed total and leaving these out would inflate
+        // every surviving lecture's share by exactly the amount that was deleted.
+        List<LectureHeat> lectures = toLectureHeat(
+                heatRows, repository.deletedLectureHeat(courseId, since));
         Map<UUID, String> filenames = filenamesFrom(heatRows);
 
         List<TopicCluster> topics = repository.clusters(courseId, properties.maxTopics()).stream()
@@ -104,14 +110,25 @@ public class ConfusionAnalyticsService {
     // Share is computed against the sum of the attributed counts, not against totals.asked():
     // ungrounded questions are counted in the totals but belong to no lecture, so dividing by the
     // course total would make every bar short and none of them add up to anything.
-    private static List<LectureHeat> toLectureHeat(List<LectureHeatRow> rows) {
-        int attributed = rows.stream().mapToInt(LectureHeatRow::questionCount).sum();
-        List<LectureHeat> lectures = new ArrayList<>(rows.size());
+    private static List<LectureHeat> toLectureHeat(List<LectureHeatRow> rows,
+                                                   List<RetiredHeatRow> deleted) {
+        int attributed = rows.stream().mapToInt(LectureHeatRow::questionCount).sum()
+                + deleted.stream().mapToInt(RetiredHeatRow::questionCount).sum();
+        List<LectureHeat> lectures = new ArrayList<>(rows.size() + deleted.size());
         for (LectureHeatRow row : rows) {
             double share = attributed == 0 ? 0.0 : (double) row.questionCount() / attributed;
             lectures.add(new LectureHeat(row.documentId(), row.filename(), row.questionCount(),
                     row.distinctAskers(), share, row.lastAskedAt()));
         }
+        // A null documentId is the whole signal on the client: the row renders as a name with no
+        // link, because there is nothing left to open.
+        for (RetiredHeatRow row : deleted) {
+            double share = attributed == 0 ? 0.0 : (double) row.questionCount() / attributed;
+            lectures.add(new LectureHeat(null, row.filename(), row.questionCount(),
+                    row.distinctAskers(), share, row.lastAskedAt()));
+        }
+        lectures.sort(Comparator.comparingInt(LectureHeat::questionCount).reversed()
+                .thenComparing(LectureHeat::filename));
         return lectures;
     }
 

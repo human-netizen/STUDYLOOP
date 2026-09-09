@@ -19,6 +19,28 @@ export interface PdfTarget {
   index?: number
 }
 
+// A citation the reader can actually open, or null when there is nothing to open (Phase
+// 27.3). A video scene whose source document was deleted still carries its citation — the
+// filename, page and passage were snapshotted when the scene was written — but the document
+// id is gone, and offering a click-through would be a 404 dressed as a source.
+//
+// A function rather than a cast at each call site: this is the one place that decides what
+// makes a citation openable, and the type system now asks the question at every caller.
+export function pdfTargetOf(citation: {
+  documentId: string | null
+  filename: string
+  pageNumber: number | null
+  index?: number
+}): PdfTarget | null {
+  if (citation.documentId == null) return null
+  return {
+    documentId: citation.documentId,
+    filename: citation.filename,
+    pageNumber: citation.pageNumber,
+    index: citation.index,
+  }
+}
+
 // A right-side drawer that renders a PDF, opened at the target's page. Fetches the bytes once
 // (auth-guarded), then lets the reader page around. Remounted by the parent (keyed on
 // documentId) when the target points at a different document.

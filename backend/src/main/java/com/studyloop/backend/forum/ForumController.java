@@ -8,6 +8,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import com.studyloop.backend.forum.ForumService.ThreadDeletion;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -71,5 +73,15 @@ public class ForumController {
                                     @PathVariable UUID threadId,
                                     @PathVariable UUID answerId) {
         return forumService.accept(UUID.fromString(authentication.getName()), courseId, threadId, answerId);
+    }
+
+    // Phase 27.4 - author or manager. Answers with what survived rather than 204: an accepted
+    // answer that became course material is still there, and a caller who is told nothing will
+    // assume it went with the thread.
+    @DeleteMapping("/{threadId}")
+    public ThreadDeletion delete(Authentication authentication,
+                                 @PathVariable UUID courseId,
+                                 @PathVariable UUID threadId) {
+        return forumService.delete(UUID.fromString(authentication.getName()), courseId, threadId);
     }
 }

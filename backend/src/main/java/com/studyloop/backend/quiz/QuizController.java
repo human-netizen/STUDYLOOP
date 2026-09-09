@@ -10,6 +10,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -68,5 +70,14 @@ public class QuizController {
                                                  @PathVariable UUID courseId,
                                                  @PathVariable UUID quizId) {
         return gradingService.listAttempts(UUID.fromString(authentication.getName()), courseId, quizId);
+    }
+
+    // Phase 27.4 - author or manager. 204, because there is nothing left to describe.
+    @DeleteMapping("/{quizId}")
+    public ResponseEntity<Void> delete(Authentication authentication,
+                                       @PathVariable UUID courseId,
+                                       @PathVariable UUID quizId) {
+        quizService.delete(UUID.fromString(authentication.getName()), courseId, quizId);
+        return ResponseEntity.noContent().build();
     }
 }

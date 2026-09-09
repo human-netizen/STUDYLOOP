@@ -10,6 +10,10 @@ import java.util.UUID;
 // of the chunk text; the full jump-to-source viewer comes in Phase 6.2.
 public record Citation(
         int index,
+        // Both null only on a video scene whose source document was deleted (Phase 27.3): the
+        // citation still reads, from the snapshot taken when the scene was written, and the client
+        // shows it without a click-through. Never null on a chat answer, which is grounded on
+        // chunks it retrieved a moment earlier.
         UUID chunkId,
         UUID documentId,
         String filename,

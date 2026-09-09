@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ApiError, coursesApi } from '../lib/api'
+import { ApiError, authApi, coursesApi, errorMessage } from '../lib/api'
 import type { CourseResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import {
   Button,
+  Confirm,
   Empty,
   ErrorText,
   Eyebrow,
@@ -20,19 +21,24 @@ import {
   SectionHead,
 } from '../components/ui'
 import { PANEL, cx } from '../lib/style'
+import { useAuth } from '../lib/auth'
 
 export function CoursesPage() {
   const [courses, setCourses] = useState<CourseResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Phase 27.4. Off by default, which is the entire point of archiving a course; the toggle
+  // is how a finished semester is found again rather than lost.
+  const [showArchived, setShowArchived] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
     coursesApi
-      .list()
+      .list(0, 20, showArchived)
       .then((page) => setCourses(page.content))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load courses.'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [showArchived])
 
   function addCourse(course: CourseResponse) {
     // New courses sort newest-first, matching the backend's default ordering.
@@ -55,12 +61,18 @@ export function CoursesPage() {
         </div>
       </section>
 
-      <section>
+      <section className="mb-14">
         <SectionHead
           index="02 · Library"
           title="Courses"
           description={courses.length > 0 ? `${courses.length} in your library` : undefined}
         />
+
+        <div className="mb-3 flex justify-end">
+          <Button variant="quiet" size="sm" onClick={() => setShowArchived((on) => !on)}>
+            {showArchived ? 'Hide archived' : 'Show archived'}
+          </Button>
+        </div>
 
         {loading && <Loading />}
         {error && <ErrorText>{error}</ErrorText>}
@@ -86,6 +98,7 @@ export function CoursesPage() {
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
+                    {course.archivedAt && <Pill tone="neutral">archived</Pill>}
                     <Pill>{course.myRole}</Pill>
                     <span
                       aria-hidden
@@ -100,6 +113,8 @@ export function CoursesPage() {
           </Rows>
         )}
       </section>
+
+      <DangerZone />
     </AppShell>
   )
 }
@@ -201,4 +216,52 @@ function parseInviteToken(input: string): string {
   if (marker >= 0 && parts[marker + 1]) return parts[marker + 1]
   const last = parts[parts.length - 1]
   return last === 'accept' ? (parts[parts.length - 2] ?? '') : last
+}
+
+// Phase 27.4 — the last verb, on the only page in this application that is not inside a course.
+//
+// **The row survives as a tombstone and everything personal is destroyed**, which is a deliberate
+// choice and not a shortcut: ten foreign keys point at `users` from tables that belong to courses
+// rather than to people — the material somebody uploaded, the threads they answered, the quizzes
+// they generated. Deleting the row would either fail on those or punch holes in a course's own
+// history. So the email, the name and the password go, every membership goes, and the private
+// work goes; what stays is what the course owns.
+//
+// It is refused while the caller is the last owner of any course, and the refusal names them —
+// the same rule as leaving one, applied to all of them at once.
+function DangerZone() {
+  const { logout } = useAuth()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <section>
+      <SectionHead
+        index="03 · Account"
+        title="Delete your account"
+        description="Your email, your name, your private notes, your conversations and your cards. What you contributed to a course stays with the course."
+      />
+      <div className="flex justify-start">
+        <Confirm
+          label="Delete my account"
+          question="Delete your account? This cannot be undone."
+          detail="Your notes, chats, flashcards and quiz attempts go. Material you uploaded, threads you answered and the anonymised question counts stay with their courses — they are the course's, not yours."
+          confirmLabel="Delete my account"
+          busy={busy}
+          onConfirm={() => {
+            setBusy(true)
+            setError(null)
+            authApi
+              .deleteAccount()
+              .then(() => logout())
+              .catch((err) => {
+                setError(errorMessage(err, 'Could not delete your account.'))
+                setBusy(false)
+              })
+          }}
+        />
+      </div>
+      {error && <ErrorText className="mt-3">{error}</ErrorText>}
+    </section>
+  )
 }

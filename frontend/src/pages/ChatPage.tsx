@@ -4,7 +4,7 @@ import { ApiError, chatApi, coursesApi, errorMessage, flashcardsApi, forumApi } 
 import type { AskedBefore, Citation, CourseResponse } from '../lib/types'
 import { AppShell } from '../components/AppShell'
 import { Markdown } from '../components/Markdown'
-import { PdfViewer } from '../components/PdfViewer'
+import { PdfViewer, pdfTargetOf, type PdfTarget } from '../components/PdfViewer'
 import { Button, ErrorText, Eyebrow } from '../components/ui'
 
 // One rendered turn in the thread. Assistant turns grow token-by-token while `streaming`, and
@@ -43,7 +43,10 @@ export function ChatPage() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
-  const [activeCitation, setActiveCitation] = useState<Citation | null>(null)
+  // A PdfTarget rather than the Citation itself: a citation is not necessarily openable, and
+  // pdfTargetOf is what decides (Phase 27.3). Chat's own citations always are — they are
+  // grounded on chunks retrieved a moment earlier — so this narrows and never drops one.
+  const [activeCitation, setActiveCitation] = useState<PdfTarget | null>(null)
 
   const threadRef = useRef<HTMLDivElement>(null)
 
@@ -157,7 +160,7 @@ export function ChatPage() {
               question={turns[i - 1]?.text ?? ''}
               courseId={id}
               conversationId={conversationId}
-              onCite={setActiveCitation}
+              onCite={(cite) => setActiveCitation(pdfTargetOf(cite))}
               onEscalated={(threadId) => navigate(`/courses/${id}/forum/${threadId}`)}
               onGeneralAnswer={(answer) =>
                 setTurns((current) => [

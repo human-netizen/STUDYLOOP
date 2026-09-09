@@ -5,6 +5,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from 'react'
+import { useEffect, useState } from 'react'
 import {
   BUTTON_BASE,
   BUTTON_VARIANT,
@@ -288,6 +289,93 @@ export function ProgressBar({
           style={{ width: `${pct}%` }}
         />
       </div>
+    </div>
+  )
+}
+
+// Phase 27 — the confirmation every destructive action in this application shares.
+//
+// **The house rule applied to a delete: degrading is acceptable, degrading silently is the
+// defect.** A button that asks "are you sure?" is asking a question the reader has no way to
+// answer, because the consequences are spread over five tables they have never seen. So `detail`
+// is not decoration — it is the counted consequence, read from the server, and it is what turns
+// this from a delete button into an informed one.
+//
+// Two clicks in place rather than a modal: the row stays where it is, the reader keeps their
+// place in the list, and Escape or anywhere-else cancels because the second click is the only
+// thing that commits.
+export function Confirm({
+  label,
+  question,
+  detail,
+  confirmLabel = 'Delete',
+  busy,
+  onConfirm,
+  onOpen,
+}: {
+  label: string
+  question: string
+  // What this will destroy, in numbers. Undefined while it is still being fetched — the confirm
+  // button waits for it rather than letting somebody confirm a consequence they were not shown.
+  detail?: string | null
+  confirmLabel?: string
+  busy?: boolean
+  onConfirm: () => void
+  // Called when the confirmation opens, so the caller can fetch `detail` then rather than for
+  // every row in a list nobody is deleting.
+  onOpen?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  if (!open) {
+    return (
+      <Button
+        variant="quiet"
+        size="sm"
+        disabled={busy}
+        onClick={() => {
+          setOpen(true)
+          onOpen?.()
+        }}
+      >
+        {label}
+      </Button>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2 rounded-card border border-bad/40 bg-bad-bg px-3 py-2">
+      <div className="mr-auto min-w-0">
+        <p className="m-0 text-[13px] text-ink">{question}</p>
+        {detail === undefined ? (
+          <Meta>Counting what this would affect…</Meta>
+        ) : (
+          detail && <Meta className="block">{detail}</Meta>
+        )}
+      </div>
+      <Button variant="quiet" size="sm" disabled={busy} onClick={() => setOpen(false)}>
+        Cancel
+      </Button>
+      <Button
+        variant="danger"
+        size="sm"
+        disabled={busy || detail === undefined}
+        onClick={() => {
+          setOpen(false)
+          onConfirm()
+        }}
+      >
+        {busy ? 'Working…' : confirmLabel}
+      </Button>
     </div>
   )
 }

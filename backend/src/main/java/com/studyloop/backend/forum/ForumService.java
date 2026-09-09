@@ -2,6 +2,7 @@ package com.studyloop.backend.forum;
 
 import com.studyloop.backend.analytics.QuestionLogService;
 import com.studyloop.backend.course.CourseAccess;
+import com.studyloop.backend.course.InsufficientCourseRoleException;
 import com.studyloop.backend.course.Membership;
 import com.studyloop.backend.course.MembershipRole;
 import com.studyloop.backend.forum.ForumAnswerRepository.ThreadAnswerCount;
@@ -198,4 +199,37 @@ public class ForumService {
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.strip();
     }
+
+    // Phase 27.4 - author or manager.
+    //
+    // **The one rule worth writing down: deleting a thread must not silently delete material.**
+    // An accepted answer is written back into the corpus as a `source = FORUM` document (Phase
+    // 9.2), and that document is cited by chat answers, may have absorbed questions in the
+    // heatmap, and is exactly the artifact the accept flow exists to produce. Cascading it away
+    // because somebody tidied up a thread would destroy the durable half of the feature to remove
+    // the conversational half.
+    //
+    // So the document is left alone, and the response says so rather than leaving the caller to
+    // discover it. Retiring it instead was the alternative, and it is the wrong default: a manager
+    // deleting a resolved thread is tidying a list, not withdrawing an answer. Retiring it is one
+    // click away on the document itself if that is what they meant.
+    @Transactional
+    public ThreadDeletion delete(UUID actorId, UUID courseId, UUID threadId) {
+        Membership actor = courseAccess.requireMember(actorId, courseId);
+        ForumThread thread = threadRepository.findByIdAndCourseSpaceId(threadId, courseId)
+                .orElseThrow(() -> new ForumThreadNotFoundException(threadId));
+        boolean mine = thread.getCreatedBy() != null
+                && thread.getCreatedBy().getId().equals(actorId);
+        if (!mine && actor.getRole() == MembershipRole.MEMBER) {
+            throw new InsufficientCourseRoleException(courseId);
+        }
+        UUID keptDocumentId = thread.getAnswerDocumentId();
+        threadRepository.delete(thread);
+        return new ThreadDeletion(keptDocumentId);
+    }
+
+    // What the delete left behind. Non-null when this thread had an accepted answer that is now a
+    // document in the corpus - the client says "the accepted answer stays in the course material"
+    // and links to it.
+    public record ThreadDeletion(UUID keptDocumentId) { }
 }

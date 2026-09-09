@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.chat.ChatClient;
 import com.studyloop.backend.chat.LlmMessage;
 import com.studyloop.backend.course.CourseAccess;
+import com.studyloop.backend.course.InsufficientCourseRoleException;
 import com.studyloop.backend.course.Membership;
+import com.studyloop.backend.course.MembershipRole;
 import com.studyloop.backend.document.ChunkModality;
 import com.studyloop.backend.document.Document;
 import com.studyloop.backend.document.DocumentChunk;
@@ -339,5 +341,25 @@ public class QuizService {
         boolean isMultipleChoice() {
             return !"short_answer".equalsIgnoreCase(type);
         }
+    }
+
+    // Phase 27.4 - author or manager. A quiz is generated material rather than a record of
+    // anything, so this is an ordinary delete: quiz_questions, their options and every attempt
+    // (with its per-question answers) cascade from the row.
+    //
+    // **Attempts cascade, and that is the part worth stating out loud.** Deleting a quiz throws
+    // away other people's scores on it. That is right for a quiz - the questions are gone, so a
+    // score out of ten on questions nobody can read is not a record, it is a number - but it is
+    // the reason this is manager-or-author and not any-member.
+    @Transactional
+    public void delete(UUID actorId, UUID courseId, UUID quizId) {
+        Membership actor = courseAccess.requireMember(actorId, courseId);
+        Quiz quiz = quizRepository.findByIdAndCourseSpaceId(quizId, courseId)
+                .orElseThrow(() -> new QuizNotFoundException(quizId));
+        boolean mine = quiz.getCreatedBy().getId().equals(actorId);
+        if (!mine && actor.getRole() == MembershipRole.MEMBER) {
+            throw new InsufficientCourseRoleException(courseId);
+        }
+        quizRepository.delete(quiz);
     }
 }

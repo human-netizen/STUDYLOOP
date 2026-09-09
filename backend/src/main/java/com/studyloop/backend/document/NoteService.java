@@ -4,6 +4,7 @@ import com.studyloop.backend.chat.SemanticCacheService;
 import com.studyloop.backend.course.CourseAccess;
 import com.studyloop.backend.course.Membership;
 import com.studyloop.backend.course.MembershipRole;
+import com.studyloop.backend.document.DocumentImpactRepository.DocumentImpact;
 import com.studyloop.backend.document.DocumentService.UploadOutcome;
 import com.studyloop.backend.document.dto.NoteBlockResponse;
 import com.studyloop.backend.document.dto.NoteResponse;
@@ -41,6 +42,7 @@ public class NoteService {
     private final DocumentNoteBlockService noteBlockService;
     private final CourseAccess courseAccess;
     private final SemanticCacheService semanticCache;
+    private final DocumentLifecycleService lifecycleService;
 
     // requireMember, not requireManager. This is the one document a student may add to a course,
     // and it is theirs: it starts owner-visible, so "adding" it changes nothing anybody else can
@@ -159,5 +161,17 @@ public class NoteService {
         int dot = filename.lastIndexOf('.');
         String stem = dot > 0 ? filename.substring(0, dot) : filename;
         return stem.replaceAll("[_-]+", " ").replaceAll("\\s+", " ").strip();
+    }
+
+    // Phase 27.4 - delegated rather than reimplemented.
+    //
+    // A note *is* a Document, which is the whole reason Phase 16.3 made it one, so its delete is
+    // the document delete: the same cascade, the same byte removal, the same impact counts. The
+    // ownership rule it needs is already the one DocumentLifecycleService applies - a note whose
+    // visibility is still OWNER may be deleted by its owner, and a promoted one is course material
+    // and needs a manager.
+    @Transactional
+    public DocumentImpact delete(UUID actorId, UUID courseId, UUID noteId) {
+        return lifecycleService.delete(actorId, courseId, noteId);
     }
 }

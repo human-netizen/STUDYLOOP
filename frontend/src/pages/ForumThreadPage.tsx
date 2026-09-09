@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { ApiError, coursesApi, forumApi } from '../lib/api'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ApiError, coursesApi, errorMessage, forumApi } from '../lib/api'
 import type { ForumAnswer, ForumThreadDetail } from '../lib/types'
 import { AppShell, BackLink } from '../components/AppShell'
 import { Markdown } from '../components/Markdown'
@@ -11,6 +11,7 @@ import {
   Eyebrow,
   Loading,
   Meta,
+  Confirm,
   PageTitle,
   Panel,
   Pill,
@@ -24,11 +25,25 @@ import { cx } from '../lib/style'
 // `canAccept`, so this page never has to reason about roles itself.
 export function ForumThreadPage() {
   const { id = '', threadId = '' } = useParams()
+  const navigate = useNavigate()
 
   const [courseName, setCourseName] = useState<string | undefined>()
   const [thread, setThread] = useState<ForumThreadDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  async function removeThread() {
+    setDeleting(true)
+    setError(null)
+    try {
+      await forumApi.remove(id, threadId)
+      navigate(`/courses/${id}/forum`)
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete this discussion.'))
+      setDeleting(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -83,6 +98,23 @@ export function ForumThreadPage() {
                 asked by {thread.authorName} · {new Date(thread.createdAt).toLocaleDateString()}
                 {thread.questionEventId && ' · escalated from a question the assistant refused'}
               </Meta>
+            }
+            action={
+              /* Phase 27.4 — author or manager, decided by the server. The detail line is the
+                 one rule worth stating on screen: an accepted answer that became course
+                 material is deliberately left in the corpus, so deleting the discussion does
+                 not quietly delete the knowledge it produced. */
+              <Confirm
+                label="Delete thread"
+                question="Delete this discussion?"
+                detail={
+                  thread.status === 'ANSWERED'
+                    ? 'Every reply goes. An accepted answer that was written into the course material stays there — retire it separately if that is what you meant.'
+                    : 'Every reply goes with it.'
+                }
+                busy={deleting}
+                onConfirm={() => void removeThread()}
+              />
             }
           />
 

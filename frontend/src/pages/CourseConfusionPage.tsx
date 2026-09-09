@@ -155,7 +155,7 @@ export function CourseConfusionPage() {
             ) : (
               <Rows>
                 {report.lectures.map((lecture) => (
-                  <LectureRow key={lecture.documentId} lecture={lecture} />
+                  <LectureRow key={lecture.documentId ?? lecture.filename} lecture={lecture} />
                 ))}
               </Rows>
             )}
@@ -248,6 +248,13 @@ function LectureRow({ lecture }: { lecture: LectureHeat }) {
               ? 'no questions in this window'
               : `${count(lecture.distinctAskers)} ${plural(lecture.distinctAskers, 'student')} · last asked ${shortDate(lecture.lastAskedAt)}`}
           </Meta>
+          {/* Phase 27.3 — a lecture somebody deleted. The questions that landed on it are
+              still counted and still take their share of the bar, because dropping them is
+              what made these totals stop reconciling with the course total above. The row is
+              named and marked rather than silently missing. */}
+          {lecture.documentId == null && (
+            <Meta className="block text-warn">this document is no longer in the course</Meta>
+          )}
           <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-surface-2">
             <div
               className="h-full rounded-full bg-accent"

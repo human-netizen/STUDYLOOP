@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, coursesApi, forumApi, videosApi } from '../lib/api'
 import type { Citation, CourseResponse, VideoJob, VideoLibrary, VideoScene } from '../lib/types'
 import { AppShell } from '../components/AppShell'
-import { PdfViewer } from '../components/PdfViewer'
+import { PdfViewer, pdfTargetOf, type PdfTarget } from '../components/PdfViewer'
 import {
   Button,
   Empty,
@@ -46,7 +46,7 @@ export function CourseVideosPage() {
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [citation, setCitation] = useState<Citation | null>(null)
+  const [citation, setCitation] = useState<PdfTarget | null>(null)
 
   useEffect(() => {
     let active = true
@@ -191,7 +191,7 @@ export function CourseVideosPage() {
                 <JobDetail
                   courseId={id}
                   job={selected}
-                  onCite={setCitation}
+                  onCite={(cite) => setCitation(pdfTargetOf(cite))}
                   onDelete={() => void remove(selected.id)}
                   onAskInChat={() => navigate(`/courses/${id}/chat`)}
                 />
@@ -428,6 +428,19 @@ function SceneRow({ scene, onCite }: { scene: VideoScene; onCite: (c: Citation) 
 // The same link chat's citations use, because it is the same promise: this claim came from that
 // page, and here is the page.
 function SourceLink({ citation, onCite }: { citation: Citation; onCite: (c: Citation) => void }) {
+  // Phase 27.3 — the source was deleted after this video was rendered. The citation still
+  // reads, from the snapshot the scene was written with, and it does not offer a click-through to
+  // a document that is not there. Hiding it instead was the behaviour before this phase, and it
+  // meant a video that played with four sources on Monday played with none on Tuesday and said
+  // nothing about it.
+  if (citation.documentId == null) {
+    return (
+      <span className="tnum block font-mono text-[11.5px] text-ink-muted">
+        [{citation.index}] {citation.filename}
+        {citation.pageNumber != null && ` · p.${citation.pageNumber}`} · no longer in the course
+      </span>
+    )
+  }
   if (citation.documentSource === 'FORUM') {
     return (
       <span className="tnum block font-mono text-[11.5px] text-ink-muted">

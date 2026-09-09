@@ -38,7 +38,44 @@ export interface CourseResponse {
   description: string | null
   ownerId: string
   myRole: MembershipRole
+  // When this course was archived, or null while it is active (Phase 27.4). Archiving hides
+  // it from the list and nothing else — an archived course still answers questions and still
+  // opens by direct link.
+  archivedAt: string | null
   createdAt: string
+}
+
+// A partial update: every field is optional and an omitted one is left alone (Phase 27.4).
+export interface UpdateCourseRequest {
+  name?: string
+  description?: string
+}
+
+// One person in a course. `userId` is the handle for removing them.
+export interface MemberResponse {
+  userId: string
+  displayName: string
+  email: string
+  role: MembershipRole
+  joinedAt: string
+}
+
+// What deleting a document would destroy, counted before it is (Phase 27.3). Fetched when
+// the confirmation opens, so the question the reader is asked is one they can answer.
+export interface DocumentImpact {
+  chunks: number
+  flashcards: number
+  questions: number
+  forumAnswers: number
+  sceneCitations: number
+  videos: number
+}
+
+// What survived deleting a forum thread (Phase 27.4). Non-null when the thread had an
+// accepted answer that is now a document in the corpus — which the delete deliberately
+// leaves alone, and which the client therefore has to say out loud.
+export interface ThreadDeletion {
+  keptDocumentId: string | null
 }
 
 export interface CreateCourseRequest {
@@ -73,6 +110,9 @@ export type DocumentStatus =
   | 'EMBEDDING'
   | 'READY'
   | 'FAILED'
+  // In the library, out of the corpus (Phase 27.3). Everything is still there — the row, the
+  // bytes, the chunks and the vectors — and un-retiring is one request with no model call.
+  | 'RETIRED'
 
 // What language a document's text is written in (Phase 19.1). Two values because the backend
 // detects two scripts — it is a fact about the encoding rather than a guess, and a wider union
@@ -171,8 +211,11 @@ export interface DocumentSummary {
 // cached answers predate the field, so treat anything that isn't 'FORUM' as openable.
 export interface Citation {
   index: number
-  chunkId: string
-  documentId: string
+  // Both null only on a video scene whose source document was deleted (Phase 27.3): the
+  // citation still reads, from the snapshot taken when the scene was written, but there is
+  // nothing left to open.
+  chunkId: string | null
+  documentId: string | null
   filename: string
   documentSource: DocumentSourceKind | null
   pageNumber: number | null
@@ -455,7 +498,10 @@ export interface ConfusionTotals {
 // One row of the heatmap. `share` is this lecture's fraction of all lecture-attributed
 // questions — what the bar length encodes.
 export interface LectureHeat {
-  documentId: string
+  // Null for a lecture somebody has since deleted (Phase 27.3). The questions that landed on
+  // it still count and still take their share of the bar — dropping them is what made the
+  // per-lecture totals stop reconciling with the course total — but there is nothing to open.
+  documentId: string | null
   filename: string
   questionCount: number
   distinctAskers: number

@@ -15,6 +15,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class DocumentIngestionListener {
 
     private final DocumentIngestionService ingestionService;
+    private final DocumentLifecycleService lifecycleService;
 
     // The ingestion executor is not the request thread, so the usage attribution set at the edge
     // is not in force here. Naming the uploader for the length of the pipeline is what puts the
@@ -26,5 +27,32 @@ public class DocumentIngestionListener {
         try (var ignored = AiUsageContext.actor(event.uploadedBy())) {
             ingestionService.ingest(event.documentId());
         }
+    }
+
+    // Phase 27.2 — the same pipeline over bytes that are already stored. Two lines rather than a
+    // parameter on the method above, because the two events say different things and one of them
+    // has other listeners: ForumWatchService sweeps a course's open threads when a document is
+    // *uploaded*, and re-cutting a document the course has had for a month is not that event.
+    //
+    // The re-ingest spends the vision quota exactly as an upload does, so it carries an actor for
+    // exactly the same reason — without one, a 296-page re-read lands in the ledger under nobody.
+    @Async("ingestionExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onReingestRequested(DocumentReingestRequestedEvent event) {
+        try (var ignored = AiUsageContext.actor(event.requestedBy())) {
+            ingestionService.ingest(event.documentId());
+        }
+    }
+
+    // Phase 27.3 — the stored object of a document whose row has just been deleted.
+    //
+    // AFTER_COMMIT, so a rolled-back delete never destroys bytes; @Async because a bucket delete
+    // is an HTTP round trip and the caller has already been told the document is gone. The
+    // service swallows a failure here: an orphaned object costs disk, and there is no row left for
+    // a retry to find.
+    @Async("ingestionExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onBytesOrphaned(DocumentLifecycleService.DocumentBytesOrphanedEvent event) {
+        lifecycleService.removeBytes(event.storagePath());
     }
 }
