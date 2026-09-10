@@ -36,6 +36,8 @@ import type {
   ReviewCard,
   ReviewResult,
   SearchResponse,
+  StudyGuide,
+  StudyGuideLibrary,
   SubmitAttemptRequest,
   ThreadDeletion,
   TokenResponse,
@@ -652,4 +654,22 @@ export const chatApi = {
   // Phase 28.3 — a verdict on one answer, with the passages it was shown with.
   feedback: (courseId: string, body: AnswerFeedbackRequest) =>
     request<void>(`/courses/${courseId}/chat/feedback`, { method: 'POST', body, auth: true }),
+}
+
+// Phase 22 — study guides. The same shape as videosApi because it is the same kind of thing: a
+// long job asked for once, polled while it runs, and kept afterwards.
+export const guidesApi = {
+  library: (courseId: string) =>
+    request<StudyGuideLibrary>(`/courses/${courseId}/guides`, { auth: true }),
+  // 202 and the row to poll. Six model calls; there is no synchronous version of this.
+  request: (courseId: string, topic: string) =>
+    request<StudyGuide>(`/courses/${courseId}/guides`, {
+      method: 'POST',
+      body: { topic },
+      auth: true,
+    }),
+  get: (courseId: string, guideId: string) =>
+    request<StudyGuide>(`/courses/${courseId}/guides/${guideId}`, { auth: true }),
+  remove: (courseId: string, guideId: string) =>
+    request<void>(`/courses/${courseId}/guides/${guideId}`, { method: 'DELETE', auth: true }),
 }

@@ -56,6 +56,27 @@ public class AsyncConfig {
     // The queue is deliberately shallow. A backlog of 20 renders at three minutes each is an hour,
     // which is longer than anybody waits, and the rejection at the door — a 429 with the daily cap
     // in it — is a better answer than a job that sits QUEUED past the end of the session.
+    // Phase 22 — study guides. Two threads rather than one, and rather than many.
+    //
+    // Not one, because a guide is minutes of *waiting on a provider* and not seconds of saturating
+    // this machine, which is what makes the video pool a single slot; two students asking at once
+    // should not queue behind each other for no reason this process can see.
+    //
+    // Not many, because each running guide is a sequence of short transactions against a Supabase
+    // pool of five connections, and because the provider's own rate limit is the real ceiling: a
+    // Cohere trial key allows about twenty chat calls a minute, which is three guides. A deeper
+    // pool would spend the allowance faster and return 429s instead of guides.
+    @Bean("guideExecutor")
+    public ThreadPoolTaskExecutor guideExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("guide-");
+        executor.initialize();
+        return executor;
+    }
+
     @Bean("videoExecutor")
     public ThreadPoolTaskExecutor videoExecutor(VideoProperties properties) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

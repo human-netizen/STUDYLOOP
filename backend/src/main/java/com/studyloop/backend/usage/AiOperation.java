@@ -86,6 +86,17 @@ public enum AiOperation {
     // ratio of this row to VIDEO_SCRIPT is the number that decides whether generated animation is
     // worth its cost, and it is the reason the three are not one VIDEO entry.
     VIDEO_SCENE_CODE,
+    // Planning a study guide's sections from what the course has on the topic (Phase 22.1). One
+    // call per guide, and the only one of the two guide rows that does not scale with anything.
+    STUDY_GUIDE_OUTLINE,
+    // Writing one section of a guide from the passages retrieved for that section alone (22.1).
+    // Kept apart from the outline for the reason VIDEO_SCRIPT and VIDEO_SCENE_PLAN are kept apart:
+    // the two answer different questions about the bill. The outline count is how many guides were
+    // asked for; this one is how many sections the corpus could actually support — a *gap* costs
+    // one embedding and no completion, so the ratio between this row and the outline row is a
+    // measurement of coverage rather than of usage, and one line cannot go up for both reasons and
+    // still be read.
+    STUDY_GUIDE_SECTION,
     // A call no scope claimed. A row landing here means an unlabelled call site, not a bug in
     // the caller — it still costs money and still shows up in the total.
     OTHER

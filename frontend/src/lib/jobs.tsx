@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useLocation } from 'react-router-dom'
-import { documentsApi, videosApi } from './api'
+import { documentsApi, guidesApi, videosApi } from './api'
 
 // Phase 29.4 — saying when a long job has finished.
 //
@@ -32,7 +32,7 @@ import { documentsApi, videosApi } from './api'
 // permission is asked for at the moment a long job starts rather than on arrival — a prompt whose
 // answer is "why are you asking me this" is a prompt that gets denied forever.
 
-export type JobKind = 'document' | 'video'
+export type JobKind = 'document' | 'video' | 'guide'
 
 export interface JobWatch {
   kind: JobKind
@@ -168,6 +168,29 @@ async function poll(job: JobWatch): Promise<{ ok: boolean; detail: string } | nu
       }
       return null
     }
+    if (job.kind === 'guide') {
+      // Phase 22. REFUSED is reported as `ok: false` here for the same reason a refused render is:
+      // this notification exists to say whether there is something to go and read, and there is
+      // not. The page itself draws the distinction between "declined" and "broke".
+      const guide = await guidesApi.get(job.courseId, job.id)
+      if (guide.status === 'READY') {
+        return {
+          ok: true,
+          detail:
+            guide.sectionsWritten === guide.sectionsPlanned
+              ? 'The guide is ready to read.'
+              : `Ready — ${guide.sectionsPlanned - guide.sectionsWritten} of ` +
+                `${guide.sectionsPlanned} sections were gaps in your materials.`,
+        }
+      }
+      if (guide.status === 'FAILED') {
+        return { ok: false, detail: guide.error ?? 'The guide did not finish.' }
+      }
+      if (guide.status === 'REFUSED') {
+        return { ok: false, detail: 'Your materials do not cover that topic.' }
+      }
+      return null
+    }
     const video = await videosApi.get(job.courseId, job.id)
     if (video.status === 'READY') {
       return { ok: true, detail: 'The video is ready to watch.' }
@@ -182,7 +205,9 @@ async function poll(job: JobWatch): Promise<{ ok: boolean; detail: string } | nu
 }
 
 function pageOf(job: FinishedJob): string {
-  return job.kind === 'video' ? `/courses/${job.courseId}/videos` : `/courses/${job.courseId}`
+  if (job.kind === 'video') return `/courses/${job.courseId}/videos`
+  if (job.kind === 'guide') return `/courses/${job.courseId}/guides`
+  return `/courses/${job.courseId}`
 }
 
 // Asked at the moment a long job starts, which is the only moment the question makes sense. Once

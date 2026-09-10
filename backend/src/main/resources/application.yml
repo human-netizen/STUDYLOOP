@@ -623,6 +623,26 @@ studyloop:
     # lectures is at most 20 retrievals and 20 model calls per file, and every one of them is
     # skipped for a thread the assistant has already answered.
     watch-max-threads: ${FORUM_WATCH_MAX_THREADS:20}
+  guide:
+    # Phase 22 — a study guide written from the course's own materials, section by section.
+    #
+    # **No `enabled` here, and the contrast with `video` below is deliberate.** Video is off by
+    # default because it needs a sidecar container an installation may not have. A guide needs the
+    # chat client and retrieval, which every other generated feature already requires, so the gate
+    # is `chatClient.isConfigured()` — the same one summaries and quizzes sit behind. A second
+    # switch would be a second thing that can disagree with the first.
+    #
+    # The upper bound on one guide, and therefore on its cost: sections + 1 is the model-call count
+    # in the worst case. Six is where a guide is still read rather than scrolled past.
+    max-sections: ${GUIDE_MAX_SECTIONS:6}
+    # Passages per section. The same k as a chat turn on purpose — a different number would mean a
+    # guide's sections were written from a different amount of context than the chat answer to the
+    # same question, a difference nobody can see and everybody has to explain.
+    retrieval-k: ${GUIDE_RETRIEVAL_K:6}
+    # Whether the section prompt asks for a Mermaid diagram where the material has a shape worth
+    # drawing (22.2). Never a call of its own — it is one clause of the section prompt and one more
+    # field in the same JSON — so turning it off saves tokens rather than requests.
+    diagrams: ${GUIDE_DIAGRAMS:true}
   video:
     # Phase 21 — narrated, animated explanations rendered from a course's own materials.
     #

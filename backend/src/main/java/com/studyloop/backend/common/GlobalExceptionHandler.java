@@ -38,6 +38,8 @@ import com.studyloop.backend.quiz.QuizNotFoundException;
 import com.studyloop.backend.usage.QuotaExceededException;
 import com.studyloop.backend.usage.RateLimitExceededException;
 import com.studyloop.backend.usage.TokenBudgetExceededException;
+import com.studyloop.backend.guide.StudyGuideNotFoundException;
+import com.studyloop.backend.guide.StudyGuideUnavailableException;
 import com.studyloop.backend.video.VideoDailyCapExceededException;
 import com.studyloop.backend.video.VideoDisabledException;
 import com.studyloop.backend.video.VideoJobNotFoundException;
@@ -469,6 +471,28 @@ public class GlobalExceptionHandler {
                 HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
         problem.setTitle("Daily video limit reached");
         problem.setProperty("reason", "VIDEO_DAILY_CAP");
+        return problem;
+    }
+
+    // ── Phase 22 · study guides ─────────────────────────────────────────────────────────────
+
+    @ExceptionHandler(StudyGuideNotFoundException.class)
+    ProblemDetail handleStudyGuideNotFound(StudyGuideNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Study guide not found");
+        return problem;
+    }
+
+    // 503 for the reason the video one is: the endpoint exists and the provider does not. There is
+    // no equivalent of a REFUSED status here, because a topic the corpus cannot cover is a *row*
+    // rather than an error — the request was accepted and answered, and the answer was no.
+    @ExceptionHandler(StudyGuideUnavailableException.class)
+    ProblemDetail handleStudyGuideUnavailable(StudyGuideUnavailableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        problem.setTitle("Study guides unavailable");
+        problem.setProperty("reason", "GUIDE_UNAVAILABLE");
         return problem;
     }
 

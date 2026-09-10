@@ -406,4 +406,21 @@ select {
   a[href]::after {
     content: none !important;
   }
+
+  /* Phase 22.2 — a Mermaid diagram is an SVG with its colours baked in at render time, so
+     re-pointing the tokens above cannot reach it: it would print as pale grey lines on white,
+     which is to say as nothing. Mermaid is initialised with a near-monochrome palette (see
+     Mermaid.tsx) precisely so that inverting it here is correct rather than merely legible —
+     light lines on dark become dark lines on white. Re-rendering the diagram for print instead
+     would mean an async redraw racing the print dialog. */
+  .mermaid svg {
+    filter: invert(1);
+  }
+
+  /* A section and its diagram belong on one page. `figure` is already in the list above; this is
+     the heading that must not be orphaned from the prose it introduces. */
+  h2,
+  h3 {
+    break-after: avoid;
+  }
 }

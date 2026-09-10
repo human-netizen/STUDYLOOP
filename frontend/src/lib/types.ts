@@ -785,3 +785,52 @@ export interface VideoLibrary {
   usedToday: number
   jobs: VideoJob[]
 }
+
+// --- Study guides (Phase 22) ---
+
+export type StudyGuideStatus = 'QUEUED' | 'PLANNING' | 'WRITING' | 'READY' | 'FAILED' | 'REFUSED'
+
+// One section of a guide.
+//
+// **`covered` is the field the whole feature turns on.** False means the course materials do not
+// support this section: there is no body, no diagram and no citations, and the page says so in the
+// section's own place rather than dropping it. That negative line is useful to a student and is
+// something an ungrounded generator cannot produce — it has no way to know it was about to invent.
+export interface StudyGuideSection {
+  position: number
+  heading: string
+  covered: boolean
+  // Markdown with [n] markers matching `citations`. Null for a gap.
+  body: string | null
+  // Mermaid source, or null — which is the normal answer.
+  diagram: string | null
+  // Numbered from one *within this section*: [2] here is this section's second source, not the
+  // guide's. That is what per-section retrieval looks like from the outside.
+  citations: Citation[]
+}
+
+export interface StudyGuide {
+  id: string
+  courseId: string
+  topic: string
+  status: StudyGuideStatus
+  language: DocumentLanguage
+  // While it runs, written-of-planned is the progress line. Once it is READY the same pair is the
+  // coverage report: six planned and four written means two sections are not in the course.
+  sectionsPlanned: number
+  sectionsWritten: number
+  modelCalls: number
+  // Null for REFUSED, which is not a failure: the status is the whole message.
+  error: string | null
+  createdAt: string
+  completedAt: string | null
+  sections: StudyGuideSection[]
+}
+
+// One call answers both of the page's questions: can this installation write guides, and what has
+// this member already asked for. `available` is whether an AI provider is configured — there is no
+// separate feature flag, unlike videos, because a guide needs nothing videos need.
+export interface StudyGuideLibrary {
+  available: boolean
+  guides: StudyGuide[]
+}

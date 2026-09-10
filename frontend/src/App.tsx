@@ -14,6 +14,7 @@ import { FlashcardsPage } from './pages/FlashcardsPage'
 import { ReviewPage } from './pages/ReviewPage'
 import { CourseNotesPage } from './pages/CourseNotesPage'
 import { CourseVideosPage } from './pages/CourseVideosPage'
+import { CourseGuidesPage } from './pages/CourseGuidesPage'
 import { CourseConfusionPage } from './pages/CourseConfusionPage'
 import { JoinPage } from './pages/JoinPage'
 import { AdminCostsPage } from './pages/AdminCostsPage'
@@ -105,6 +106,16 @@ function App() {
         element={
           <ProtectedRoute>
             <FlashcardsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Phase 22: a study guide written from the course's materials, with the sections they
+          do not cover left as named gaps. */}
+      <Route
+        path="/courses/:id/guides"
+        element={
+          <ProtectedRoute>
+            <CourseGuidesPage />
           </ProtectedRoute>
         }
       />

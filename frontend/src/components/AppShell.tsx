@@ -50,6 +50,7 @@ function Rail({ courseName }: { courseName?: string }) {
   // the page it belongs to, which is what makes it a signal rather than a counter.
   const ingested = useJobBadge(courseId, 'document')
   const rendered = useJobBadge(courseId, 'video')
+  const written = useJobBadge(courseId, 'guide')
 
   return (
     <aside className="flex flex-col gap-6 border-b border-line bg-ground-2 px-5 py-6 print:hidden sm:px-8 lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:py-8 lg:pr-5 lg:pl-7">
@@ -84,21 +85,27 @@ function Rail({ courseName }: { courseName?: string }) {
             <RailLink to={`/courses/${courseId}/search`} index="07" label="Search" />
             <RailLink to={`/courses/${courseId}/quizzes`} index="08" label="Quizzes" />
             <RailLink to={`/courses/${courseId}/flashcards`} index="09" label="Flashcards" />
+            {/* Phase 22. Beside Flashcards and Video rather than beside Contents, because those
+                three are the same kind of thing: something generated on request from the corpus,
+                as opposed to something the corpus already is. Not gated — a guide needs only the
+                provider that chat and summaries already need, and the page says so when there is
+                none. */}
+            <RailLink to={`/courses/${courseId}/guides`} index="10" label="Study guide" badge={written} />
             {/* Phase 21. Absent rather than disabled where the renderer is not installed: an
                 optional service that advertises itself and then fails is worse than one nobody
                 was told about. Same rule as Confusion and Spend, for a different reason — those
                 are hidden by role, this one by whether the machine can do it at all. */}
             {videos && (
-              <RailLink to={`/courses/${courseId}/videos`} index="10" label="Video" badge={rendered} />
+              <RailLink to={`/courses/${courseId}/videos`} index="11" label="Video" badge={rendered} />
             )}
             {/* Phase 16.3. Every member has one, and what is in it is theirs until a manager
                 promotes it — so this is not gated the way Confusion and Spend are. */}
-            <RailLink to={`/courses/${courseId}/notes`} index="11" label="Your notes" end />
-            <RailLink to={`/courses/${courseId}/review`} index="12" label="Review this course" end />
+            <RailLink to={`/courses/${courseId}/notes`} index="12" label="Your notes" end />
+            <RailLink to={`/courses/${courseId}/review`} index="13" label="Review this course" end />
             {/* Same rule as the Spend link: hidden for a plain MEMBER rather than offered and
                 refused. The page still handles a 403 for anyone who pastes the URL. */}
             {teaches && (
-              <RailLink to={`/courses/${courseId}/confusion`} index="13" label="Confusion" end />
+              <RailLink to={`/courses/${courseId}/confusion`} index="14" label="Confusion" end />
             )}
           </>
         )}

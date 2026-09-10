@@ -44,7 +44,12 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         // the wrong thing. The feature has a second, tighter limit of its own (a
                         // per-member daily cap) because a quota sized for chat turns would let one
                         // person spend an afternoon of the machine before this one noticed.
-                        "/api/v1/courses/*/videos");
+                        "/api/v1/courses/*/videos",
+                        // Phase 22. Six completions behind one POST, and — unlike the video — no
+                        // second limiter behind it, because six completions is exactly what the
+                        // rolling token budget above already prices. A guide is expensive in the
+                        // currency this quota counts, which is the case the quota was built for.
+                        "/api/v1/courses/*/guides");
 
         // Embedding calls. A search is one embedding of the query — far cheaper than a chat turn,
         // but not free, and it is the endpoint easiest to call in a loop.
