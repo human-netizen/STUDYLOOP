@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
 
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
@@ -290,6 +291,52 @@ class VisionRoutingTest {
         assertThat(PdfExtractionRouter.retryKindOf(wrapped(
                 new ResourceAccessException("I/O error", new SocketTimeoutException("Read timed out")))))
                 .isEqualTo(PdfExtractionRouter.Retry.TOO_SLOW);
+    }
+
+    @Test
+    void aTimeoutIsRecognisedWhicheverExceptionSpringWrappedItIn() {
+        // The regression guard for 2026-09-10, and the reason the test above was not enough: it
+        // asserted on a shape this code invented rather than one the provider produces. Spring only
+        // raises ResourceAccessException when the *request* failed; a timeout that fires while
+        // extracting the *response* arrives as a plain RestClientException, which is a subclass of
+        // neither branch the classifier tested. A 260-page ingest died on page 120 with `Read timed
+        // out` sitting in the chain, unread — one slow page rejecting the whole document, which is
+        // the exact outcome 25.3 exists to prevent.
+        //
+        // Copied from that stack trace, wrapper wording and all.
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(new RestClientException(
+                "Error while extracting response for type [tools.jackson.databind.JsonNode] "
+                        + "and content type [application/octet-stream]",
+                new SocketTimeoutException("Read timed out")))))
+                .isEqualTo(PdfExtractionRouter.Retry.TOO_SLOW);
+
+        // The other half of the claim, so the fix is "find the timeout" and not "give up quietly on
+        // anything unrecognised": a RestClient failure with no timeout under it is still a verdict.
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(
+                new RestClientException("No HttpMessageConverter for the request"))))
+                .isEqualTo(PdfExtractionRouter.Retry.NEVER);
+
+        // And a status code still outranks a socket: the body of a 429 timing out does not make the
+        // rate limit stop being a rate limit.
+        assertThat(PdfExtractionRouter.retryKindOf(wrapped(tooManyRequests(QUOTA_MINUTE_BODY))))
+                .isEqualTo(PdfExtractionRouter.Retry.RATE_LIMIT);
+    }
+
+    @Test
+    void aResponseThatTimesOutWhileBeingReadCostsOnePageRatherThanTheDocument() {
+        // The same bug at the level Niloy met it: not a classification, a 260-page upload failing.
+        vision.failWith = new VisionExtractionException(
+                "Gemini vision request failed: Error while extracting response for type "
+                        + "[tools.jackson.databind.JsonNode] and content type [application/octet-stream]",
+                new RestClientException("Error while extracting response",
+                        new SocketTimeoutException("Read timed out")));
+
+        Extraction extraction = router().extract(TestPdfs.of(Kind.PROSE, Kind.SCANNED));
+
+        assertThat(extraction.pages()).hasSize(2);
+        assertThat(extraction.pages().get(0).text()).contains("A skiplist is a sequence");
+        assertThat(extraction.degradedPages()).isEqualTo(1);
+        assertThat(vision.calls).isEqualTo(1);
     }
 
     @Test

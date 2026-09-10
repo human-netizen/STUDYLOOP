@@ -306,11 +306,23 @@ public class PdfExtractionRouter implements DocumentExtractor {
                 return isTimeout(cause) ? Retry.TOO_SLOW : Retry.TRANSIENT;
             }
         }
-        return Retry.NEVER;
+        // **A timeout is a timeout whatever Spring wrapped it in.** Added 2026-09-10, after a
+        // 260-page ingest died on page 120 with `Read timed out` in the chain and no fallback:
+        // `ResourceAccessException` is only used when the *request* failed, and this timeout fired
+        // while extracting the *response* — reading the headers to decide a content type — which
+        // `DefaultRestClient` reports as a plain `RestClientException`. That is a subclass of
+        // neither branch above, so the whole chain fell through to NEVER and one slow page rejected
+        // the document, which is precisely the outcome 25.3 exists to prevent.
+        //
+        // The wrapper is Spring's private business and changes with where in the exchange the clock
+        // ran out; the SocketTimeoutException is the fact. So the last question asked is about the
+        // fact rather than the wrapper. It stays last, because a real status code is stronger
+        // evidence than a socket: a 429 whose body then timed out is still a rate limit.
+        return isTimeout(e) ? Retry.TOO_SLOW : Retry.NEVER;
     }
 
-    private static boolean isTimeout(Throwable resourceAccess) {
-        for (Throwable cause = resourceAccess; cause != null; cause = cause.getCause()) {
+    private static boolean isTimeout(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
             if (cause instanceof SocketTimeoutException) {
                 return true;
             }
