@@ -13,7 +13,7 @@ reveal does not get a reveal, and that the finished clip is exactly as long as w
 
 from __future__ import annotations
 
-import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -27,9 +27,12 @@ import jobs  # noqa: E402
 import narrator  # noqa: E402
 import renderer  # noqa: E402
 
+# `shutil.which` rather than a trial run: asking ffmpeg for its version to find out whether
+# ffmpeg exists raises FileNotFoundError when it does not, and `check=False` suppresses only a
+# non-zero exit, not a missing executable. At module scope a raise is a collection error rather
+# than a skip, so the module that meant to step aside takes the whole run down with it.
 needs_ffmpeg = pytest.mark.skipif(
-    subprocess.run(["ffmpeg", "-version"], capture_output=True, check=False).returncode != 0
-    if os.name == "posix" else True,
+    shutil.which("ffmpeg") is None,
     reason="composition is ffmpeg, which lives in the worker image",
 )
 
