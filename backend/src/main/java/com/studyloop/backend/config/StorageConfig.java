@@ -17,10 +17,11 @@ import org.springframework.context.annotation.Configuration;
 public class StorageConfig {
 
     @Bean
-    public DocumentStorageService documentStorageService(StorageProperties properties) {
+    public DocumentStorageService documentStorageService(StorageProperties properties,
+                                                        HttpProperties http) {
         String provider = properties.provider();
         if (provider != null && provider.equalsIgnoreCase("supabase")) {
-            return new SupabaseDocumentStorage(requireSupabaseSettings(properties));
+            return new SupabaseDocumentStorage(requireSupabaseSettings(properties), http);
         }
         return new FilesystemDocumentStorage(properties);
     }

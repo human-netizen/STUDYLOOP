@@ -7,6 +7,8 @@ import com.studyloop.backend.usage.AiUsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import com.studyloop.backend.config.HttpProperties;
+import com.studyloop.backend.config.TimedRestClient;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -58,14 +60,17 @@ public class CohereEmbeddingClient implements EmbeddingClient {
     // only part of ingestion whose cost scales with how many figures a course uploads.
     private static final String IMAGE_PRICING_MODEL_SUFFIX = "-image";
 
-    private final RestClient restClient = RestClient.create();
+    // Timed rather than RestClient.create(): ingestion embeds in batches, so the ceiling has to
+    // clear a large batch rather than the 0.89s a single short text costs.
+    private final RestClient restClient;
     private final AiUsageRecorder usageRecorder;
     private final String apiKey;
     private final String model;
     private final int dimensions;         // our target size (must match the vector column)
     private final int requestDimension;   // the output_dimension we actually ask Cohere for
 
-    public CohereEmbeddingClient(EmbeddingProperties properties, AiUsageRecorder usageRecorder) {
+    public CohereEmbeddingClient(EmbeddingProperties properties, AiUsageRecorder usageRecorder, HttpProperties http) {
+        this.restClient = TimedRestClient.with(http.connectTimeout(), http.embeddingReadTimeout());
         this.usageRecorder = usageRecorder;
         EmbeddingProperties.Cohere cohere = properties.cohere();
         this.apiKey = cohere != null ? cohere.apiKey() : null;

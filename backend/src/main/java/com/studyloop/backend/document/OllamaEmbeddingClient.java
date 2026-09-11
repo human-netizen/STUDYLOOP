@@ -2,6 +2,8 @@ package com.studyloop.backend.document;
 
 import com.studyloop.backend.config.EmbeddingProperties;
 import org.springframework.http.MediaType;
+import com.studyloop.backend.config.HttpProperties;
+import com.studyloop.backend.config.TimedRestClient;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import tools.jackson.databind.JsonNode;
@@ -26,7 +28,7 @@ public class OllamaEmbeddingClient implements EmbeddingClient {
     private final String model;
     private final int dimensions;
 
-    public OllamaEmbeddingClient(EmbeddingProperties properties) {
+    public OllamaEmbeddingClient(EmbeddingProperties properties, HttpProperties http) {
         EmbeddingProperties.Ollama ollama = properties.ollama();
         String baseUrl = ollama != null && ollama.baseUrl() != null && !ollama.baseUrl().isBlank()
                 ? ollama.baseUrl() : DEFAULT_BASE_URL;
@@ -34,7 +36,13 @@ public class OllamaEmbeddingClient implements EmbeddingClient {
         this.model = (configuredModel == null || configuredModel.isBlank()) ? DEFAULT_MODEL : configuredModel;
         int configuredDims = ollama != null ? ollama.dimensions() : 0;
         this.dimensions = configuredDims > 0 ? configuredDims : DEFAULT_DIMENSIONS;
-        this.restClient = RestClient.builder().baseUrl(baseUrl).build();
+        // **The one client that looked timed and was not.** `.builder().baseUrl(...)` reads like a
+        // configured client, but without a request factory it inherits exactly the same unbounded
+        // wait as `RestClient.create()` — which is why the audit that found five bare clients
+        // actually found six. Local and keyless does not mean fast: a model that is not pulled, or
+        // an Ollama busy loading one, can sit on the connection for minutes.
+        this.restClient = TimedRestClient.with(
+                baseUrl, http.connectTimeout(), http.embeddingReadTimeout());
     }
 
     // Ollama is local and keyless, so it is always "configured". If the server is down or the

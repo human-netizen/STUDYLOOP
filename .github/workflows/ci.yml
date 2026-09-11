@@ -38,6 +38,44 @@ jobs:
           TEST_DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
+  # The sandbox that makes generated code executable at all (added 2026-09-11).
+  #
+  # **Why this job exists: it is the one suite in the project with a security argument resting on
+  # it, and it was the one suite CI did not run.** Phase 21.3 runs model-written Manim inside a
+  # three-layer sandbox, and "Deliberately not building" permits that — where it refuses sandboxed
+  # code execution in general — specifically because the sandbox is built rather than assumed and
+  # has a hostile-fixture suite behind it. A suite nobody runs does not support that argument. As of
+  # 2026-09-11 these 41 tests had not run since 2026-08-24, by hand, because `pytest` is not
+  # installed on the development machine (the worker is a container there) and nothing here ran them.
+  #
+  # **Not `pip install -r requirements.txt`.** That pulls Manim, and Manim pulls cairo, pango, numpy
+  # and moderngl — minutes of CI for a render nothing here performs. None of the three test modules
+  # imports Manim: `sandbox.py` is pure standard library, and the other two need only Pillow and
+  # edge-tts, both pure-Python wheels. Versions match requirements.txt so CI tests what ships.
+  #
+  # Layers 2 and 3 fork processes and set rlimits, so they skip themselves off POSIX and genuinely
+  # run here — which is the other half of the point, because the development machine is Windows and
+  # can only ever run Layer 1.
+  sandbox:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: video-worker
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the test dependencies only
+        run: pip install "pytest==8.3.*" "pillow==10.4.*" "edge-tts==7.*"
+
+      - name: Run the hostile-fixture suite
+        run: python -m pytest -v
+
   # Verify the deployment images build from a clean context. No registry push — that only needs
   # a `push: true` + login step once a registry (e.g. GHCR) is wired up.
   docker:

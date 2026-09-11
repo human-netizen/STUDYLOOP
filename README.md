@@ -9,8 +9,8 @@
 ![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
 ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![PostgreSQL + pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?logo=postgresql&logoColor=white)
-![Flyway migrations](https://img.shields.io/badge/Flyway-20%20migrations-CC0200?logo=flyway&logoColor=white)
-![tests 556](https://img.shields.io/badge/tests-556%20green-brightgreen)
+![Flyway migrations](https://img.shields.io/badge/Flyway-31%20migrations-CC0200?logo=flyway&logoColor=white)
+![tests 706](https://img.shields.io/badge/tests-706%20green-brightgreen)
 
 ---
 
@@ -507,7 +507,7 @@ openable at [diagrams.net](https://app.diagrams.net).
 ## 7. Technology stack
 
 **Backend and AI.** Java 21 on Spring Boot 4.1 (Web MVC, Security, Data JPA, Validation, Actuator),
-over PostgreSQL hosted at Supabase with pgvector and Flyway migrations `V1` to `V25`. Embeddings are
+over PostgreSQL hosted at Supabase with pgvector and Flyway migrations `V1` to `V31`. Embeddings are
 Cohere `embed-v4.0` truncated to 768 dimensions, with Google `gemini-embedding-001` and a local
 Ollama `qwen3-embedding` sitting behind the same interface as swappable adapters. Reranking is
 Cohere `rerank-v3.5`. Generation is Cohere Command R, called directly over Spring's `RestClient`.

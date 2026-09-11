@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.config.ChatProperties;
+import com.studyloop.backend.config.HttpProperties;
+import com.studyloop.backend.config.TimedRestClient;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
 import org.slf4j.Logger;
@@ -45,7 +47,13 @@ public class CohereChatClient implements ChatClient {
     private static final String DEFAULT_MODEL = "command-r-08-2024";
     private static final String PROVIDER = "cohere";
 
-    private final RestClient restClient = RestClient.create();
+    // Timed rather than `RestClient.create()`, which sets no connect and no read timeout — so a
+    // provider that accepted the connection and went quiet used to block this thread for ever.
+    // That mattered most here of all eight clients: the video executor is one thread by design, so
+    // one hung planning call meant no video rendered again until the process restarted, and the job
+    // timeout could not save it because that is checked between scenes and this hangs before the
+    // first. See HttpProperties for how the 180s was chosen and why it is not tighter.
+    private final RestClient restClient;
     // Cohere adds response fields over time and we only read a few; failing on the rest would
     // turn a harmless API addition into an outage.
     private final ObjectMapper objectMapper = new ObjectMapper()
@@ -59,8 +67,9 @@ public class CohereChatClient implements ChatClient {
     // class uninstantiable - the container stops guessing the moment there is a choice, and the
     // failure is at context startup rather than at compile time.
     @Autowired
-    public CohereChatClient(ChatProperties properties, AiUsageRecorder usageRecorder) {
-        this(properties, usageRecorder, CHAT_URL);
+    public CohereChatClient(ChatProperties properties, HttpProperties http,
+                            AiUsageRecorder usageRecorder) {
+        this(properties, http, usageRecorder, CHAT_URL);
     }
 
     // The same client pointed somewhere else, which exists for one reason: Phase 26.3 added a
@@ -68,7 +77,9 @@ public class CohereChatClient implements ChatClient {
     // several fragments - and a protocol that is only exercised against the live provider is a
     // protocol nothing checks. The suite serves canned SSE from a local socket and reads what this
     // parses out of it.
-    CohereChatClient(ChatProperties properties, AiUsageRecorder usageRecorder, String chatUrl) {
+    CohereChatClient(ChatProperties properties, HttpProperties http,
+                     AiUsageRecorder usageRecorder, String chatUrl) {
+        this.restClient = TimedRestClient.with(http.connectTimeout(), http.chatReadTimeout());
         this.usageRecorder = usageRecorder;
         ChatProperties.Cohere cohere = properties.cohere();
         this.apiKey = cohere != null ? cohere.apiKey() : null;

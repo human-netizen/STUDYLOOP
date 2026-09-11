@@ -90,6 +90,20 @@ services:
       - key: VISUAL_MAX_PAGES
         value: "24"
 
+      # **Set 2026-09-11, because its absence was silently the wrong deployment.** Unset, the
+      # application falls back to `gemini-3.6-flash` — whose free tier allows roughly twenty
+      # requests a *day*, which is one scanned chapter and then nothing until tomorrow. Production
+      # had been running on that default since the deploy. `flash-lite` is the same family with a
+      # much larger daily allowance, and the quota is per model, so this is a different budget
+      # rather than a larger share of the same one.
+      #
+      # Worth knowing when this is changed again: an exhausted *daily* quota is deliberately fatal
+      # to the document rather than degrading it (PdfExtractionRouter), because waiting cannot make
+      # a day pass — so the wrong value here does not produce slightly worse documents, it produces
+      # failed ingests naming the quota.
+      - key: VISION_MODEL
+        value: gemini-3.5-flash-lite
+
       # Heap at 55% rather than the image's 75%. The remaining 45% is not spare: metaspace for a
       # Spring context is ~100 MB on its own, and thread stacks, code cache and PDFBox's direct
       # buffers all live outside the heap. At 75% the container is killed by the platform for

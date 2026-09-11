@@ -19,14 +19,15 @@ public class EmbeddingConfig {
     // and Google's embed response doesn't report token counts, so a row for either would be a
     // call with a fabricated price — worse for the dashboard than an honest absence.
     @Bean
-    public EmbeddingClient embeddingClient(EmbeddingProperties properties, AiUsageRecorder usageRecorder) {
+    public EmbeddingClient embeddingClient(EmbeddingProperties properties, HttpProperties http,
+                                          AiUsageRecorder usageRecorder) {
         String provider = properties.provider();
         if (provider != null && provider.equalsIgnoreCase("google")) {
-            return new GoogleEmbeddingClient(properties);
+            return new GoogleEmbeddingClient(properties, http);
         }
         if (provider != null && provider.equalsIgnoreCase("ollama")) {
-            return new OllamaEmbeddingClient(properties);
+            return new OllamaEmbeddingClient(properties, http);
         }
-        return new CohereEmbeddingClient(properties, usageRecorder);
+        return new CohereEmbeddingClient(properties, usageRecorder, http);
     }
 }

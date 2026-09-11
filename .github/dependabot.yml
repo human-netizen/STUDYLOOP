@@ -1,0 +1,60 @@
+# Dependency vulnerability alerts for both halves of the project (added 2026-09-11).
+#
+# **The gap:** `npm audit` covers the frontend and is clean, but the backend — Spring Boot 4.1,
+# PDFBox, Tika, POI, Flyway, jjwt — had **no automated vulnerability check of any kind**. Nothing in
+# CI would have noticed a known CVE in a transitive dependency, and the project's one dependency
+# incident so far was caught by hand: `mermaid@12` pulls a `lodash-es` carrying a code-injection and
+# a prototype-pollution advisory, into a parser that is fed model output. That was found by reading
+# `npm audit` during Phase 22, not by anything that runs on its own.
+#
+# **Why this rather than the OWASP dependency-check Maven plugin.** That plugin is the more thorough
+# tool and it is the wrong trade here: it downloads and caches the entire NVD feed, adds minutes to
+# every build, and since the NVD API began rate-limiting unauthenticated clients it needs its own key
+# to stay reliable. Adding a slow, network-dependent step to a green pipeline days before submission
+# risks the pipeline to gain a report nobody will read in time. Dependabot costs zero CI seconds,
+# runs on GitHub's schedule rather than in the build, and raises a pull request with the fix already
+# written.
+#
+# Weekly, not daily: this is a student project with a submission date, and a daily cadence during the
+# final week would be noise arriving faster than it could be read.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, backend]
+    # Spring Boot's starters move as one unit; separate PRs for each would conflict with each other.
+    groups:
+      spring-boot:
+        patterns:
+          - "org.springframework.boot:*"
+          - "org.springframework:*"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, frontend]
+    # **Mermaid is pinned deliberately and must not be bumped across a major automatically.** 11.x is
+    # held because 12 reintroduces the `lodash-es` advisories described above. A major bump here needs
+    # a person to check that first, so Dependabot may offer minors and patches and nothing else.
+    ignore:
+      - dependency-name: mermaid
+        update-types: [version-update:semver-major]
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+
+  # The workflows themselves. Phase 23's own CI break was an action version GitHub had retired, which
+  # is the failure this half prevents.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]

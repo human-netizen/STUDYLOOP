@@ -264,7 +264,26 @@ studyloop:
       lexical-or: ${RETRIEVAL_LEXICAL_OR:false}
       # Phase 18.3 — three confidence thresholds chosen by what the question asks for, instead of
       # one for every question. The thresholds themselves are under `studyloop.chat.intent`.
-      intent: ${RETRIEVAL_INTENT:false}
+      #
+      # **On since 2026-09-11, and the A/B that earned it is the reason.** The thresholds were
+      # calibrated in Phase 18.3 and then left switched off, so the flat 0.32 kept running and the
+      # calibration did nothing. Same corpus, same 64 questions, this one property changed:
+      #
+      #   unanswerable refused   6 of 8  →  **8 of 8**
+      #   false refusal          0.000 (0/56)  →  0.000 (0/56)   unchanged
+      #   Recall@6 / MRR / nDCG  0.942 / 0.838 / 0.843  →  identical
+      #
+      # The two questions that stopped being answered are U03 (Kruskal, relevance 0.347) and U07
+      # (Timsort, 0.346) — both *lookups*, both sitting just above the flat 0.32 and far below the
+      # lookup floor of 0.47. Retrieval is untouched because this is a gate and not a ranker, which
+      # is why the three headline metrics do not move by a thousandth.
+      #
+      # **Free, and not by luck.** The weakest answerable lookup scores 0.594 against a strongest
+      # unanswerable of 0.347, so a floor at 0.47 sits in a 0.247-wide gap with ~0.12 either side.
+      # `explain` is the opposite — a 0.021 gap — and is deliberately left at 0.32, which is the
+      # whole argument for splitting the buckets rather than raising one number: a flat threshold
+      # high enough to catch these two lookups would have started refusing real explain questions.
+      intent: ${RETRIEVAL_INTENT:true}
       # On since Phase 17.3, and the run that earned it is an A/B over the same corpus with this
       # one property changed. On the same questions: Recall@6 0.939 to 0.942, MRR 0.813 to 0.838,
       # nDCG@6 0.828 to 0.843, refusals unchanged at 6/8 with no false refusal added. The category
@@ -705,6 +724,33 @@ studyloop:
     voices:
       english: ${VIDEO_VOICE_EN:en-US-AriaNeural}
       bangla: ${VIDEO_VOICE_BN:bn-BD-NabanitaNeural}
+  http:
+    # How long to wait for somebody else's server before giving up (added 2026-09-11).
+    #
+    # **Six of this application's eight HTTP clients had no ceiling at all until now.**
+    # `RestClient.create()` sets neither timeout, so a provider that accepted the connection and then
+    # stopped talking blocked the calling thread for ever. `GeminiVisionClient` was fixed in Phase
+    # 25.3 and `HttpVideoWorker` always had them; the reasoning sat one file away from the other five
+    # for three weeks. The sixth was `OllamaEmbeddingClient`, which looked configured because it set
+    # a base URL and was just as unbounded.
+    #
+    # **Sized from measurements, not caution** — see HttpProperties for the full spread. A timeout is
+    # never retried here (the provider may already have done the work and billed for it), so a value
+    # set too tight turns a slow success into a lost one. Each is therefore clear of the slowest
+    # legitimate call it must survive, not near the median.
+    connect-timeout: ${HTTP_CONNECT_TIMEOUT:5s}
+    # The widest, because one client serves both a ~2-3s chat turn and a 60-90s video scene planner.
+    # 180s clears the planner twice over and still fits inside Phase 21's 3-minute scene budget, so a
+    # hung planner loses a scene rather than the job.
+    chat-read-timeout: ${HTTP_CHAT_READ_TIMEOUT:180s}
+    # A whole batch, not one text: 0.89s buys one short string, and ingestion sends many at once.
+    embedding-read-timeout: ${HTTP_EMBEDDING_READ_TIMEOUT:120s}
+    # ~1.3s measured, on the critical path of every question. Twenty times the observed cost is
+    # already generous; a rerank slower than this has failed whatever it returns.
+    rerank-read-timeout: ${HTTP_RERANK_READ_TIMEOUT:30s}
+    # Whole PDFs in both directions, so this one is bounded by the uploader's bandwidth rather than
+    # by any model — the only value here a real user can legitimately push toward the limit.
+    storage-read-timeout: ${HTTP_STORAGE_READ_TIMEOUT:120s}
   quota:
     # Phase 10: the two guardrails on the paid surface, both per user. They are separate switches
     # because they fail differently — a rate limit clears in seconds, a spent budget does not.

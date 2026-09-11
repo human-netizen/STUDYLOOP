@@ -174,6 +174,17 @@ public class PdfExtractionRouter implements DocumentExtractor {
                             IngestionEstimate.describe(
                                     IngestionEstimate.forVisionPages(failing.size() - done))));
 
+            // **One INFO per page, because the alternative is indistinguishable from death.**
+            // Phase 23.6's last bullet. This loop runs up to VISION_MAX_PAGES rasterise-plus-API
+            // cycles and used to log nothing unless one failed, so on 2026-09-07 a 296-page book
+            // routed 18 pages to vision and the log went silent for minutes at "Extraction quality:
+            // 18 of 296". Exceeding a container's memory limit is a kill by the platform — no
+            // OutOfMemoryError, no stack trace — so "working" and "OOM-killed" produced byte-identical
+            // output: none. One line per page separates them at a glance.
+            log.info("Vision page {} of {} (page {} of the document, {})",
+                    done + 1, failing.size(), quality.pageNumber(),
+                    quality.defect().name().toLowerCase(Locale.ROOT));
+
             byte[] png = renderer.renderPng(pageRenderer, quality.pageNumber(), properties.dpi());
             String markdown = readOrFallBack(png, quality);
             if (markdown == null) {
@@ -239,11 +250,67 @@ public class PdfExtractionRouter implements DocumentExtractor {
         if (quota != null) {
             throw new VisionExtractionException(quota, lastFailure);
         }
-        throw new VisionExtractionException(
-                "The vision extractor could not read page %d (%s)."
-                        .formatted(quality.pageNumber(),
-                                quality.defect().name().toLowerCase(Locale.ROOT)),
-                lastFailure);
+
+        // **Phase 23.6, closed 2026-09-11 — the distinction this method was missing.**
+        //
+        // Until now every failure that was not TOO_SLOW threw, and a throw here rejects the whole
+        // document from inside the page loop. That is how a 120-page PDF was lost on 2026-09-07 to
+        // one unreadable figure, after roughly twenty Gemini calls had already been paid for. The
+        // retry classification added that day was correct and did not help: the failure was
+        // `read no text`, which arrives as **HTTP 200 with no content** and is therefore NEVER —
+        // straight past the retries and into the throw.
+        //
+        // The rule is about *scope*, not severity. A failure describing **one page** — a safety
+        // block, an empty candidate, no text read, a 400 on this image, a 429 or 5xx that outlasted
+        // its retries — loses that page and nothing else, so it degrades and the ingest carries on.
+        // A failure describing **the run** still rejects the document, because every remaining page
+        // would fail the same way and a document that reached READY having silently read none of
+        // them is the defect this codebase has already decided not to ship. Two of those remain
+        // fatal: an exhausted daily quota (above) and an unusable configuration (below).
+        //
+        // Degrading is only acceptable because it is counted in `documents.degraded_pages` and said
+        // out loud on the row. The guarantee that survives unchanged is the one that matters most:
+        // a document over `VISION_MAX_PAGES` is still refused outright, before any work, because
+        // that cap is a deterministic property of the file rather than an accident of a provider.
+        String unusable = unusableConfigurationOf(lastFailure);
+        if (unusable != null) {
+            throw new VisionExtractionException(unusable, lastFailure);
+        }
+
+        // WARN for the same reason the timeout above is WARN: this line and `degraded_pages` are
+        // the only two places that will ever say this page is worse than it looks.
+        log.warn("Page {} ({}) could not be read by the vision model; keeping the text PDFBox "
+                 + "extracted. Cause: {}",
+                quality.pageNumber(), quality.defect().name().toLowerCase(Locale.ROOT),
+                lastFailure.getMessage());
+        return null;
+    }
+
+    // The sentence to fail with when the *deployment* is wrong rather than the page — a key the
+    // provider will not accept, or a model that does not exist. Both fail identically on every
+    // remaining page, so degrading them would quietly produce a document whose vision pages were
+    // all read by nobody; and both are fixed by changing a variable rather than by re-uploading,
+    // which is why the message names the variable.
+    //
+    // Null for everything else, so the caller degrades. The first HTTP-shaped cause decides, the
+    // same way `retryKindOf` does it and for the same reason: the client wraps its failure, so the
+    // top frame is Spring's business and the status is the fact.
+    private static String unusableConfigurationOf(RuntimeException failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof RestClientResponseException http) {
+                int status = http.getStatusCode().value();
+                if (status == 401 || status == 403) {
+                    return ("The vision model rejected the API key (HTTP %d), so no page of this "
+                            + "document can be read. Check GOOGLE_API_KEY.").formatted(status);
+                }
+                if (status == 404) {
+                    return ("The configured vision model does not exist (HTTP 404), so no page of "
+                            + "this document can be read. Check VISION_MODEL.");
+                }
+                return null;
+            }
+        }
+        return null;
     }
 
     // "3 scanned, 1 figure" — the shape of the problem in one clause, so a log line answers whether

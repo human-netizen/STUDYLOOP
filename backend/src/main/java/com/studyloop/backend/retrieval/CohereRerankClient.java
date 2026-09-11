@@ -6,6 +6,8 @@ import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import com.studyloop.backend.config.HttpProperties;
+import com.studyloop.backend.config.TimedRestClient;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -24,12 +26,15 @@ public class CohereRerankClient implements RerankClient {
     private static final String RERANK_URL = "https://api.cohere.com/v2/rerank";
     private static final String PROVIDER = "cohere";
 
-    private final RestClient restClient = RestClient.create();
+    // Timed rather than RestClient.create(): ~1.3s is the measured cost and it sits on the
+    // critical path of every question, so patience past a few seconds buys nothing.
+    private final RestClient restClient;
     private final AiUsageRecorder usageRecorder;
     private final String apiKey;
     private final String model;
 
-    public CohereRerankClient(RetrievalProperties properties, AiUsageRecorder usageRecorder) {
+    public CohereRerankClient(RetrievalProperties properties, AiUsageRecorder usageRecorder, HttpProperties http) {
+        this.restClient = TimedRestClient.with(http.connectTimeout(), http.rerankReadTimeout());
         this.usageRecorder = usageRecorder;
         this.apiKey = properties.rerank().apiKey();
         this.model = properties.rerank().model();

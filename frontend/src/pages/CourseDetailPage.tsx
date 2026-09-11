@@ -509,11 +509,20 @@ function DocumentRow({
           </Meta>
           {/* Phase 25.3. The whole defence of falling back instead of failing is that the fallback
               is visible, so this line is not optional decoration — it is the thing that makes a
-              degraded document different from one that quietly answers nothing. */}
+              degraded document different from one that quietly answers nothing.
+
+              Reworded in Phase 23.6 (2026-09-11), and the old wording is the reason to be careful
+              here: it said "took too long to read", which was exactly true while a timeout was the
+              only thing that could degrade a page. Now a page also degrades when the model answers
+              about it and says nothing usable — a safety block, an empty response, no text read —
+              so naming the timeout would be wrong on most degraded pages. The copy therefore states
+              the consequence, which is the same whatever the cause and is the part a reader can act
+              on: this page is indexed from weaker text, so an answer citing it may be thin. */}
           {document.degradedPages > 0 && document.status === 'READY' && (
             <p className="m-0 mt-1 text-[12px] text-warn">
-              {document.degradedPages} page{document.degradedPages === 1 ? '' : 's'} took too long
-              to read and kept the text extracted from the file.
+              {document.degradedPages} page{document.degradedPages === 1 ? '' : 's'} could not be
+              read by the vision model and {document.degradedPages === 1 ? 'is' : 'are'} indexed
+              from the text extracted directly from the file.
             </p>
           )}
           {document.status === 'FAILED' && document.errorMessage && (

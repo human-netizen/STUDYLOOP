@@ -2,6 +2,8 @@ package com.studyloop.backend.document;
 
 import com.studyloop.backend.config.EmbeddingProperties;
 import org.springframework.http.MediaType;
+import com.studyloop.backend.config.HttpProperties;
+import com.studyloop.backend.config.TimedRestClient;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import tools.jackson.databind.JsonNode;
@@ -22,11 +24,13 @@ public class GoogleEmbeddingClient implements EmbeddingClient {
     // Google caps batchEmbedContents at 100 requests per call.
     private static final int MAX_BATCH = 100;
 
-    private final RestClient restClient = RestClient.create();
+    // Timed rather than RestClient.create() — see HttpProperties.
+    private final RestClient restClient;
     private final String apiKey;
     private final String model;
 
-    public GoogleEmbeddingClient(EmbeddingProperties properties) {
+    public GoogleEmbeddingClient(EmbeddingProperties properties, HttpProperties http) {
+        this.restClient = TimedRestClient.with(http.connectTimeout(), http.embeddingReadTimeout());
         EmbeddingProperties.Google google = properties.google();
         this.apiKey = google != null ? google.apiKey() : null;
         String configured = google != null ? google.model() : null;

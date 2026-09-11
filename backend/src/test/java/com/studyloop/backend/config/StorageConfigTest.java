@@ -34,18 +34,18 @@ class StorageConfigTest {
     void defaultsToTheFilesystem() {
         // Unset, and every unrecognised value, means the filesystem: a default that needs three
         // secrets is not a default, and a dev machine has a disk.
-        assertThat(config.documentStorageService(properties(null, null)))
+        assertThat(config.documentStorageService(properties(null, null), HttpProperties.defaults()))
                 .isInstanceOf(FilesystemDocumentStorage.class);
-        assertThat(config.documentStorageService(properties("filesystem", null)))
+        assertThat(config.documentStorageService(properties("filesystem", null), HttpProperties.defaults()))
                 .isInstanceOf(FilesystemDocumentStorage.class);
     }
 
     @Test
     void selectsSupabaseWhenAskedTo() {
-        assertThat(config.documentStorageService(properties("supabase", complete())))
+        assertThat(config.documentStorageService(properties("supabase", complete()), HttpProperties.defaults()))
                 .isInstanceOf(SupabaseDocumentStorage.class);
         // The platform sets this from a dashboard field, so case is not something to rely on.
-        assertThat(config.documentStorageService(properties("SUPABASE", complete())))
+        assertThat(config.documentStorageService(properties("SUPABASE", complete()), HttpProperties.defaults()))
                 .isInstanceOf(SupabaseDocumentStorage.class);
     }
 
@@ -53,20 +53,23 @@ class StorageConfigTest {
     void refusesToStartWhenSupabaseIsSelectedWithoutItsSettings() {
         // Each of these boots healthy and passes a health check under a lazier check, then 500s
         // the first time anybody uploads anything. The deploy would be reported green.
-        assertThatThrownBy(() -> config.documentStorageService(properties("supabase", null)))
+        assertThatThrownBy(() -> config.documentStorageService(properties("supabase", null), HttpProperties.defaults()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("SUPABASE_URL");
 
         assertThatThrownBy(() -> config.documentStorageService(
-                properties("supabase", new StorageProperties.Supabase("", "key", "documents"))))
+                properties("supabase", new StorageProperties.Supabase("", "key", "documents")),
+                HttpProperties.defaults()))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThatThrownBy(() -> config.documentStorageService(
-                properties("supabase", new StorageProperties.Supabase("https://ref.supabase.co", " ", "documents"))))
+                properties("supabase", new StorageProperties.Supabase("https://ref.supabase.co", " ", "documents")),
+                HttpProperties.defaults()))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThatThrownBy(() -> config.documentStorageService(
-                properties("supabase", new StorageProperties.Supabase("https://ref.supabase.co", "key", null))))
+                properties("supabase", new StorageProperties.Supabase("https://ref.supabase.co", "key", null)),
+                HttpProperties.defaults()))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -91,7 +94,7 @@ class StorageConfigTest {
         // it stays one function: a hash that differed by provider would silently break dedup.
         DocumentStorageService filesystem =
                 new FilesystemDocumentStorage(new StorageProperties("filesystem", "./data/documents", null));
-        DocumentStorageService supabase = new SupabaseDocumentStorage(complete());
+        DocumentStorageService supabase = new SupabaseDocumentStorage(complete(), HttpProperties.defaults());
 
         byte[] bytes = "the same nine bytes".getBytes();
         assertThat(supabase.sha256Hex(bytes)).isEqualTo(filesystem.sha256Hex(bytes));

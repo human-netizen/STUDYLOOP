@@ -1,0 +1,12 @@
+# The demo corpus is generated, not stored.
+#
+# `DemoCorpusGenerator` (backend test sources) writes these seven files from builders the suite
+# already trusts — `TestPdfs` and `TestOfficeFiles` — so committing them would add binaries to the
+# repository that it would then have no way to explain. The generator is the record of how they were
+# made; the bytes are a build artifact.
+#
+#     cd backend
+#     ./mvnw -o test -Dtest=DemoCorpusGenerator -Ddemo.corpus=true
+#
+# `seed.ps1` beside this file is tracked, because that one is source.
+corpus/

@@ -3,6 +3,7 @@ package com.studyloop.backend.chat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.studyloop.backend.config.ChatProperties;
+import com.studyloop.backend.config.HttpProperties;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageRecorder;
 import com.sun.net.httpserver.HttpExchange;
@@ -68,7 +69,7 @@ class CohereToolStreamTest {
                 billed.add(fallbackOperation);
             }
         };
-        client = new CohereChatClient(properties, recorder,
+        client = new CohereChatClient(properties, HttpProperties.defaults(), recorder,
                 "http://127.0.0.1:" + server.getAddress().getPort() + "/v2/chat");
     }
 

@@ -14,7 +14,9 @@ import org.springframework.web.client.RestClientException;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -193,37 +195,104 @@ class VisionRoutingTest {
         assertThat(vision.calls).isEqualTo(1);
     }
 
-    // ── failure is loud ─────────────────────────────────────────────────────────────────────
+    // ── failure is loud, but it is about a page or about the run ────────────────────────────
+    //
+    // **Phase 23.6 (2026-09-11) rewrote the three tests that used to live here**, and the rewrite is
+    // the phase. They asserted that any vision failure rejects the whole document — which is what
+    // the code did, and what cost a 120-page PDF on 2026-09-07 over one unreadable figure after
+    // roughly twenty paid calls. The guarantee worth keeping is not "a failure is fatal"; it is
+    // "nothing is ever indexed as better than it is". A degraded page satisfies that by being
+    // counted and shown, so a failure about one page should cost one page.
+    //
+    // What is deliberately *unchanged* and asserted below: the cap still refuses outright, an
+    // exhausted daily quota still rejects, and a failed page is still never retried when retrying
+    // cannot help.
 
     @Test
-    void aVisionFailureFailsTheDocumentRatherThanIndexingTheUnreadablePage() {
-        vision.failWith = new VisionExtractionException("the model is down");
+    void aPageTheModelCannotReadCostsThatPageRatherThanTheDocument() {
+        // The 2026-09-07 failure, reproduced: `read no text` arrives as HTTP 200 with no content, so
+        // it is never retried and used to fall straight through to a throw.
+        vision.failByCall.put(1, new VisionExtractionException(
+                "Gemini read no text from page 2 (figure)."));
 
-        assertThatThrownBy(() -> router().extract(TestPdfs.of(Kind.PROSE, Kind.SCANNED)))
-                .isInstanceOf(VisionExtractionException.class)
-                .hasMessageContaining("page 2")
-                .hasMessageContaining("scanned");
+        Extraction extraction = router().extract(TestPdfs.of(Kind.PROSE, Kind.SCANNED));
+
+        // The document survives, and page 2 keeps whatever PDFBox managed on it.
+        assertThat(extraction.pages()).hasSize(2);
+        assertThat(extraction.pages().get(1).text()).doesNotContain(MARKDOWN);
+        // Counted, which is the only reason degrading is allowed at all.
+        assertThat(extraction.degradedPages()).isEqualTo(1);
+        // Still billed: visionPages records what the ingest *cost*, degradedPages what it failed to
+        // buy. Folding them would make a document that spent a call look like one that did not.
+        assertThat(extraction.visionPages()).isEqualTo(1);
     }
 
     @Test
-    void anOrdinaryFailureIsNotRetried() {
-        // The bounded retry exists for a rate limit, which resolves itself by waiting. Retrying a
-        // malformed request three times at twenty-second intervals would turn a failed upload into
-        // a failed upload a minute later, and the ingestion executor has other documents queued.
-        vision.failWith = new VisionExtractionException("bad request");
+    void twoPagesFailingDifferentlyBothDegradeAndTheGoodPagesAreUntouched() {
+        // 23.6 specifies "one page with a 429 and one with a 400". **The 400 is here and the 429 is
+        // deliberately not**, for the reason this file already gives twice: a 429 is retried at
+        // 20s, 40s and 60s, so driving one through extract() would be a test that really sleeps for
+        // two minutes to re-establish what `aDailyQuotaIsNotWaitedOutAndAPerMinuteOneStillIs` pins
+        // directly and instantly. The substitute is the failure the phase actually exists for — an
+        // HTTP 200 carrying no usable text — which is also not retried, so the two failing pages
+        // still fail *differently* from each other, which is the property under test.
+        vision.failByCall.put(1, badRequest("could not decode the image"));
+        vision.failByCall.put(2, new VisionExtractionException(
+                "Gemini returned no candidate (SAFETY)."));
 
-        assertThatThrownBy(() -> router().extract(TestPdfs.of(Kind.SCANNED)))
-                .isInstanceOf(VisionExtractionException.class);
+        Extraction extraction = router()
+                .extract(TestPdfs.of(Kind.SCANNED, Kind.SCANNED, Kind.SCANNED, Kind.PROSE));
+
+        assertThat(extraction.degradedPages()).isEqualTo(2);
+        // The third scanned page succeeded, so it carries what the model read — the failures did not
+        // poison the pages around them.
+        assertThat(extraction.pages().get(2).text()).isEqualTo(MARKDOWN);
+        // And the prose page was never sent at all.
+        assertThat(extraction.pages().get(3).text()).doesNotContain(MARKDOWN);
+    }
+
+    @Test
+    void aPageThatCannotBeRetriedIsStillNotRetried() {
+        // Unchanged from before 23.6, and still the reason the retry is classified rather than
+        // blanket: retrying a malformed request three times at twenty-second intervals turns one
+        // lost page into a minute of the executor's time, and other documents are queued behind it.
+        // Only the verdict moved — the page degrades now instead of rejecting the document.
+        vision.failByCall.put(1, badRequest("bad request"));
+
+        Extraction extraction = router().extract(TestPdfs.of(Kind.SCANNED));
+
         assertThat(vision.calls).isEqualTo(1);
+        assertThat(extraction.degradedPages()).isEqualTo(1);
     }
 
     @Test
-    void aFailureCarriesTheProvidersOwnMessageForTheUploaderToRead() {
-        vision.failWith = new VisionExtractionException("Gemini returned no candidate (SAFETY).");
+    void anUnusableKeyOrModelRejectsTheDocumentBecauseEveryPageWouldFailTheSameWay() {
+        // The line 23.6 draws. A safety block is about one page; a 403 and a 404 are about the
+        // deployment, so degrading them would hand back a document whose vision pages were all read
+        // by nobody — counted, but useless, and the count would be the only clue. Both are fixed by
+        // changing a variable, so the message names the variable rather than the page.
+        vision.failWith = new VisionExtractionException("Gemini vision request failed",
+                HttpClientErrorException.create(HttpStatus.NOT_FOUND, "Not Found",
+                        HttpHeaders.EMPTY, "model not found".getBytes(StandardCharsets.UTF_8), null));
 
         assertThatThrownBy(() -> router().extract(TestPdfs.of(Kind.SCANNED)))
-                .hasRootCauseMessage("Gemini returned no candidate (SAFETY).");
+                .isInstanceOf(VisionExtractionException.class)
+                .hasMessageContaining("VISION_MODEL");
+
+        vision.failWith = new VisionExtractionException("Gemini vision request failed",
+                HttpClientErrorException.create(HttpStatus.FORBIDDEN, "Forbidden",
+                        HttpHeaders.EMPTY, "bad key".getBytes(StandardCharsets.UTF_8), null));
+
+        assertThatThrownBy(() -> router().extract(TestPdfs.of(Kind.SCANNED)))
+                .isInstanceOf(VisionExtractionException.class)
+                .hasMessageContaining("GOOGLE_API_KEY");
     }
+
+    private static HttpClientErrorException badRequest(String body) {
+        return HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request",
+                HttpHeaders.EMPTY, body.getBytes(StandardCharsets.UTF_8), null);
+    }
+
 
     // ── the stub ────────────────────────────────────────────────────────────────────────────
 
@@ -462,6 +531,12 @@ class VisionRoutingTest {
         private volatile RuntimeException failWith = null;
         private int calls = 0;
         private final List<PageDefect> hints = new ArrayList<>();
+        // Phase 23.6 needs what `failWith` cannot express: *some* pages failing while others
+        // succeed, and failing differently from each other. Keyed by call number (1-based) because
+        // the client is handed an image and a defect hint, never a page number — the router's own
+        // ordering is what maps calls to pages, and a stub that guessed at page numbers would be
+        // asserting on its own guess.
+        private final Map<Integer, RuntimeException> failByCall = new HashMap<>();
 
         @Override
         public boolean isConfigured() {
@@ -475,6 +550,10 @@ class VisionRoutingTest {
             // The renderer is the real one, so this also pins that a page actually rasterised:
             // an empty image would mean PDFBox rendering silently produced nothing.
             assertThat(pngImage).isNotEmpty();
+            RuntimeException perCall = failByCall.get(calls);
+            if (perCall != null) {
+                throw perCall;
+            }
             if (failWith != null) {
                 throw failWith;
             }

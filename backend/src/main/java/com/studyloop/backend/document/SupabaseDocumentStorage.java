@@ -2,6 +2,8 @@ package com.studyloop.backend.document;
 
 import com.studyloop.backend.config.StorageProperties;
 import org.springframework.http.MediaType;
+import com.studyloop.backend.config.HttpProperties;
+import com.studyloop.backend.config.TimedRestClient;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -28,11 +30,14 @@ import java.util.UUID;
 // either, and a deployment can move between them without a migration.
 public class SupabaseDocumentStorage implements DocumentStorageService {
 
-    private final RestClient restClient = RestClient.create();
+    // Timed rather than RestClient.create(): this one moves whole PDFs both ways, so it is
+    // bounded by the uploader's bandwidth rather than by any model.
+    private final RestClient restClient;
     private final String objectBaseUrl;
     private final String serviceKey;
 
-    public SupabaseDocumentStorage(StorageProperties.Supabase properties) {
+    public SupabaseDocumentStorage(StorageProperties.Supabase properties, HttpProperties http) {
+        this.restClient = TimedRestClient.with(http.connectTimeout(), http.storageReadTimeout());
         // Tolerate a trailing slash on the project URL: it is copied out of a dashboard by hand,
         // and "https://x.supabase.co//storage/v1/..." is a 404 that reads like a missing file.
         String base = properties.url().replaceAll("/+$", "");

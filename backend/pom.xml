@@ -177,6 +177,51 @@
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
+            <!-- Phase 23.1 needs a number, and until 2026-09-11 there was no way to produce one.
+                 The plan has asked for "~70% service-layer coverage" since Phase 10.3; with no
+                 coverage plugin configured, that target was not merely unmet but unmeasurable, and
+                 the honest reporting consequence is worse than a low number: any figure written in
+                 the report would have been invented.
+
+                 No <check> rule binds a threshold to the build. A failing coverage gate on a
+                 project four days from submission converts one missing test into a red build that
+                 blocks everything else, and the purpose here is to *measure* the claim the report
+                 makes rather than to enforce it. The report quotes the number; this produces it.
+
+                 Bound to `verify` (via prepare-agent + report) so `clean verify` — the command this
+                 project already uses, and the only one that cannot be fooled by stale class files
+                 in target/classes — emits target/site/jacoco/index.html as a side effect. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.13</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <excludes>
+                        <!-- Generated or declarative code, excluded so the percentage describes
+                             logic somebody could get wrong. DTOs and records are fields; the
+                             application class is a main method; *Properties are configuration
+                             records whose defaults already have their own tests. -->
+                        <exclude>**/dto/**</exclude>
+                        <exclude>**/BackendApplication.class</exclude>
+                        <exclude>**/config/*Properties.class</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
