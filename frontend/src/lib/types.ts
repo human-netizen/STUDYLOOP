@@ -155,9 +155,44 @@ export interface DocumentResponse {
   // already, so the name is a lookup rather than a round trip.
   nearDuplicateOfId: string | null
   nearDuplicateScore: number | null
+  // Phase 23.2 — how this material is filed. `week` is null when nobody has said; `category` is
+  // never null and reads UNCLASSIFIED when nobody has; `tags` is always an array, never null, so
+  // every consumer can map over it without a guard.
+  week: number | null
+  category: DocumentCategory
+  tags: string[]
   uploadedById: string
   createdAt: string
   updatedAt: string
+}
+
+// What kind of material a document is (Phase 23.2). A closed vocabulary: the backend binds this
+// from an enum, so a value invented here is a 400 rather than a new category.
+export type DocumentCategory =
+  | 'LECTURE'
+  | 'LAB'
+  | 'TUTORIAL'
+  | 'ASSIGNMENT'
+  | 'EXAM'
+  | 'READING'
+  | 'UNCLASSIFIED'
+
+// What a course is actually organised by, read out of its corpus rather than declared (Phase
+// 23.2). Empty lists are the honest answer for a course nobody has labelled, and are what keep
+// the picker from offering fifty-two empty weeks.
+export interface CourseTaxonomy {
+  weeks: number[]
+  categories: DocumentCategory[]
+  tags: string[]
+}
+
+// The whole taxonomy, stated. A PUT rather than a PATCH: the editor holds all three fields at
+// once, so `null` here means *none* rather than "leave it alone" — which is the only way to spell
+// "this is not a week 4 document after all".
+export interface DocumentTaxonomyRequest {
+  week: number | null
+  category: DocumentCategory | null
+  tags: string[]
 }
 
 // Whether a document is the course's or one member's (Phase 16.3). A photographed note starts
@@ -249,6 +284,11 @@ export interface ChatResponse {
   // tests to decide whether to offer the escalation buttons.
   answerEventId: string | null
   askedBefore: AskedBefore | null
+  // Phase 23.2 — "Week 3", "Week 3 · Lab", or null. Set when the question named a week or a kind
+  // of material *and* the course had material filed under it, so this answer was drawn from a
+  // subset the reader did not pick by hand. Shown, because a search that quietly stopped looking
+  // at eleven of fourteen documents has changed the answer.
+  scopeNote: string | null
 }
 
 // --- Chat history (Phase 28.1) ---
@@ -335,6 +375,9 @@ export interface ChatMetaEvent {
   questionEventId: string | null
   answerEventId: string | null
   askedBefore: AskedBefore | null
+  // Phase 23.2. Null on the branch where meta is sent by the token callback before anything has
+  // been retrieved, which is correct rather than lossy: that turn did not search.
+  scopeNote: string | null
 }
 
 export interface ChatDoneEvent {
@@ -374,6 +417,9 @@ export interface SearchResponse {
   query: string
   hitCount: number
   documents: SearchDocument[]
+  // Phase 23.2 — "Week 3", "Week 3 · Lab", or null. Results drawn from three of fourteen documents
+  // look exactly like results drawn from fourteen, so the narrowing is said rather than inferred.
+  scopeNote: string | null
 }
 
 // --- Quizzes (com.studyloop.backend.quiz.dto) ---

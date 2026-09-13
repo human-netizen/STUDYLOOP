@@ -34,7 +34,12 @@ public record RetrievedTurn(
         float[] questionVector,
         Double topSimilarity,
         // The documents the answer draws on, for the lecture attribution on the question log.
-        Set<UUID> documentIds
+        Set<UUID> documentIds,
+        // Phase 23.2 - the narrowing retrieval applied because the question named a week or a
+        // kind of material, as a sentence to show the reader. Null on almost every turn, and
+        // null on a cache hit for a stronger reason than rarity: no retrieval ran, so there was
+        // nothing to narrow.
+        String scopeNote
 ) {
 
     public enum Outcome {

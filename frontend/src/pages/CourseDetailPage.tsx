@@ -3,10 +3,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, coursesApi, documentsApi, errorMessage } from '../lib/api'
 import type {
   CourseResponse,
+  DocumentCategory,
   DocumentImpact,
   DocumentResponse,
   DocumentStatus,
   DocumentSummary,
+  DocumentTaxonomyRequest,
   MemberResponse,
 } from '../lib/types'
 import { AppShell } from '../components/AppShell'
@@ -28,6 +30,7 @@ import {
   Row,
   Rows,
   SectionHead,
+  Select,
   TextArea,
 } from '../components/ui'
 import { PdfFilmstrip } from '../components/PdfFilmstrip'
@@ -507,6 +510,26 @@ function DocumentRow({
                 document is a column of noise, and the useful signal is that this one is not. */}
             {document.language === 'BANGLA' && ' · বাংলা'}
           </Meta>
+          {/* Phase 23.2 — how this material is filed, and the reason it is on the row rather than
+              behind the expander: it is what a question naming a week will be answered from, so a
+              reader who gets a narrowed answer needs to see why without opening anything.
+              UNCLASSIFIED is deliberately not shown — a badge on every unlabelled document is a
+              column of noise, and the signal worth having is the label somebody chose. */}
+          {(document.week != null ||
+            document.category !== 'UNCLASSIFIED' ||
+            document.tags.length > 0) && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {document.week != null && <Pill tone="accent">Week {document.week}</Pill>}
+              {document.category !== 'UNCLASSIFIED' && (
+                <Pill>{CATEGORY_LABELS[document.category]}</Pill>
+              )}
+              {document.tags.map((tag) => (
+                <Pill key={tag} tone="neutral">
+                  {tag}
+                </Pill>
+              ))}
+            </div>
+          )}
           {/* Phase 25.3. The whole defence of falling back instead of failing is that the fallback
               is visible, so this line is not optional decoration — it is the thing that makes a
               degraded document different from one that quietly answers nothing.
@@ -699,6 +722,7 @@ function DocumentActions({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recutting, setRecutting] = useState(false)
+  const [labelling, setLabelling] = useState(false)
   // undefined = not fetched yet, which is what the Confirm waits on before it will commit.
   const [impact, setImpact] = useState<DocumentImpact | undefined>(undefined)
 
@@ -719,6 +743,15 @@ function DocumentActions({
   return (
     <div className="border-t border-line-soft px-5 py-3">
       <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* Phase 23.2 — the correction path, which had to exist before the inference was
+            allowed to guess anything. It sits with the other verbs rather than in the expander,
+            because it is a manager action on the row and the expander is a reader's summary. */}
+        {!recutting && !labelling && (
+          <Button variant="quiet" size="sm" disabled={busy} onClick={() => setLabelling(true)}>
+            Label
+          </Button>
+        )}
+
         {/* Re-ingest. Named for what it costs the reader rather than for what it does to the
             database: "Read it again" is the sentence somebody who picked the wrong pages is
             already saying. */}
@@ -779,6 +812,23 @@ function DocumentActions({
         />
       </div>
 
+      {labelling && (
+        <LabelPanel
+          document={document}
+          busy={busy}
+          onCancel={() => setLabelling(false)}
+          onSave={(taxonomy) =>
+            void run(
+              () => documentsApi.setTaxonomy(courseId, document.id, taxonomy),
+              (doc) => {
+                onChanged(doc)
+                setLabelling(false)
+              },
+            )
+          }
+        />
+      )}
+
       {recutting && (
         <RecutPanel
           document={document}
@@ -818,6 +868,132 @@ function DocumentActions({
 // No filmstrip here, deliberately. The bytes are on the server, and drawing thumbnails would mean
 // downloading the whole file back to the browser to preview a decision the reader has already
 // made once. 27.1's argument is about a file that has not been uploaded yet.
+// Phase 23.2 — the human half of the taxonomy: what the file is, said by somebody who knows.
+//
+// **A form that submits all three fields together, which is why the endpoint is a PUT.** The
+// alternative — a PATCH per field with `null` meaning "leave alone" — would have no way to spell
+// "this is not a week 4 document after all", and a set of tags has two readings under a partial
+// update that nothing on the wire can tell apart.
+//
+// The week is a free number rather than a picker over the course's existing weeks, deliberately:
+// the first document of week 5 has to be able to say so, and a control that only offers what
+// already exists cannot create anything.
+function LabelPanel({
+  document,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  document: DocumentResponse
+  busy: boolean
+  onSave: (taxonomy: DocumentTaxonomyRequest) => void
+  onCancel: () => void
+}) {
+  const [week, setWeek] = useState<number | undefined>(document.week ?? undefined)
+  const [category, setCategory] = useState<DocumentCategory>(document.category)
+  // Edited as the comma-separated line people actually type. Normalisation — lower case, single
+  // spaces, duplicates gone — is the server's, in one function, because it has to be the same
+  // rule for the write and for any later comparison against a stored tag.
+  const [tags, setTags] = useState(document.tags.join(', '))
+
+  return (
+    <div className="mt-3 border-t border-line-soft pt-3">
+      <Eyebrow className="mb-2">How is this filed?</Eyebrow>
+      <div className="flex flex-wrap items-end gap-3">
+        {/* A bare Input rather than NumberField, and the reason is the empty case. NumberField
+            clamps a blank box to its minimum, which is right for "how many questions" and wrong
+            here: a document that belongs to no week has to be expressible, and clamping would
+            make clearing the week set it to 1. */}
+        <Field label="Week" className="w-24 shrink-0">
+          <Input
+            type="number"
+            min={1}
+            max={52}
+            value={week ?? ''}
+            disabled={busy}
+            placeholder="—"
+            className="tnum font-mono"
+            onChange={(event) => {
+              const next = event.target.value
+              setWeek(next === '' ? undefined : Number(next))
+            }}
+          />
+        </Field>
+        <Field label="Kind">
+          <Select
+            value={category}
+            disabled={busy}
+            onChange={(event) => setCategory(event.target.value as DocumentCategory)}
+          >
+            {CATEGORY_ORDER.map((value) => (
+              <option key={value} value={value}>
+                {CATEGORY_LABELS[value]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Tags" className="min-w-[16rem] flex-1">
+          <Input
+            value={tags}
+            disabled={busy}
+            placeholder="hash tables, probing"
+            onChange={(event) => setTags(event.target.value)}
+          />
+        </Field>
+      </div>
+
+      <Meta className="mt-2 block">
+        A week and a kind are what a question like “what did week 3 cover” is answered from. Tags
+        are for finding things here.
+      </Meta>
+
+      <div className="mt-3 flex justify-end gap-2">
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() =>
+            onSave({
+              week: week ?? null,
+              category,
+              tags: tags
+                .split(',')
+                .map((tag) => tag.trim())
+                .filter((tag) => tag.length > 0),
+            })
+          }
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// UNCLASSIFIED last and named for what it is, so the dropdown's default reads as an admission
+// rather than as a choice somebody made.
+const CATEGORY_ORDER: DocumentCategory[] = [
+  'LECTURE',
+  'LAB',
+  'TUTORIAL',
+  'ASSIGNMENT',
+  'EXAM',
+  'READING',
+  'UNCLASSIFIED',
+]
+
+const CATEGORY_LABELS: Record<DocumentCategory, string> = {
+  LECTURE: 'Lecture',
+  LAB: 'Lab',
+  TUTORIAL: 'Tutorial',
+  ASSIGNMENT: 'Assignment',
+  EXAM: 'Exam',
+  READING: 'Reading',
+  UNCLASSIFIED: 'Not filed',
+}
+
 function RecutPanel({
   document,
   busy,

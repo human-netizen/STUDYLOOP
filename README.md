@@ -9,8 +9,8 @@
 ![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
 ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![PostgreSQL + pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?logo=postgresql&logoColor=white)
-![Flyway migrations](https://img.shields.io/badge/Flyway-31%20migrations-CC0200?logo=flyway&logoColor=white)
-![tests 706](https://img.shields.io/badge/tests-706%20green-brightgreen)
+![Flyway migrations](https://img.shields.io/badge/Flyway-32%20migrations-CC0200?logo=flyway&logoColor=white)
+![tests 788](https://img.shields.io/badge/tests-788%20green-brightgreen)
 
 ---
 
@@ -54,8 +54,8 @@ are embedded back into the corpus.
 
 ## 2. Feature set
 
-Twenty-five Flyway migrations and 556 backend tests, the integration ones running against a real
-Postgres with pgvector rather than an in-memory stand-in.
+Thirty-two Flyway migrations and 788 backend tests, the integration ones running against a
+real Postgres with pgvector rather than an in-memory stand-in.
 
 | Capability | What it does |
 |---|---|
@@ -73,6 +73,7 @@ Postgres with pgvector rather than an in-memory stand-in.
 | **Flashcards** | Generated from a document, or saved from any answer worth keeping. |
 | **Revision queue** | SM-2 schedule. Wrong answers enrol themselves; the app tells you what is due today. |
 | **Document summaries** | A summary and key-term glossary per document, generated once and cached. |
+| **Material taxonomy** | Every upload is filed by week and kind from its own filename, at no cost, and corrected in one form. A question that names a week or a lab is then answered from that material alone — unless the course has nothing filed under it, in which case those are just words in a sentence and the search stays course-wide. The narrowing is always stated above the answer. |
 | **Search** | Passages grouped by document with matched words highlighted. No confidence gate here, because you can judge a weak match yourself. |
 | **Confusion heatmap** | Which lectures the class asks about, questions clustered by meaning, and the questions the corpus could not answer at all. |
 | **Course forum** | Any refusal escalates to the class. An instructor accepts an answer; the accepted answer is embedded back into the course. |
@@ -429,7 +430,7 @@ graph TB
     end
 
     subgraph INFRA["INFRASTRUCTURE"]
-        PG[("PostgreSQL + pgvector on Supabase<br/>21 Flyway migrations<br/>HNSW cosine · GIN tsvector")]
+        PG[("PostgreSQL + pgvector on Supabase<br/>32 Flyway migrations<br/>HNSW cosine · GIN tsvector")]
         FS[("Filesystem<br/>bytes at courseId/sha256")]
         AI["Cohere: embed-v4.0 · rerank-v3.5 · Command R<br/>Google: Gemini 2.5 Flash vision<br/>Ollama: offline"]
     end
@@ -507,7 +508,7 @@ openable at [diagrams.net](https://app.diagrams.net).
 ## 7. Technology stack
 
 **Backend and AI.** Java 21 on Spring Boot 4.1 (Web MVC, Security, Data JPA, Validation, Actuator),
-over PostgreSQL hosted at Supabase with pgvector and Flyway migrations `V1` to `V31`. Embeddings are
+over PostgreSQL hosted at Supabase with pgvector and Flyway migrations `V1` to `V32`. Embeddings are
 Cohere `embed-v4.0` truncated to 768 dimensions, with Google `gemini-embedding-001` and a local
 Ollama `qwen3-embedding` sitting behind the same interface as swappable adapters. Reranking is
 Cohere `rerank-v3.5`. Generation is Cohere Command R, called directly over Spring's `RestClient`.

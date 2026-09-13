@@ -40,7 +40,13 @@ public record PreparedTurn(
         // Non-null when this student has asked this course the same thing before (20.3). It rides
         // along on all three outcomes, because a repeat is a repeat whether the answer came from
         // the model, the cache or the gate — and the refused one is the most worth saying out loud.
-        AskedBefore askedBefore
+        AskedBefore askedBefore,
+        // Phase 23.2 - what retrieval narrowed this turn to, when the question named a week or a
+        // kind of material and the course had some. It rides the meta event beside the citations
+        // for the reason 28.2's chips are on screen: a search that quietly stopped looking at
+        // eleven of the fourteen documents has changed the answer, and the reader is the one
+        // person who can tell whether that was what they meant.
+        String scopeNote
 ) {
 
     public boolean isAnswered() {
@@ -48,24 +54,24 @@ public record PreparedTurn(
     }
 
     static PreparedTurn answered(UUID conversationId, List<Citation> citations, String answer,
-                                 AskedBefore askedBefore, UUID answerEventId) {
+                                 AskedBefore askedBefore, UUID answerEventId, String scopeNote) {
         return new PreparedTurn(conversationId, citations, List.of(), answer, null, null,
-                answerEventId, askedBefore);
+                answerEventId, askedBefore, scopeNote);
     }
 
     static PreparedTurn refused(UUID conversationId, String answer, UUID questionEventId,
-                                AskedBefore askedBefore) {
+                                AskedBefore askedBefore, String scopeNote) {
         // The refusal handle and the feedback handle are the same row here, and that is the one
         // outcome where they coincide: the refusal *is* the logged event.
         return new PreparedTurn(conversationId, List.of(), List.of(), answer, null, questionEventId,
-                questionEventId, askedBefore);
+                questionEventId, askedBefore, scopeNote);
     }
 
     static PreparedTurn answerable(UUID conversationId, List<Citation> citations,
                                    List<LlmMessage> messages, CacheWrite cacheWrite,
-                                   AskedBefore askedBefore, UUID answerEventId) {
+                                   AskedBefore askedBefore, UUID answerEventId, String scopeNote) {
         return new PreparedTurn(conversationId, citations, messages, null, cacheWrite, null,
-                answerEventId, askedBefore);
+                answerEventId, askedBefore, scopeNote);
     }
 
     // Carries the question's embedding forward from prepare() to completeTurn(), which is the

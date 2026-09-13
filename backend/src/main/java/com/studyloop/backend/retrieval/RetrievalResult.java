@@ -32,7 +32,12 @@ public record RetrievalResult(
         // both are known, so it is where the answer is settled — the gate reads one field instead
         // of reimplementing a decision.
         QueryIntent intent,
-        boolean expanded
+        boolean expanded,
+        // Phase 23.2 — the taxonomy filter this search was actually narrowed by, null when it was
+        // not narrowed. Carried on the result rather than left in a log for the same reason the
+        // intent is: retrieval is where it is known, and a narrowing the reader cannot see is a
+        // stage that has silently changed their answer.
+        TaxonomyFilter appliedFilter
 ) {
 
     // Kept so the twenty-odd call sites written before Phase 18 still say what they meant: a
@@ -40,5 +45,14 @@ public record RetrievalResult(
     public RetrievalResult(List<RetrievedChunk> chunks, OptionalDouble topVectorSimilarity,
                            int lexicalHitCount, OptionalDouble topRerankScore, float[] queryVector) {
         this(chunks, topVectorSimilarity, lexicalHitCount, topRerankScore, queryVector, null, false);
+    }
+
+    // And the Phase 18 shape, for the call sites written before Phase 23.2 added a narrowing that
+    // most searches do not have.
+    public RetrievalResult(List<RetrievedChunk> chunks, OptionalDouble topVectorSimilarity,
+                           int lexicalHitCount, OptionalDouble topRerankScore, float[] queryVector,
+                           QueryIntent intent, boolean expanded) {
+        this(chunks, topVectorSimilarity, lexicalHitCount, topRerankScore, queryVector, intent,
+                expanded, null);
     }
 }

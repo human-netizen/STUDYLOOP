@@ -71,6 +71,7 @@ public class RetrievalService {
     private final TrigramStage trigramStage;
     private final HydeStage hydeStage;
     private final IntentClassifier intentClassifier;
+    private final TaxonomyStage taxonomyStage;
 
     // Any course member may search the course's materials. Returns the fused top-`limit`
     // chunks, best-first; an empty/blank query or a course with no matching chunks yields [].
@@ -156,10 +157,28 @@ public class RetrievalService {
         }
         int topN = clampLimit(limit);
 
+        // Phase 23.2 — narrow to the week or the kind of material the question named, if the
+        // course has labelled any. Free on a question that names none: the check is a regex, and
+        // the database is only asked when it matches. A reader-chosen scope (28.2) is left alone
+        // rather than intersected — see TaxonomyStage.
+        TaxonomyStage.Result narrowed = taxonomyStage.narrow(courseId, actorId, trimmed, scope);
+        DocumentScope searched = narrowed.scope();
+        // **The routing phrase is spent once it has chosen the documents, so it is taken out of
+        // what gets searched for.** With `lexical-or` off, `plainto_tsquery` AND-joins the
+        // question's content words and no chunk anywhere contains the word "week" - so leaving
+        // the phrase in empties the sparse half of hybrid retrieval on exactly the questions this
+        // stage was built for. Identical to `trimmed` unless a narrowing actually happened, so no
+        // existing caller and no published number can see this.
+        //
+        // The **reranker keeps the question as typed**, further down: 18.2's rule is that
+        // expansion is a way of finding candidates rather than a way of restating the ask, and
+        // this is that rule pointing the other way.
+        String searchQuery = narrowed.searchQuery();
+
         // Semantic half — only when an embedding provider is configured. If not, retrieval
         // degrades gracefully to full-text alone rather than failing.
         float[] vector = queryVector != null ? queryVector
-                : embeddingClient.isConfigured() ? embeddingClient.embedQuery(trimmed) : null;
+                : embeddingClient.isConfigured() ? embeddingClient.embedQuery(searchQuery) : null;
 
         // Phase 26.2 — the dense, lexical and visual candidate lists in **one** round trip.
         //
@@ -175,9 +194,9 @@ public class RetrievalService {
         // they travel, not how they are ranked — see the repository for why that distinction is
         // load-bearing for every eval number this project has published.
         Candidates candidates = searchRepository.candidateSearch(
-                courseId, actorId, vector == null ? null : VectorSupport.toLiteral(vector), trimmed,
-                CANDIDATES_PER_SOURCE, properties.stages().lexicalOr(), visualStage.enabled(),
-                scope);
+                courseId, actorId, vector == null ? null : VectorSupport.toLiteral(vector),
+                searchQuery, CANDIDATES_PER_SOURCE, properties.stages().lexicalOr(),
+                visualStage.enabled(), searched);
         List<ChunkHit> vectorHits = candidates.vector();
         List<ChunkHit> textHits = candidates.text();
 
@@ -205,7 +224,7 @@ public class RetrievalService {
         // Fourth list (18.1): chunks holding a near-spelling of one of the question's distinctive
         // words. It exists for the case the lexical half above returns *nothing* — a typo does not
         // weaken `plainto_tsquery`, it empties it — so the two are fused rather than swapped.
-        List<ChunkHit> trigramHits = trigramStage.search(courseId, actorId, trimmed, scope);
+        List<ChunkHit> trigramHits = trigramStage.search(courseId, actorId, searchQuery, searched);
 
         // The second pass (18.2), and it runs only if the first one came back weak. Everything it
         // produces is *more lists*: the invented passage searches the dense half, the rewrites
@@ -218,7 +237,7 @@ public class RetrievalService {
         List<List<ChunkHit>> rankings = new ArrayList<>(
                 List.of(vectorHits, textHits, visualHits, trigramHits));
         HydeStage.Result expansion =
-                hydeStage.apply(courseId, actorId, trimmed, vector, topSimilarity, scope);
+                hydeStage.apply(courseId, actorId, searchQuery, vector, topSimilarity, searched);
         rankings.addAll(expansion.rankings());
 
         // **The gate signal is allowed to rise, and only in one specific way.** What HyDE found is
@@ -255,7 +274,7 @@ public class RetrievalService {
         Double topRelevance = ranked.isEmpty() ? null : ranked.get(0).rerankScore();
         return new RetrievalResult(ranked, topSimilarity, textHits.size(),
                 topRelevance == null ? OptionalDouble.empty() : OptionalDouble.of(topRelevance),
-                vector, intent, expansion.triggered());
+                vector, intent, expansion.triggered(), narrowed.applied());
     }
 
     // Reciprocal Rank Fusion: a chunk at 0-based rank r in a list contributes 1/(K + r + 1);

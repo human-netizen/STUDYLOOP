@@ -85,6 +85,21 @@ public class Document {
     @Column(nullable = false, length = 20)
     private Language language = Language.ENGLISH;
 
+    // Phase 23.2. Which week of the course this material belongs to, and what kind of thing it
+    // is. Both are inferred from the filename at upload by DocumentTaxonomyInferrer and both are
+    // correctable by hand, which is the order that makes the inference safe to do at all.
+    //
+    // Null week and UNCLASSIFIED are not the same shape of absence, deliberately. A document
+    // always is some kind of thing, so "not worked out yet" is a named value and the column stays
+    // `not null`; a document does not always belong to a week, so there the absence is a null and
+    // the filter has nothing to match rather than something to skip.
+    @Column(name = "week_number")
+    private Integer weekNumber;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private DocumentCategory category = DocumentCategory.UNCLASSIFIED;
+
     // Filled by the extraction step (Phase 4.3); null until then.
     @Column(name = "page_count")
     private Integer pageCount;

@@ -92,7 +92,8 @@ public class ChatStreamService {
             TurnContext context = chatService.readContext(actorId, courseId, request);
             PreparedTurn prepared = chatService.recordTurn(context, chatService.retrieve(context));
             send(emitter, "meta", new MetaEvent(prepared.conversationId(), prepared.citations(),
-                    prepared.questionEventId(), prepared.answerEventId(), prepared.askedBefore()));
+                    prepared.questionEventId(), prepared.answerEventId(), prepared.askedBefore(),
+                    prepared.scopeNote()));
 
             if (prepared.isAnswered()) {
                 // The confidence gate refused, or the semantic cache already had this answer.
@@ -143,7 +144,8 @@ public class ChatStreamService {
                     PreparedTurn prepared = chatService.recordTurn(context, retrieved);
                     searched.set(prepared);
                     sendMetaOnce(emitter, metaSent, prepared.conversationId(), prepared.citations(),
-                            prepared.questionEventId(), prepared.answerEventId(), prepared.askedBefore());
+                            prepared.questionEventId(), prepared.answerEventId(),
+                            prepared.askedBefore(), prepared.scopeNote());
                     // A cache hit or a refusal ends the turn here: the text exists already, so the
                     // model is not asked to write over the top of it.
                     return prepared.isAnswered()
@@ -151,7 +153,8 @@ public class ChatStreamService {
                             : ToolResult.of(retrieved.sources());
                 },
                 token -> {
-                    sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null, null);
+                    sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null,
+                            null, null);
                     send(emitter, "delta", new DeltaEvent(token));
                 });
 
@@ -165,7 +168,8 @@ public class ChatStreamService {
             chatService.completeTurn(prepared, answer);
         }
 
-        sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null, null);
+        sendMetaOnce(emitter, metaSent, context.conversationId(), List.of(), null, null, null,
+                null);
         send(emitter, "done", new DoneEvent(context.conversationId()));
         emitter.complete();
     }
@@ -186,10 +190,10 @@ public class ChatStreamService {
     // meta is sent exactly once per turn, by whichever of the two moments comes first.
     private void sendMetaOnce(SseEmitter emitter, AtomicBoolean sent, UUID conversationId,
                               List<Citation> citations, UUID questionEventId, UUID answerEventId,
-                              AskedBefore askedBefore) {
+                              AskedBefore askedBefore, String scopeNote) {
         if (sent.compareAndSet(false, true)) {
             send(emitter, "meta", new MetaEvent(conversationId, citations, questionEventId,
-                    answerEventId, askedBefore));
+                    answerEventId, askedBefore, scopeNote));
         }
     }
 
@@ -228,8 +232,11 @@ public class ChatStreamService {
     // the search has settled, and it then carries nulls for all three — which is correct rather
     // than lossy: that branch is the one where the model answered without retrieving, so there is
     // no citation list, no refusal and no logged question for a verdict to be about.
+    // scopeNote is Phase 23.2's narrowing, non-null only when the question named a week or a
+    // kind of material the course actually has. It rides meta rather than stage, because a stage
+    // event is a sentence about what is happening now and this is a fact about the answer.
     public record MetaEvent(UUID conversationId, List<Citation> citations, UUID questionEventId,
-                            UUID answerEventId, AskedBefore askedBefore) { }
+                            UUID answerEventId, AskedBefore askedBefore, String scopeNote) { }
 
     public record DeltaEvent(String text) { }
 

@@ -13,7 +13,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -31,6 +33,8 @@ public class DocumentService {
 
     private final DocumentRepository documentRepository;
     private final DocumentStorageService storageService;
+    private final DocumentTagRepository tagRepository;
+    private final DocumentTaxonomyInferrer taxonomyInferrer;
     private final CourseAccess courseAccess;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -96,6 +100,15 @@ public class DocumentService {
         document.setCourseSpace(course);
         document.setUploadedBy(actor.getUser());
         document.setFilename(sanitizeFilename(file.getOriginalFilename(), format));
+        // Phase 23.2 — read the week and the kind off the name the uploader gave the file, before
+        // anything is extracted. Deliberately from the *sanitized* filename, which is the one the
+        // library will show: inferring from a name nobody ever sees would produce a badge that
+        // disagrees with the row it sits on. A filename that says nothing leaves both at their
+        // defaults, and the taxonomy endpoint is how a person says what it is.
+        DocumentTaxonomyInferrer.InferredTaxonomy inferred =
+                taxonomyInferrer.infer(document.getFilename());
+        document.setWeekNumber(inferred.week());
+        document.setCategory(inferred.category());
         // The format's own type, not the one the client sent. A .pptx that arrived as
         // `application/octet-stream` is stored as OOXML, so both the extractor registry and the
         // download endpoint read a type that describes the bytes.
@@ -193,10 +206,15 @@ public class DocumentService {
     @Transactional(readOnly = true)
     public List<DocumentResponse> list(UUID actorId, UUID courseId) {
         courseAccess.requireMember(actorId, courseId);
-        return documentRepository
-                .findByCourseSpaceIdAndSourceOrderByCreatedAtDesc(courseId, DocumentSource.UPLOAD)
-                .stream()
-                .map(document -> DocumentResponse.from(document, courseId))
+        List<Document> documents = documentRepository
+                .findByCourseSpaceIdAndSourceOrderByCreatedAtDesc(courseId, DocumentSource.UPLOAD);
+        // One query for the page's tags rather than one per row (Phase 23.2). Documents with no
+        // tags are simply absent from the map, which is what the getOrDefault below is for.
+        Map<UUID, Set<String>> tags =
+                tagRepository.tagsOf(documents.stream().map(Document::getId).toList());
+        return documents.stream()
+                .map(document -> DocumentResponse.from(
+                        document, courseId, tags.getOrDefault(document.getId(), Set.of())))
                 .toList();
     }
 
@@ -205,7 +223,7 @@ public class DocumentService {
         courseAccess.requireMember(actorId, courseId);
         Document document = documentRepository.findVisibleById(documentId, courseId, actorId)
                 .orElseThrow(() -> new DocumentNotFoundException(documentId));
-        return DocumentResponse.from(document, courseId);
+        return DocumentResponse.from(document, courseId, tagRepository.tagsOf(documentId));
     }
 
     // Loads the stored bytes so a member can view the source behind a citation. Any course member

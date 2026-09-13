@@ -22,6 +22,7 @@ import com.studyloop.backend.retrieval.RetrievalResult;
 import com.studyloop.backend.retrieval.RetrievalService;
 import com.studyloop.backend.retrieval.RetrievedChunk;
 import com.studyloop.backend.retrieval.SectionExpander;
+import com.studyloop.backend.retrieval.TaxonomyStage;
 import com.studyloop.backend.usage.AiOperation;
 import com.studyloop.backend.usage.AiUsageContext;
 import lombok.RequiredArgsConstructor;
@@ -132,6 +133,7 @@ public class ChatService {
     private final ChatConversationRepository conversationRepository;
     private final ChatMessageRepository messageRepository;
     private final ConfidenceGate confidenceGate;
+    private final TaxonomyStage taxonomyStage;
     private final SemanticCacheService semanticCache;
     private final QuestionLogService questionLog;
     private final SectionExpander sectionExpander;
@@ -152,13 +154,18 @@ public class ChatService {
         if (prepared.isAnswered()) {
             return new ChatResponse(prepared.conversationId(), prepared.finalAnswer(),
                     prepared.citations(), prepared.questionEventId(), prepared.answerEventId(),
-                    prepared.askedBefore());
+                    prepared.askedBefore(), prepared.scopeNote());
         }
 
         String answer = chatClient.complete(prepared.messages());
         completeTurn(prepared, answer);
         return new ChatResponse(prepared.conversationId(), answer, prepared.citations(), null,
-                prepared.answerEventId(), prepared.askedBefore());
+                prepared.answerEventId(), prepared.askedBefore(), prepared.scopeNote());
+    }
+
+    // Phase 23.2 - the narrowing retrieval actually applied, as a sentence, or null.
+    private static String scopeNote(RetrievalResult retrieval) {
+        return retrieval.appliedFilter() == null ? null : retrieval.appliedFilter().describe();
     }
 
     // The three phases composed, for callers that want a turn prepared in one call: the
@@ -271,7 +278,18 @@ public class ChatService {
         // person who asks the question of the whole course. Widening the key is the alternative and
         // it is the wrong trade: it would fragment the cache by subset — one entry per question per
         // combination of documents — which is a cache that never hits.
-        boolean cacheable = context.opensThread() && context.scope().isWholeCourse();
+        // **And a turn the taxonomy stage could narrow is not cacheable either (Phase 23.2),
+        // for the same reason and with one extra wrinkle.** `chat_cache_entries` is keyed on the
+        // course and the question's embedding; "week 3" is *in* that embedding but the narrowing
+        // it produces is not, so an entry written by a narrowed turn would be served to a reader
+        // who asked the whole course, and a whole-course entry would be served to a reader who
+        // asked about week 3. The wrinkle is that the narrowing is decided inside retrieval, after
+        // this probe would already have run - so the test here is whether the question *could* be
+        // narrowed, which is the regex alone and deliberately wider than the stage's own answer.
+        // Wider in the safe direction: at worst a question mentioning a week the course does not
+        // have skips a cache it would have been entitled to.
+        boolean cacheable = context.opensThread() && context.scope().isWholeCourse()
+                && !taxonomyStage.mayNarrow(searchQuery);
         CacheProbe probe = cacheable
                 ? semanticCache.probe(context.courseId(), context.question())
                 : CacheProbe.unavailable();
@@ -286,7 +304,7 @@ public class ChatService {
             // cached answer, and there is no top similarity to report.
             return new RetrievedTurn(Outcome.CACHED, cached.citations(), List.of(), null,
                     cached.answer(), null, repeated, probe.questionVector(), null,
-                    documentIdsOf(cached.citations()));
+                    documentIdsOf(cached.citations()), null);
         }
 
         // Ground on the course's materials (the same hybrid retrieval the search API uses),
@@ -321,7 +339,7 @@ public class ChatService {
         if (confidenceGate.shouldRefuse(retrieval)) {
             String refusal = context.language() == Language.BANGLA ? NOT_IN_MATERIALS_BN : NOT_IN_MATERIALS;
             return new RetrievedTurn(Outcome.REFUSED, List.of(), List.of(), null, refusal, null,
-                    repeated, questionVector, topSimilarity, Set.of());
+                    repeated, questionVector, topSimilarity, Set.of(), scopeNote(retrieval));
         }
 
         // The sources are the retrieved chunks expanded to their sections (13.5): retrieval picked
@@ -350,7 +368,8 @@ public class ChatService {
         TurnProgress.report(TurnProgress.WRITING);
         return new RetrievedTurn(Outcome.GROUNDED, toCitations(chunks), messages, sources, null,
                 cacheWrite, repeated, questionVector, topSimilarity,
-                chunks.stream().map(RetrievedChunk::documentId).collect(Collectors.toSet()));
+                chunks.stream().map(RetrievedChunk::documentId).collect(Collectors.toSet()),
+                scopeNote(retrieval));
     }
 
     // ------------------------------------------------------------------------------------------
@@ -379,7 +398,8 @@ public class ChatService {
                         context.actorId(), context.question(), retrieved.questionVector(), null,
                         retrieved.documentIds());
                 yield PreparedTurn.answered(context.conversationId(), retrieved.citations(),
-                        retrieved.settledAnswer(), retrieved.askedBefore(), cachedEventId);
+                        retrieved.settledAnswer(), retrieved.askedBefore(), cachedEventId,
+                        retrieved.scopeNote());
             }
             case REFUSED -> {
                 saveMessage(reference(context), ChatRole.ASSISTANT, retrieved.settledAnswer());
@@ -390,7 +410,7 @@ public class ChatService {
                         context.actorId(), context.question(), retrieved.questionVector(),
                         retrieved.topSimilarity());
                 yield PreparedTurn.refused(context.conversationId(), retrieved.settledAnswer(),
-                        questionEventId, retrieved.askedBefore());
+                        questionEventId, retrieved.askedBefore(), retrieved.scopeNote());
             }
             case GROUNDED -> {
                 UUID answerEventId = questionLog.recordGrounded(context.courseId(),
@@ -398,7 +418,7 @@ public class ChatService {
                         retrieved.topSimilarity(), retrieved.documentIds());
                 yield PreparedTurn.answerable(context.conversationId(), retrieved.citations(),
                         retrieved.messages(), retrieved.cacheWrite(), retrieved.askedBefore(),
-                        answerEventId);
+                        answerEventId, retrieved.scopeNote());
             }
         };
     }

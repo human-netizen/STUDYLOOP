@@ -4,8 +4,11 @@ import com.studyloop.backend.document.DocumentImpactRepository.DocumentImpact;
 import com.studyloop.backend.document.DocumentService.DocumentContent;
 import com.studyloop.backend.document.DocumentService.UploadOutcome;
 import com.studyloop.backend.document.dto.CourseOutline;
+import com.studyloop.backend.document.dto.CourseTaxonomy;
 import com.studyloop.backend.document.dto.DocumentResponse;
 import com.studyloop.backend.document.dto.DocumentSummaryResponse;
+import com.studyloop.backend.document.dto.DocumentTaxonomyRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -17,6 +20,8 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -35,6 +40,7 @@ public class DocumentController {
     private final DocumentSummaryService summaryService;
     private final DocumentLifecycleService lifecycleService;
     private final CourseOutlineService courseOutlineService;
+    private final DocumentTaxonomyService taxonomyService;
 
     // Upload a course document for ingestion. A new file → 202 Accepted (the pipeline runs
     // asynchronously); an already-ingested identical file → 200 OK with the existing record.
@@ -125,6 +131,29 @@ public class DocumentController {
     @GetMapping("/outline")
     public CourseOutline outline(Authentication authentication, @PathVariable UUID courseId) {
         return courseOutlineService.outline(UUID.fromString(authentication.getName()), courseId);
+    }
+
+    // Phase 23.2 — what this course is organised by: the weeks that have material in them, the
+    // categories in use, and every tag somebody has applied. Read out of the corpus, so a course
+    // that has labelled nothing gets three empty lists and a UI that says so.
+    //
+    // Above the `/{documentId}` mapping, like `/outline`, because a literal segment and a UUID
+    // path variable both match this shape and Spring's ordering is not something to rely on for
+    // a path that could parse as an id.
+    @GetMapping("/taxonomy")
+    public CourseTaxonomy taxonomy(Authentication authentication, @PathVariable UUID courseId) {
+        return taxonomyService.courseTaxonomy(UUID.fromString(authentication.getName()), courseId);
+    }
+
+    // How this material is filed. A PUT rather than the PATCH Phase 27.4 introduced, because the
+    // body is the complete taxonomy and not a fragment of one — see DocumentTaxonomyRequest.
+    @PutMapping("/{documentId}/taxonomy")
+    public DocumentResponse setTaxonomy(Authentication authentication,
+                                        @PathVariable UUID courseId,
+                                        @PathVariable UUID documentId,
+                                        @Valid @RequestBody DocumentTaxonomyRequest request) {
+        return taxonomyService.update(UUID.fromString(authentication.getName()), courseId,
+                documentId, request);
     }
 
     @GetMapping("/{documentId}")

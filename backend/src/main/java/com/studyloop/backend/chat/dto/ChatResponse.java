@@ -24,6 +24,11 @@ public record ChatResponse(
         UUID answerEventId,
         // Set when this student has asked this course the same thing before (Phase 20.3). Null on
         // almost every turn.
-        AskedBefore askedBefore
+        AskedBefore askedBefore,
+        // Phase 23.2 - "Week 3", "Week 3 - Lab", or null. Set when the question named a week or a
+        // kind of material *and* the course had material filed under it, so the answer was drawn
+        // from a subset the reader did not pick by hand. Null on a turn that searched everything,
+        // which is nearly all of them.
+        String scopeNote
 ) {
 }

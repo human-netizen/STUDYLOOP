@@ -14,7 +14,9 @@ import type {
   DocumentImpact,
   CreateFlashcardRequest,
   CreateThreadRequest,
+  CourseTaxonomy,
   DocumentResponse,
+  DocumentTaxonomyRequest,
   DocumentSummary,
   Flashcard,
   ForumThreadDetail,
@@ -243,6 +245,19 @@ export const documentsApi = {
   // how many questions each document has ever answered.
   outline: (courseId: string) =>
     request<CourseOutline>(`/courses/${courseId}/documents/outline`, { auth: true }),
+  // Phase 23.2 — what this course is organised by: the weeks with material in them, the
+  // categories in use and every tag somebody has applied. Read out of the corpus, so a course
+  // that has labelled nothing gets three empty lists.
+  taxonomy: (courseId: string) =>
+    request<CourseTaxonomy>(`/courses/${courseId}/documents/taxonomy`, { auth: true }),
+  // A PUT because the body is the complete taxonomy rather than a fragment of one: the editor
+  // shows all three fields together, so `null` means *none* and not "leave it alone".
+  setTaxonomy: (courseId: string, documentId: string, taxonomy: DocumentTaxonomyRequest) =>
+    request<DocumentResponse>(`/courses/${courseId}/documents/${documentId}/taxonomy`, {
+      method: 'PUT',
+      auth: true,
+      body: taxonomy,
+    }),
   // `range` is Phase 25.1's page cut, sent as query params rather than as extra form parts: the
   // body is already multipart for the file, and the backend reads them as plain @RequestParams
   // either way. Omitted entirely when the whole document is wanted, so the request is byte-for-byte

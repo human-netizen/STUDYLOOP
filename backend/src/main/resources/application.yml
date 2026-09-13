@@ -319,6 +319,23 @@ studyloop:
       # anyway because the eval report's header is built from this block, and a separate switch
       # that could disagree with it would let the header describe a corpus nobody built.
       synthetic-queries: ${RETRIEVAL_SYNTHETIC_QUERIES:false}
+      # Phase 23.2 - narrow a search to the week or the kind of material the question named,
+      # when the course has labelled any of it.
+      #
+      # **On by default, which no other stage here is, and the argument is a test rather than a
+      # preference.** The rule these flags exist to serve is that landing a stage and changing the
+      # baseline are two events. This stage cannot change the baseline: it resolves the filter to
+      # document ids and discards it when the set is empty, and not one document in the fixture
+      # corpus carries a week or a category - so on the golden set the filter is never evidenced
+      # and the pipeline is byte-for-byte the unfiltered one. `TaxonomyEvalNeutralityTest` asserts
+      # that, which is what makes "on" a measured statement instead of an assumption.
+      #
+      # What it costs a question that names no week and no kind of material: one regex, and no
+      # query. The database is asked only once something has matched.
+      #
+      # Set false to stop honouring a question's own words about where to look - the narrowing is
+      # then only ever the reader's explicit document picker (28.2).
+      taxonomy: ${RETRIEVAL_TAXONOMY:true}
     # How the rerank stage runs when stages.rerank is on. The key is the one embeddings and chat
     # already use; blank leaves the stage off however the switch above is set, so a deployment
     # without a Cohere key keeps working rather than failing every question.

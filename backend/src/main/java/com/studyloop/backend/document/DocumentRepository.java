@@ -54,4 +54,27 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
             order by d.createdAt desc
             """)
     List<Document> findVisibleNotes(@Param("courseId") UUID courseId, @Param("actorId") UUID actorId);
+
+    // Phase 23.2 — the weeks this course actually has material in, ascending.
+    //
+    // Distinct and null-excluding, so a course that has never labelled anything returns an empty
+    // list rather than a list of one null. This is the picker's vocabulary and it is read out of
+    // the corpus rather than declared, which is what keeps it from offering fifty-two empty weeks.
+    @Query("""
+            select distinct d.weekNumber from Document d
+            where d.courseSpace.id = :courseId
+              and d.weekNumber is not null
+            order by d.weekNumber
+            """)
+    List<Integer> weeksInCourse(@Param("courseId") UUID courseId);
+
+    // The categories present on at least one document. UNCLASSIFIED is included when it is true:
+    // "not labelled yet" is a useful thing to filter a library by, even though it is never a
+    // filter a *question* can mean.
+    @Query("""
+            select distinct d.category from Document d
+            where d.courseSpace.id = :courseId
+            order by d.category
+            """)
+    List<DocumentCategory> categoriesInCourse(@Param("courseId") UUID courseId);
 }

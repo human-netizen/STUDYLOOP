@@ -125,6 +125,15 @@ export function CourseSearchPage() {
             {result.hitCount === 0
               ? 'Nothing matched.'
               : `${result.hitCount} ${plural(result.hitCount, 'passage')} in ${result.documents.length} ${plural(result.documents.length, 'document')}.`}
+            {/* Phase 23.2. Said rather than inferred: three documents' worth of results look
+                exactly like fourteen documents' worth, and "nothing matched" inside a narrowed
+                search means something very different from "nothing matched" across the course. */}
+            {result.scopeNote && (
+              <>
+                {' '}
+                Searched <span className="text-ink-2">{result.scopeNote}</span> only.
+              </>
+            )}
           </Meta>
 
           {result.hitCount === 0 ? (

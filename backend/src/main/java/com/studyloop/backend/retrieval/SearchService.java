@@ -36,7 +36,11 @@ public class SearchService {
     // the page calls this on every submit, including the one that clears the box.
     public SearchResponse search(UUID actorId, UUID courseId, String query, int limit) {
         String trimmed = query == null ? "" : query.trim();
-        List<RetrievedChunk> chunks = retrievalService.retrieve(actorId, courseId, trimmed, clampLimit(limit));
+        // `search` rather than `retrieve` since Phase 23.2: the chunks are the same chunks, and
+        // the result also carries whether retrieval narrowed itself to part of the course. Same
+        // query, same cost — `retrieve` is a wrapper that throws the rest of this away.
+        RetrievalResult result = retrievalService.search(actorId, courseId, trimmed, clampLimit(limit));
+        List<RetrievedChunk> chunks = result.chunks();
         List<String> terms = Snippets.terms(trimmed);
 
         // Insertion order is the fused RRF order, so a document's position is its best hit's
@@ -49,7 +53,8 @@ public class SearchService {
         List<SearchDocument> documents = byDocument.values().stream()
                 .map(group -> toDocument(group, terms))
                 .toList();
-        return new SearchResponse(trimmed, chunks.size(), documents);
+        return new SearchResponse(trimmed, chunks.size(), documents,
+                result.appliedFilter() == null ? null : result.appliedFilter().describe());
     }
 
     private static SearchDocument toDocument(List<RetrievedChunk> group, List<String> terms) {

@@ -53,6 +53,12 @@ interface Turn {
   // `questionEventId` above, which is the refusal handle and is what `refused` tests.
   answerEventId: string | null
   askedBefore: AskedBefore | null
+  // Phase 23.2 — "Week 3", "Week 3 · Lab", or null. Set when the question named a week or a kind
+  // of material the course actually has, so this answer came from part of the corpus rather than
+  // all of it. Shown for the same reason 28.2's chips are on screen: a search that quietly
+  // stopped looking at eleven of fourteen documents has changed the answer, and the reader is the
+  // only one who can say whether that was what they meant.
+  scopeNote: string | null
   general: boolean
 }
 
@@ -218,6 +224,7 @@ export function ChatPage() {
               questionEventId: meta.questionEventId,
               answerEventId: meta.answerEventId,
               askedBefore: meta.askedBefore,
+              scopeNote: meta.scopeNote,
             }))
           },
           onDelta: (text) => updateLast((turn) => ({ ...turn, text: turn.text + text, stage: null })),
@@ -401,6 +408,7 @@ const blank: Turn = {
   questionEventId: null,
   answerEventId: null,
   askedBefore: null,
+  scopeNote: null,
   general: false,
 }
 
@@ -445,6 +453,14 @@ function AssistantBubble({
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-card rounded-bl-[2px] border border-line bg-surface px-4 py-3 text-sm text-ink-2">
         {turn.askedBefore && <AskedBeforeNote askedBefore={turn.askedBefore} />}
+        {/* Phase 23.2. Above the answer rather than beside the citations, because it qualifies the
+            whole reply and not any one source: everything below was drawn from this slice of the
+            course, the refusals included. */}
+        {turn.scopeNote && (
+          <p className="m-0 mb-2 text-[12px] text-ink-muted">
+            Answered from <span className="text-ink-2">{turn.scopeNote}</span> only.
+          </p>
+        )}
         {/* The wait, narrated (26.1). A sentence and no bar: a chat turn has no denominator, and a
             progress bar moving at an unpredictable rate from an unknown total invites the reader
             to work out an arrival time from a number nobody measured. It occupies the bubble only

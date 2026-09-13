@@ -1,10 +1,13 @@
 package com.studyloop.backend.document.dto;
 
 import com.studyloop.backend.document.Document;
+import com.studyloop.backend.document.DocumentCategory;
 import com.studyloop.backend.document.DocumentStatus;
 import com.studyloop.backend.document.Language;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 // A document and its ingestion state. Its `id` doubles as the job handle the client polls
@@ -46,14 +49,33 @@ public record DocumentResponse(
         // a join per row to send back a string the client has in hand.
         UUID nearDuplicateOfId,
         Double nearDuplicateScore,
+        // Phase 23.2 — how this material is filed. `week` is null when nobody has said; `category`
+        // is never null and reads UNCLASSIFIED when nobody has; `tags` is an empty list, never
+        // null, for the reason `progress` is sent on every row — a field the client has to
+        // null-check before it can map over it is a field every consumer guards separately.
+        Integer week,
+        DocumentCategory category,
+        List<String> tags,
         UUID uploadedById,
         Instant createdAt,
         Instant updatedAt
 ) {
 
+    // The tagless form, for the paths where a document is being reported rather than browsed —
+    // an upload that has just landed, a re-ingest that has just been accepted. It sends an empty
+    // tag list rather than reading the table, which is true for a new document and stale for
+    // nothing a client renders from these responses: the library re-reads the list.
+    public static DocumentResponse from(Document document, UUID courseId) {
+        return from(document, courseId, Set.of());
+    }
+
     // courseId is passed in (from the request path) so this never touches the lazy course
     // association; uploadedBy is read only for its id, which a proxy answers without a load.
-    public static DocumentResponse from(Document document, UUID courseId) {
+    //
+    // Tags are passed in rather than fetched, because every caller that has them has them for a
+    // whole page at once — `DocumentTagRepository.tagsOf(List)` is one query for a library — and a
+    // DTO that fetched its own would be the N+1 that query exists to avoid.
+    public static DocumentResponse from(Document document, UUID courseId, Set<String> tags) {
         return new DocumentResponse(
                 document.getId(),
                 courseId,
@@ -72,6 +94,9 @@ public record DocumentResponse(
                 document.getLanguage(),
                 document.getNearDuplicateOf(),
                 document.getNearDuplicateScore(),
+                document.getWeekNumber(),
+                document.getCategory(),
+                tags == null ? List.of() : List.copyOf(tags),
                 document.getUploadedBy().getId(),
                 document.getCreatedAt(),
                 document.getUpdatedAt()

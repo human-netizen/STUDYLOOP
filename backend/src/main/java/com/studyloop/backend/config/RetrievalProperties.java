@@ -156,22 +156,57 @@ public record RetrievalProperties(Stages stages, Rerank rerank, Trigram trigram,
             // could disagree with this one would let the header describe a corpus that does not
             // exist. What is configured over in `studyloop.chunking.synthetic-queries` is the
             // block's shape, the same split `rerank` already has.
-            boolean syntheticQueries
+            boolean syntheticQueries,
+            // Phase 23.2: narrow a search to the week or the kind of material the question named,
+            // when the course has labelled any.
+            //
+            // **The only stage here that cannot move a published number, and the eval corpus is
+            // why.** Every other switch changes what is retrieved for every question; this one
+            // resolves a filter to document ids and discards it when the set is empty, and no
+            // fixture document carries a week or a category — so on the golden set the filter is
+            // never evidenced and the search is byte-for-byte the unfiltered one.
+            // `TaxonomyEvalNeutralityTest` asserts exactly that, which is what lets this default
+            // to **on** where the rest default to off: 11.3's rule is that a stage must not
+            // silently change the baseline, and the way to honour it is a test rather than a
+            // switch left in the off position.
+            boolean taxonomy
     ) {
 
+        // The pre-23.2 shape, so every call site written before the taxonomy stage existed still
+        // says what it meant: those seven flags, and a narrowing that is on and — on a corpus with
+        // no taxonomy, which is every corpus in this suite — does nothing.
+        //
+        // **A static factory and emphatically not a second constructor**, which is what the first
+        // version of this was and which broke every stage flag in the application. Spring Boot
+        // binds a nested record as a *value object* through its constructor, and it needs exactly
+        // one candidate: a record carrying two is ambiguous, binding silently declines, and every
+        // flag reads `false` — so `rerank: true` in application.yml stopped being true and eleven
+        // tests across five classes failed on assertions about stages that were simply off. Note
+        // that `Rerank`, `Trigram` and `Hyde` in this same file all use `defaults()` for exactly
+        // this reason; the pattern was already here and this ignored it. See BUGS.md 2026-09-14.
+        public static Stages of(boolean rerank, boolean hyde, boolean trigram, boolean lexicalOr,
+                                boolean visual, boolean intent, boolean syntheticQueries) {
+            return new Stages(rerank, hyde, trigram, lexicalOr, visual, intent, syntheticQueries,
+                    true);
+        }
+
         public static Stages allOff() {
-            return new Stages(false, false, false, false, false, false, false);
+            return new Stages(false, false, false, false, false, false, false, true);
         }
 
         // Printed in the header of every eval report. A report that does not say which pipeline
         // produced it cannot be compared with another one, and the flags are that statement.
         public String describe() {
             return ("rerank=%s  hyde=%s  trigram=%s  lexical-or=%s  visual=%s  intent=%s  "
-                    + "synthetic-queries=%s")
+                    + "synthetic-queries=%s  taxonomy=%s")
                     .formatted(state(rerank), state(hyde), state(trigram), state(lexicalOr),
-                            state(visual), state(intent), state(syntheticQueries));
+                            state(visual), state(intent), state(syntheticQueries),
+                            state(taxonomy));
         }
 
+        // Whether the pipeline differs from the 11.1 baseline. `taxonomy` is deliberately not in
+        // this list: it is on by default, and a stage that is on for every run cannot be what
+        // distinguishes one run from another — which is the only question this method is asked.
         public boolean anyEnabled() {
             return rerank || hyde || trigram || lexicalOr || visual || intent || syntheticQueries;
         }
