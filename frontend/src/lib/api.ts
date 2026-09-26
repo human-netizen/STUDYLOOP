@@ -48,11 +48,13 @@ import type {
   VideoJob,
   VideoLibrary,
 } from './types'
+import { trackedFetch } from './wake'
 
 // The backend origin. Override with VITE_API_URL (e.g. in production); defaults to the
 // local Spring Boot server, whose CORS already allows the Vite dev origin.
-const ORIGIN = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8080'
-export const API_BASE = `${ORIGIN}/api/v1`
+export const API_ORIGIN =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8080'
+export const API_BASE = `${API_ORIGIN}/api/v1`
 
 const ACCESS_KEY = 'studyloop.accessToken'
 const REFRESH_KEY = 'studyloop.refreshToken'
@@ -141,7 +143,7 @@ function send(path: string, options: RequestOptions, token: string | null): Prom
   const headers: Record<string, string> = {}
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   if (token) headers['Authorization'] = `Bearer ${token}`
-  return fetch(API_BASE + path, {
+  return trackedFetch(API_BASE + path, {
     method: options.method ?? 'GET',
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -184,7 +186,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 function sendUpload(path: string, form: FormData, token: string | null): Promise<Response> {
   const headers: Record<string, string> = {}
   if (token) headers['Authorization'] = `Bearer ${token}`
-  return fetch(API_BASE + path, { method: 'POST', headers, body: form })
+  return trackedFetch(API_BASE + path, { method: 'POST', headers, body: form })
 }
 
 async function upload<T>(path: string, form: FormData): Promise<T> {
@@ -334,7 +336,7 @@ export const documentsApi = {
 // drift.
 export async function fetchBlob(path: string): Promise<Blob> {
   const get = (token: string | null) =>
-    fetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    trackedFetch(API_BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
   let res = await get(tokenStore.getAccess())
   if (res.status === 401 && (await tryRefresh())) {
     res = await get(tokenStore.getAccess())
@@ -616,7 +618,7 @@ export const chatApi = {
     signal?: AbortSignal,
   ): Promise<void> {
     const open = (token: string | null) =>
-      fetch(`${API_BASE}/courses/${courseId}/chat/stream`, {
+      trackedFetch(`${API_BASE}/courses/${courseId}/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

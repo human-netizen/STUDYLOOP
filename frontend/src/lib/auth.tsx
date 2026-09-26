@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { authApi, tokenStore } from './api'
+import { ApiError, authApi, tokenStore } from './api'
 import type { LoginRequest, RegisterRequest, UserResponse } from './types'
 
 interface AuthContextValue {
@@ -27,7 +27,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authApi
       .me()
       .then(setUser)
-      .catch(() => tokenStore.clear())
+      // Only a refused token ends the session. A network failure or a 5xx says the server could
+      // not answer, not that the token is bad, and clearing on it logs out everyone whose first
+      // request of the day reached a server that was still starting.
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) tokenStore.clear()
+      })
       .finally(() => setInitializing(false))
   }, [])
 
